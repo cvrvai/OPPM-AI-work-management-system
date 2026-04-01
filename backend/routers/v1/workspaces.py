@@ -15,6 +15,8 @@ from services.workspace_service import (
     remove_member,
     create_invite,
     accept_invite,
+    get_pending_invites,
+    revoke_invite,
 )
 
 router = APIRouter()
@@ -63,9 +65,20 @@ async def remove_member_route(member_id: str, ws: WorkspaceContext = Depends(req
 
 # ── Invites ──
 
+@router.get("/workspaces/{workspace_id}/invites")
+async def list_invites(ws: WorkspaceContext = Depends(require_admin)):
+    return get_pending_invites(ws.workspace_id)
+
+
 @router.post("/workspaces/{workspace_id}/invites", status_code=201)
 async def create_invite_route(data: InviteCreate, ws: WorkspaceContext = Depends(require_admin)):
     return create_invite(ws.workspace_id, data.email, data.role.value, ws.user.id)
+
+
+@router.delete("/workspaces/{workspace_id}/invites/{invite_id}")
+async def revoke_invite_route(invite_id: str, ws: WorkspaceContext = Depends(require_admin)) -> SuccessResponse:
+    revoke_invite(ws.workspace_id, invite_id, ws.user.id)
+    return SuccessResponse()
 
 
 @router.post("/invites/accept")

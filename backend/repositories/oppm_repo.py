@@ -49,11 +49,11 @@ class TimelineRepository(BaseRepository):
             .select("id")
             .eq("objective_id", data["objective_id"])
             .eq("week_start", data["week_start"])
-            .maybe_single()
+            .limit(1)
             .execute()
         )
         if existing.data:
-            return self.update(existing.data["id"], data)
+            return self.update(existing.data[0]["id"], data)
         return self.create(data)
 
 

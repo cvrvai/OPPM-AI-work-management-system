@@ -127,11 +127,11 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
                         db.table("tasks")
                         .select("progress")
                         .eq("id", matched_task)
-                        .maybe_single()
+                        .limit(1)
                         .execute()
                     )
                     if task.data:
-                        new_progress = min(100, task.data["progress"] + progress_delta)
+                        new_progress = min(100, task.data[0]["progress"] + progress_delta)
                         db.table("tasks").update(
                             {"progress": new_progress}
                         ).eq("id", matched_task).execute()

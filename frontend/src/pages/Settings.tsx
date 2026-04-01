@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import type { GitAccount, RepoConfig, AIModel, Project } from '@/types'
+import type { GitAccount, RepoConfig, AIModel, Project, WorkspaceMember, WorkspaceInvite, WorkspaceRole } from '@/types'
 import {
   GitFork,
   Plus,
@@ -16,28 +16,36 @@ import {
   Loader2,
   Copy,
   CheckCircle2,
+  Users,
+  Mail,
+  Shield,
+  Crown,
+  Eye,
+  Clock,
 } from 'lucide-react'
 import { cn, getInitials } from '@/lib/utils'
 
 export function Settings() {
-  const [activeTab, setActiveTab] = useState<'profile' | 'github' | 'ai'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'members' | 'github' | 'ai'>('profile')
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-text">Settings</h1>
         <p className="text-sm text-text-secondary mt-0.5">
-          Configure your profile, GitHub integration, and AI models
+          Configure your profile, workspace members, GitHub integration, and AI models
         </p>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
-        {[
+        {([
           { id: 'profile' as const, label: 'Profile', icon: UserCircle },
+          ...(ws ? [{ id: 'members' as const, label: 'Members', icon: Users }] : []),
           { id: 'github' as const, label: 'GitHub Integration', icon: GitFork },
           { id: 'ai' as const, label: 'AI Models', icon: Cpu },
-        ].map(({ id, label, icon: Icon }) => (
+        ]).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -55,6 +63,7 @@ export function Settings() {
       </div>
 
       {activeTab === 'profile' && <ProfileSettings />}
+      {activeTab === 'members' && ws && <MembersSettings />}
       {activeTab === 'github' && <GitHubSettings />}
       {activeTab === 'ai' && <AIModelSettings />}
     </div>
@@ -155,6 +164,287 @@ function ProfileSettings() {
   )
 }
 
+// ── Members & Invites ──
+
+const ROLE_CONFIG: Record<WorkspaceRole, { label: string; color: string; icon: typeof Crown }> = {
+  owner: { label: 'Owner', color: 'bg-amber-100 text-amber-700', icon: Crown },
+  admin: { label: 'Admin', color: 'bg-purple-100 text-purple-700', icon: Shield },
+  member: { label: 'Member', color: 'bg-blue-100 text-blue-700', icon: Users },
+  viewer: { label: 'Viewer', color: 'bg-gray-100 text-gray-600', icon: Eye },
+}
+
+function MembersSettings() {
+  const queryClient = useQueryClient()
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const user = useAuthStore((s) => s.user)
+  const wsPath = `/v1/workspaces/${ws!.id}`
+  const currentRole = (ws as any)?.current_user_role as WorkspaceRole | undefined
+  const isAdmin = currentRole === 'owner' || currentRole === 'admin'
+
+  // ── State ──
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<WorkspaceRole>('member')
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+
+  // ── Queries ──
+  const { data: members = [], isLoading: loadingMembers } = useQuery({
+    queryKey: ['workspace-members', ws?.id],
+    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    enabled: !!ws,
+  })
+
+  const { data: invites = [], isLoading: loadingInvites } = useQuery({
+    queryKey: ['workspace-invites', ws?.id],
+    queryFn: () => api.get<WorkspaceInvite[]>(`${wsPath}/invites`),
+    enabled: !!ws && isAdmin,
+  })
+
+  // ── Mutations ──
+  const sendInvite = useMutation({
+    mutationFn: (data: { email: string; role: string }) => api.post(`${wsPath}/invites`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] })
+      setInviteEmail('')
+      setInviteRole('member')
+    },
+  })
+
+  const updateRole = useMutation({
+    mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
+      api.put(`${wsPath}/members/${memberId}`, { role }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace-members', ws?.id] })
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] })
+    },
+  })
+
+  const removeMember = useMutation({
+    mutationFn: (memberId: string) => api.delete(`${wsPath}/members/${memberId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace-members', ws?.id] })
+      setConfirmRemove(null)
+    },
+  })
+
+  const revokeInvite = useMutation({
+    mutationFn: (inviteId: string) => api.delete(`${wsPath}/invites/${inviteId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] }),
+  })
+
+  const ownerCount = members.filter(m => m.role === 'owner').length
+
+  return (
+    <div className="space-y-6">
+      {/* Invite Form (admin+ only) */}
+      {isAdmin && (
+        <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
+            <Mail className="h-4 w-4 text-primary" />
+            Invite Member
+          </h2>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!inviteEmail.trim()) return
+              sendInvite.mutate({ email: inviteEmail.trim(), role: inviteRole })
+            }}
+            className="flex items-end gap-3"
+          >
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-text-secondary mb-1">Email address</label>
+              <input
+                type="email"
+                placeholder="colleague@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                required
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            <div className="w-36">
+              <label className="block text-sm font-medium text-text-secondary mb-1">Role</label>
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as WorkspaceRole)}
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+              >
+                <option value="admin">Admin</option>
+                <option value="member">Member</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              disabled={sendInvite.isPending || !inviteEmail.trim()}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors whitespace-nowrap"
+            >
+              {sendInvite.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                'Send Invite'
+              )}
+            </button>
+          </form>
+          {sendInvite.isError && (
+            <p className="mt-2 text-sm text-danger">{(sendInvite.error as Error).message}</p>
+          )}
+          {sendInvite.isSuccess && (
+            <p className="mt-2 text-sm text-emerald-600">Invitation sent successfully!</p>
+          )}
+        </div>
+      )}
+
+      {/* Members List */}
+      <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
+        <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
+          <Users className="h-4 w-4 text-primary" />
+          Members
+          <span className="text-xs text-text-secondary font-normal">({members.length})</span>
+        </h2>
+        {loadingMembers ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {members.map((member) => {
+              const isSelf = member.user_id === user?.id
+              const isLastOwner = member.role === 'owner' && ownerCount <= 1
+              const roleInfo = ROLE_CONFIG[member.role as WorkspaceRole] || ROLE_CONFIG.member
+              const RoleIcon = roleInfo.icon
+
+              return (
+                <div key={member.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
+                      {getInitials(member.display_name || member.email || '?')}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-text">
+                        {member.display_name || member.email || member.user_id.slice(0, 8)}
+                        {isSelf && <span className="ml-1.5 text-xs text-text-secondary">(you)</span>}
+                      </p>
+                      {member.email && member.display_name && (
+                        <p className="text-xs text-text-secondary">{member.email}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {isAdmin && !isSelf && !isLastOwner ? (
+                      <select
+                        value={member.role}
+                        onChange={(e) => updateRole.mutate({ memberId: member.id, role: e.target.value })}
+                        className="rounded-lg border border-border px-2 py-1 text-xs outline-none focus:border-primary"
+                      >
+                        <option value="owner">Owner</option>
+                        <option value="admin">Admin</option>
+                        <option value="member">Member</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    ) : (
+                      <span className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium', roleInfo.color)}>
+                        <RoleIcon className="h-3 w-3" />
+                        {roleInfo.label}
+                      </span>
+                    )}
+                    {isAdmin && !isSelf && !isLastOwner && (
+                      confirmRemove === member.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => removeMember.mutate(member.id)}
+                            disabled={removeMember.isPending}
+                            className="rounded px-2 py-1 text-xs font-medium bg-danger text-white hover:bg-red-700"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => setConfirmRemove(null)}
+                            className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmRemove(member.id)}
+                          className="text-text-secondary hover:text-danger transition-colors"
+                          title="Remove member"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Pending Invites (admin+ only) */}
+      {isAdmin && (
+        <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
+            <Clock className="h-4 w-4 text-primary" />
+            Pending Invites
+            {invites.length > 0 && (
+              <span className="text-xs text-text-secondary font-normal">({invites.length})</span>
+            )}
+          </h2>
+          {loadingInvites ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            </div>
+          ) : invites.length === 0 ? (
+            <p className="text-sm text-text-secondary text-center py-6">No pending invitations</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {invites.map((invite) => {
+                const expiresAt = new Date(invite.expires_at)
+                const isExpired = expiresAt < new Date()
+                const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                const roleInfo = ROLE_CONFIG[invite.role as WorkspaceRole] || ROLE_CONFIG.member
+
+                return (
+                  <div key={invite.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 text-sm">
+                        <Mail className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-text">{invite.email}</p>
+                        <div className="flex items-center gap-2 text-xs text-text-secondary">
+                          <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium', roleInfo.color)}>
+                            {roleInfo.label}
+                          </span>
+                          {isExpired ? (
+                            <span className="text-danger font-medium">Expired</span>
+                          ) : (
+                            <span>Expires in {daysLeft} day{daysLeft !== 1 ? 's' : ''}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => revokeInvite.mutate(invite.id)}
+                      disabled={revokeInvite.isPending}
+                      className="text-text-secondary hover:text-danger transition-colors"
+                      title="Revoke invite"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function GitHubSettings() {
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
@@ -184,8 +474,8 @@ function GitHubSettings() {
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
       if (ws) {
-        const res = await api.get<{ data: Project[] }>(`${wsPath}/projects`)
-        return (res as any)?.data ?? res as unknown as Project[]
+        const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
+        return (res as any)?.items ?? []
       }
       return api.get<Project[]>('/projects')
     },

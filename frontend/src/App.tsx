@@ -10,6 +10,7 @@ import { ProjectDetail } from '@/pages/ProjectDetail'
 import { OPPMView } from '@/pages/OPPMView'
 import { Commits } from '@/pages/Commits'
 import { Settings } from '@/pages/Settings'
+import { AcceptInvite } from '@/pages/AcceptInvite'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +51,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/invites/:token" element={<AcceptInvite />} />
           <Route
             path="/*"
             element={

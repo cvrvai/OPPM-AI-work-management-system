@@ -18,8 +18,9 @@ sequenceDiagram
     Note over Frontend,Backend API: Subsequent API calls
 
     Frontend->>Backend API: GET /api/v1/workspaces<br/>Authorization: Bearer {JWT}
-    Backend API->>Backend API: get_current_user()<br/>Decode & validate JWT
-    Backend API->>Database: Query workspace_members<br/>WHERE user_id = {decoded.sub}
+    Backend API->>Supabase Auth: get_current_user()<br/>db.auth.get_user(token)
+    Supabase Auth-->>Backend API: User object (id, email, role)
+    Backend API->>Database: Query workspace_members<br/>WHERE user_id = {user.id}
     Database-->>Backend API: User's workspaces
     Backend API-->>Frontend: 200 OK [{workspaces}]
 ```
@@ -167,7 +168,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[API Request] --> B[Extract JWT → user_id]
+    A[API Request] --> B[Validate token via<br/>supabase.auth.get_user → user_id]
     B --> C[Extract workspace_id from URL path]
     C --> D{Is user a member<br/>of this workspace?}
 

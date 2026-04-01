@@ -2,6 +2,7 @@
 
 > Base URL: `http://localhost:8000/api`
 > Authentication: Bearer JWT token from Supabase Auth
+> Dev Note: Frontend uses Vite proxy (`/api` → `localhost:8000`). Do NOT set `VITE_API_URL` in development.
 
 ---
 

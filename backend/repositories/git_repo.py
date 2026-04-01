@@ -28,8 +28,8 @@ class RepoConfigRepository(BaseRepository):
         q = self._query().select("*").eq("repo_name", repo_name)
         if active_only:
             q = q.eq("is_active", True)
-        result = q.maybe_single().execute()
-        return result.data
+        result = q.limit(1).execute()
+        return result.data[0] if result.data else None
 
     def find_project_repos(self, project_id: str) -> list[dict]:
         return self.find_all(filters={"project_id": project_id}, order_by="created_at")

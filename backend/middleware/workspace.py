@@ -44,7 +44,7 @@ async def get_workspace_context(
         .select("id, role")
         .eq("workspace_id", workspace_id)
         .eq("user_id", user.id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
@@ -57,8 +57,8 @@ async def get_workspace_context(
     return WorkspaceContext(
         workspace_id=workspace_id,
         user=user,
-        role=result.data["role"],
-        member_id=result.data["id"],
+        role=result.data[0]["role"],
+        member_id=result.data[0]["id"],
     )
 
 

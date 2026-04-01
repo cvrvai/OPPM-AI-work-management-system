@@ -5,7 +5,7 @@
 - Use `logging.getLogger(__name__)` — never `print()`
 - Services are plain functions, not classes
 - Repositories are classes inheriting `BaseRepository`
-- Use `maybe_single()` instead of `single()` for queries that may return no rows
+- Use `.limit(1).execute()` and `data[0] if data else None` for queries that may return no rows — `maybe_single()` returns `None` in supabase-py 2.9.0
 - Pydantic models: use `model_config` to suppress protected namespace warnings for `model_*` fields
 
 ## Frontend (TypeScript / React)

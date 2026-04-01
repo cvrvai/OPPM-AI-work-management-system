@@ -26,8 +26,8 @@ export function Projects() {
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
       if (ws) {
-        const res = await api.get<{ data: Project[] }>(`${wsPath}/projects`)
-        return (res as any)?.data ?? res as unknown as Project[]
+        const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
+        return (res as any)?.items ?? []
       }
       return api.get<Project[]>('/projects')
     },

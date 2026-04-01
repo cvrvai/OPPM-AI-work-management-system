@@ -39,12 +39,12 @@ async def toggle_ai_model(model_id: str, ws: WorkspaceContext = Depends(require_
         .select("is_active")
         .eq("id", model_id)
         .eq("workspace_id", ws.workspace_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not current.data:
         return {"error": "Model not found"}
-    new_state = not current.data["is_active"]
+    new_state = not current.data[0]["is_active"]
     db.table("ai_models").update({"is_active": new_state}).eq("id", model_id).execute()
     return {"is_active": new_state}
 

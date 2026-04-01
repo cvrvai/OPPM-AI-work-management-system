@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     kimi_api_key: str = ""
     openai_api_key: str = ""
 
+    # Email (Resend)
+    resend_api_key: str = ""
+    app_url: str = "http://localhost:5173"
+    email_from: str = "OPPM <noreply@oppm.dev>"
+
     # App
     cors_origins: str = "http://localhost:5173,http://localhost:5174,http://localhost:5175"
     debug: bool = True

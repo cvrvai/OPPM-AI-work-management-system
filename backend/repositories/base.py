@@ -39,8 +39,8 @@ class BaseRepository:
         return q.execute().data or []
 
     def find_by_id(self, record_id: str) -> dict | None:
-        result = self._query().select("*").eq("id", record_id).maybe_single().execute()
-        return result.data
+        result = self._query().select("*").eq("id", record_id).limit(1).execute()
+        return result.data[0] if result.data else None
 
     def count(self, filters: dict[str, Any] | None = None) -> int:
         q = self._query().select("id", count="exact")

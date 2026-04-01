@@ -100,14 +100,14 @@ async def github_webhook(
         .select("*")
         .eq("repo_name", repo_full_name)
         .eq("is_active", True)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
     if not repo_config.data:
         raise HTTPException(status_code=404, detail="No active repo config found")
 
-    config = repo_config.data
+    config = repo_config.data[0]
 
     # Validate HMAC signature
     if x_hub_signature_256:

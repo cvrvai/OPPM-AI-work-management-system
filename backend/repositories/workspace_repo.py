@@ -9,8 +9,8 @@ class WorkspaceRepository(BaseRepository):
         super().__init__("workspaces")
 
     def find_by_slug(self, slug: str) -> dict | None:
-        result = self._query().select("*").eq("slug", slug).maybe_single().execute()
-        return result.data
+        result = self._query().select("*").eq("slug", slug).limit(1).execute()
+        return result.data[0] if result.data else None
 
     def find_user_workspaces(self, user_id: str) -> list[dict]:
         db = get_db()
@@ -41,10 +41,10 @@ class WorkspaceMemberRepository(BaseRepository):
             .select("*")
             .eq("workspace_id", workspace_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        return result.data
+        return result.data[0] if result.data else None
 
     def find_members(self, workspace_id: str) -> list[dict]:
         return self.find_all(filters={"workspace_id": workspace_id}, order_by="joined_at", desc=False)
@@ -55,8 +55,8 @@ class WorkspaceInviteRepository(BaseRepository):
         super().__init__("workspace_invites")
 
     def find_by_token(self, token: str) -> dict | None:
-        result = self._query().select("*").eq("token", token).maybe_single().execute()
-        return result.data
+        result = self._query().select("*").eq("token", token).limit(1).execute()
+        return result.data[0] if result.data else None
 
     def find_pending(self, workspace_id: str) -> list[dict]:
         return (

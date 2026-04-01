@@ -4,6 +4,7 @@ Workspace service — business logic for workspace management.
 
 import secrets
 from datetime import datetime, timezone, timedelta
+import logging
 from fastapi import HTTPException, status
 from repositories.workspace_repo import (
     WorkspaceRepository,
@@ -11,6 +12,9 @@ from repositories.workspace_repo import (
     WorkspaceInviteRepository,
 )
 from repositories.notification_repo import AuditRepository
+from infrastructure.email import send_invite_email
+
+logger = logging.getLogger(__name__)
 
 workspace_repo = WorkspaceRepository()
 member_repo = WorkspaceMemberRepository()
@@ -99,6 +103,15 @@ def create_invite(workspace_id: str, email: str, role: str, invited_by: str) -> 
         "expires_at": expires_at,
     })
     audit_repo.log(workspace_id, invited_by, "invite", "workspace_invite", invite["id"], new_data={"email": email})
+
+    # Send invite email (non-blocking — invite succeeds even if email fails)
+    ws = workspace_repo.find_by_id(workspace_id)
+    ws_name = ws["name"] if ws else "a workspace"
+    # Use invited_by ID to look up email from member record
+    inviter_member = member_repo.find_by_user_and_workspace(invited_by, workspace_id)
+    inviter_display = inviter_member.get("display_name", "") if inviter_member else ""
+    send_invite_email(email, ws_name, inviter_display or invited_by, token, role)
+
     return invite
 
 
@@ -127,3 +140,19 @@ def accept_invite(token: str, user_id: str) -> dict:
 
     ws = workspace_repo.find_by_id(invite["workspace_id"])
     return {"workspace_id": invite["workspace_id"], "workspace_name": ws["name"] if ws else ""}
+
+
+def get_pending_invites(workspace_id: str) -> list[dict]:
+    """Return pending (not accepted, not expired) invites for a workspace."""
+    return invite_repo.find_pending(workspace_id)
+
+
+def revoke_invite(workspace_id: str, invite_id: str, actor_id: str) -> bool:
+    """Delete a pending invite."""
+    invite = invite_repo.find_by_id(invite_id)
+    if not invite or invite["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite["accepted_at"]:
+        raise HTTPException(status_code=400, detail="Cannot revoke an accepted invite")
+    audit_repo.log(workspace_id, actor_id, "revoke_invite", "workspace_invite", invite_id)
+    return invite_repo.delete(invite_id)
