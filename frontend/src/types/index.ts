@@ -100,9 +100,11 @@ export interface OPPMTimelineEntry {
   id: string
   project_id: string
   objective_id: string
-  year: number
-  month: number
-  status: 'none' | 'planned' | 'in_progress' | 'completed' | 'delayed'
+  week_start: string
+  status: 'planned' | 'in_progress' | 'completed' | 'at_risk' | 'blocked'
+  ai_score?: number | null
+  notes?: string | null
+  created_at: string
 }
 
 export interface OPPMCost {

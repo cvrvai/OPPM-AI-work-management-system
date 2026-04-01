@@ -19,9 +19,9 @@ class OPPMObjectiveUpdate(BaseModel):
 
 class TimelineEntryUpsert(BaseModel):
     objective_id: str
-    year: int
-    month: int
-    status: str = "none"  # none | planned | in_progress | completed | delayed
+    week_start: str  # ISO date string, e.g. "2026-04-06"
+    status: str = "planned"  # planned | in_progress | completed | at_risk | blocked
+    notes: Optional[str] = None
 
 
 class CostCreate(BaseModel):

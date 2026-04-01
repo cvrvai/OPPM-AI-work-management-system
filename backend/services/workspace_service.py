@@ -91,6 +91,17 @@ def remove_member(workspace_id: str, member_id: str, actor_id: str) -> bool:
     return member_repo.delete(member_id)
 
 
+def update_my_display_name(workspace_id: str, user_id: str, display_name: str) -> dict:
+    """Update the current user's display_name in workspace_members."""
+    member = member_repo.find_by_user_and_workspace(user_id, workspace_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    result = member_repo.update(member["id"], {"display_name": display_name})
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to update display name")
+    return result
+
+
 def create_invite(workspace_id: str, email: str, role: str, invited_by: str) -> dict:
     token = secrets.token_urlsafe(48)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()

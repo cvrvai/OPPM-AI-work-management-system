@@ -72,6 +72,7 @@ export function Settings() {
 
 function ProfileSettings() {
   const user = useAuthStore((s) => s.user)
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const email = user?.email || ''
   const name = user?.user_metadata?.full_name || email.split('@')[0]
   const [displayName, setDisplayName] = useState(name)
@@ -82,9 +83,16 @@ function ProfileSettings() {
     setSaving(true)
     try {
       const { supabase } = await import('@/lib/supabase')
+      // Update Supabase Auth user metadata
       await supabase.auth.updateUser({
         data: { full_name: displayName },
       })
+      // Also update workspace_members.display_name if workspace is selected
+      if (ws) {
+        await api.patch(`/v1/workspaces/${ws.id}/members/me/display-name`, {
+          display_name: displayName,
+        })
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch {

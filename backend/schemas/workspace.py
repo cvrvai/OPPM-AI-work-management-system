@@ -30,6 +30,10 @@ class MemberUpdate(BaseModel):
     role: WorkspaceRole
 
 
+class DisplayNameUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+
+
 class InviteCreate(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     role: WorkspaceRole = WorkspaceRole.member

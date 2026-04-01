@@ -23,25 +23,26 @@ async def list_tasks_route(
     page_size: int = Query(50, ge=1, le=200),
     ws: WorkspaceContext = Depends(get_workspace_context),
 ):
-    return list_tasks(ws.workspace_id, project_id, status, page, page_size)
+    offset = (page - 1) * page_size
+    return list_tasks(project_id=project_id, status=status, limit=page_size, offset=offset)
 
 
 @router.get("/workspaces/{workspace_id}/tasks/{task_id}")
 async def get_task_route(task_id: str, ws: WorkspaceContext = Depends(get_workspace_context)):
-    return get_task(ws.workspace_id, task_id)
+    return get_task(task_id)
 
 
 @router.post("/workspaces/{workspace_id}/tasks", status_code=201)
 async def create_task_route(data: TaskCreate, ws: WorkspaceContext = Depends(require_write)):
-    return create_task(ws.workspace_id, data.model_dump())
+    return create_task(data=data.model_dump(), workspace_id=ws.workspace_id, user_id=ws.user.id)
 
 
 @router.put("/workspaces/{workspace_id}/tasks/{task_id}")
 async def update_task_route(task_id: str, data: TaskUpdate, ws: WorkspaceContext = Depends(require_write)):
-    return update_task(ws.workspace_id, task_id, data.model_dump(exclude_none=True))
+    return update_task(task_id=task_id, data=data.model_dump(exclude_none=True), workspace_id=ws.workspace_id, user_id=ws.user.id)
 
 
 @router.delete("/workspaces/{workspace_id}/tasks/{task_id}")
 async def delete_task_route(task_id: str, ws: WorkspaceContext = Depends(require_write)) -> SuccessResponse:
-    delete_task(ws.workspace_id, task_id)
+    delete_task(task_id=task_id, workspace_id=ws.workspace_id, user_id=ws.user.id)
     return SuccessResponse()

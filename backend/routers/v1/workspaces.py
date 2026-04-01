@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 from middleware.auth import CurrentUser, get_current_user
 from middleware.workspace import WorkspaceContext, get_workspace_context, require_admin
-from schemas.workspace import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept
+from schemas.workspace import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept, DisplayNameUpdate
 from schemas.common import SuccessResponse
 from services.workspace_service import (
     create_workspace,
@@ -13,6 +13,7 @@ from services.workspace_service import (
     get_workspace_members,
     update_member_role,
     remove_member,
+    update_my_display_name,
     create_invite,
     accept_invite,
     get_pending_invites,
@@ -61,6 +62,15 @@ async def update_member(member_id: str, data: MemberUpdate, ws: WorkspaceContext
 async def remove_member_route(member_id: str, ws: WorkspaceContext = Depends(require_admin)) -> SuccessResponse:
     remove_member(ws.workspace_id, member_id, ws.user.id)
     return SuccessResponse()
+
+
+@router.patch("/workspaces/{workspace_id}/members/me/display-name")
+async def update_my_display_name_route(
+    data: DisplayNameUpdate,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+):
+    """Update the current user's display name in this workspace."""
+    return update_my_display_name(ws.workspace_id, ws.user.id, data.display_name)
 
 
 # ── Invites ──

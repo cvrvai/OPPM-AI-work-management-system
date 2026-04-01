@@ -52,7 +52,7 @@ async def get_timeline_route(project_id: str, ws: WorkspaceContext = Depends(get
 
 @router.put("/workspaces/{workspace_id}/projects/{project_id}/oppm/timeline")
 async def upsert_timeline_route(project_id: str, data: TimelineEntryUpsert, ws: WorkspaceContext = Depends(require_write)):
-    payload = data.model_dump()
+    payload = data.model_dump(exclude_none=True)
     payload["project_id"] = project_id
     return upsert_timeline_entry(payload, ws.workspace_id, ws.user.id)
 

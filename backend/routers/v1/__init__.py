@@ -9,6 +9,7 @@ from routers.v1 import (
     oppm,
     git,
     ai,
+    ai_chat,
     notifications,
     dashboard,
 )
@@ -22,5 +23,6 @@ router.include_router(tasks.router, tags=["tasks"])
 router.include_router(oppm.router, tags=["oppm"])
 router.include_router(git.router, tags=["git"])
 router.include_router(ai.router, tags=["ai"])
+router.include_router(ai_chat.router, tags=["ai-chat"])
 router.include_router(notifications.router, tags=["notifications"])
 router.include_router(dashboard.router, tags=["dashboard"])

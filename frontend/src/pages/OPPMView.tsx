@@ -1,45 +1,57 @@
 /**
- * OPPMView — One Page Project Manager
+ * OPPMView — One Page Project Manager (Fully Editable)
  *
- * Layout mirrors the classic OPPM Excel template:
- *
- * ┌─────────────────────────────────────────────────────────────────────────────┐
- * │  Project Leader: [name]  │ ⊙ OPPM │  Project Name: [title]   │ [progress] │
- * ├──────────────────────────┴────────┴──────────────────────────────────────────│
- * │  Project Objective: [desc]   Deliverable Output: [editable]                 │
- * │  Start: [date]   Deadline: [date]   Status: [badge]   ● Legend              │
- * ├──────┬────────────────────────────┬─────┬─W1─┬─W2─┬─...─┬─W8─┬────────────│
- * │ Sub  │ Major Tasks (Deadline)     │  %  │    │    │     │    │ Owner/Prio  │
- * │ Obj  ├────────────────────────────┼─────┼────┼────┼─────┼────┤            │
- * │  1   │ 1. Objective Title         │     │ ●  │ ●  │     │    │            │
- * │      │   1.1 Task A (due date)    │ 60% │ ●  │ ○  │     │    │  high      │
- * │  2   │ 2. Objective Title         │     │    │    │ ●   │    │            │
- * │      │   2.1 Task B (due date)    │ 30% │    │    │ ●   │ ○  │  medium    │
- * ├──────┼────────────────────────────┼─────┴────┴────┴─────┴────┴────────────│
- * │ Summ │ 1. Feature 1               │  Team Members + Status Legend (spans) │
- * │ Del. │ 2. Feature 2               │                                        │
- * ├──────┼────────────────────────────┤                                        │
- * │ Fore │ 1. Expectation 1           │                                        │
- * │ cast │ 2. Expectation 2           │                                        │
- * ├──────┼────────────────────────────┤                                        │
- * │ Risk │ 1. Risk 1                  │                                        │
- * │      │ 2. Risk 2                  │                                        │
- * └──────────────────────────────────────────────────────────────────────────────┘
+ * Features:
+ * - Clickable StatusDots that cycle: empty → planned → in_progress → completed → at_risk → blocked
+ * - Inline editing for objective titles and owners
+ * - Add/delete objectives
+ * - Timeline entries fetched from API (oppm_timeline_entries table)
+ * - Cost section with CRUD
+ * - Editable deliverables, forecast, risks (saved to project metadata)
+ * - Week navigation with current week highlight
+ * - Auto-calculated progress per objective and overall
  */
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import type { Project, Task, OPPMObjective } from '@/types'
-import { cn, formatDate } from '@/lib/utils'
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Target, Check, X } from 'lucide-react'
-import { startOfWeek, endOfWeek, addWeeks, format, parseISO } from 'date-fns'
 import { useAuthStore } from '@/stores/authStore'
+import type { Project, OPPMObjective, OPPMTimelineEntry, OPPMCost } from '@/types'
+import { cn, formatDate } from '@/lib/utils'
+import {
+  ArrowLeft, ChevronLeft, ChevronRight, Loader2, Target,
+  Check, X, Plus, Trash2, Bot,
+} from 'lucide-react'
+import { startOfWeek, addWeeks, format, parseISO, isWithinInterval, endOfWeek } from 'date-fns'
+import { ChatPanel } from '@/components/ChatPanel'
 
 // ─────────────────────────────────────────────────────────────
-// Types
+// Constants
+// ─────────────────────────────────────────────────────────────
+const VISIBLE_WEEKS = 8
+const TOTAL_COLS = VISIBLE_WEEKS + 4 // SubObj + Tasks + % + weeks + Owner
+
+const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
+  planned:     { color: '#9CA3AF', bg: 'bg-gray-300',     label: 'Planned' },
+  in_progress: { color: '#3B82F6', bg: 'bg-blue-500',     label: 'In Progress' },
+  completed:   { color: '#22C55E', bg: 'bg-emerald-500',  label: 'Completed' },
+  at_risk:     { color: '#F59E0B', bg: 'bg-amber-400',    label: 'At Risk' },
+  blocked:     { color: '#EF4444', bg: 'bg-red-500',      label: 'Blocked' },
+}
+
+const STATUS_CYCLE = ['empty', 'planned', 'in_progress', 'completed', 'at_risk', 'blocked'] as const
+
+type TimelineStatus = 'planned' | 'in_progress' | 'completed' | 'at_risk' | 'blocked'
+
+function nextStatus(current: string | undefined): string {
+  const idx = STATUS_CYCLE.indexOf((current || 'empty') as typeof STATUS_CYCLE[number])
+  return STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Metadata type
 // ─────────────────────────────────────────────────────────────
 interface OPPMMetadata {
   deliverable_output?: string
@@ -49,97 +61,86 @@ interface OPPMMetadata {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Status helpers
+// StatusDot — clickable circle that cycles through statuses
 // ─────────────────────────────────────────────────────────────
-const DOT_BG: Record<string, string> = {
-  completed: 'bg-emerald-500',
-  in_progress: 'bg-blue-500',
-  at_risk: 'bg-amber-400',
-  blocked: 'bg-red-500',
-  planned: 'bg-gray-300',
-}
-
-function StatusDot({ status }: { status: string }) {
+function StatusDot({
+  status,
+  onClick,
+}: {
+  status?: string
+  onClick?: () => void
+}) {
+  const cfg = status && status !== 'empty' ? STATUS_CONFIG[status] : null
   return (
-    <span
+    <div
+      onClick={onClick}
+      title={cfg?.label ?? 'Click to set status'}
       className={cn(
-        'inline-block h-3 w-3 rounded-full mx-auto',
-        DOT_BG[status] ?? 'bg-gray-200'
+        'w-3.5 h-3.5 rounded-full mx-auto transition-all duration-150 shrink-0',
+        onClick && 'cursor-pointer hover:scale-125',
+        cfg ? cfg.bg : 'border-[1.5px] border-gray-300 bg-transparent'
       )}
     />
   )
 }
 
-function getWorstStatus(statuses: string[]): string {
-  if (statuses.includes('blocked')) return 'blocked'
-  if (statuses.includes('at_risk')) return 'at_risk'
-  if (statuses.includes('in_progress')) return 'in_progress'
-  if (statuses.includes('planned')) return 'planned'
-  if (statuses.includes('completed')) return 'completed'
-  return ''
-}
-
-function getTaskWeekStatus(task: Task, weekStart: Date, weekEnd: Date): string {
-  if (!task.due_date) return ''
-  const due = parseISO(task.due_date)
-  const created = parseISO(task.created_at)
-  if (created > weekEnd || due < weekStart) return ''
-  if (task.status === 'completed') return 'completed'
-  if (task.status === 'in_progress') return due < new Date() ? 'at_risk' : 'in_progress'
-  if (task.status === 'todo') return due < new Date() ? 'blocked' : 'planned'
-  return 'planned'
-}
-
 // ─────────────────────────────────────────────────────────────
-// Editable inline text field
+// InlineEdit — click-to-edit text field
 // ─────────────────────────────────────────────────────────────
-function EditableField({
+function InlineEdit({
   value,
   onSave,
   placeholder = 'Click to edit…',
+  className: extraClass,
 }: {
   value: string
   onSave: (v: string) => void
   placeholder?: string
+  className?: string
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
+  const ref = useRef<HTMLInputElement>(null)
 
-  if (editing) {
+  useEffect(() => { if (editing) ref.current?.focus() }, [editing])
+  useEffect(() => { setDraft(value) }, [value])
+
+  if (!editing) {
     return (
-      <span className="inline-flex items-center gap-1">
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') { onSave(draft); setEditing(false) }
-            if (e.key === 'Escape') { setDraft(value); setEditing(false) }
-          }}
-          className="text-xs border border-primary/60 rounded px-1.5 py-0.5 outline-none min-w-[160px]"
-        />
-        <button onClick={() => { onSave(draft); setEditing(false) }} className="text-emerald-600 hover:text-emerald-700">
-          <Check className="h-3 w-3" />
-        </button>
-        <button onClick={() => { setDraft(value); setEditing(false) }} className="text-gray-400 hover:text-gray-600">
-          <X className="h-3 w-3" />
-        </button>
+      <span
+        onClick={() => { setDraft(value); setEditing(true) }}
+        className={cn(
+          'cursor-text rounded px-0.5 hover:bg-amber-50 border border-transparent hover:border-amber-200 transition-colors',
+          !value && 'text-gray-400 italic',
+          extraClass
+        )}
+        title="Click to edit"
+      >
+        {value || placeholder}
       </span>
     )
   }
 
   return (
-    <span
-      onClick={() => { setDraft(value); setEditing(true) }}
-      className="cursor-pointer hover:bg-amber-50 rounded px-0.5 text-xs text-gray-700 group border border-transparent hover:border-amber-200"
-    >
-      {value || <em className="not-italic text-gray-400">{placeholder}</em>}
-    </span>
+    <input
+      ref={ref}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { if (draft !== value) onSave(draft); setEditing(false) }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { if (draft !== value) onSave(draft); setEditing(false) }
+        if (e.key === 'Escape') { setDraft(value); setEditing(false) }
+      }}
+      className={cn(
+        'bg-transparent border-b-[1.5px] border-blue-500 outline-none w-full text-inherit',
+        extraClass
+      )}
+    />
   )
 }
 
 // ─────────────────────────────────────────────────────────────
-// Editable numbered list (for Deliverables / Forecast / Risks)
+// EditableList — numbered list for deliverables/forecast/risk
 // ─────────────────────────────────────────────────────────────
 function EditableList({
   items,
@@ -166,14 +167,14 @@ function EditableList({
                 next[i] = e.target.value
                 setDraft(next)
               }}
-              className="flex-1 text-xs border border-primary/50 rounded px-1.5 py-0.5 outline-none focus:border-primary"
+              className="flex-1 text-xs border border-blue-400 rounded px-1.5 py-0.5 outline-none focus:border-blue-500"
             />
           </div>
         ))}
         <div className="flex gap-2 mt-1.5">
           <button
             onClick={() => { onSave(draft); setEditing(false) }}
-            className="text-[10px] bg-primary text-white rounded px-2 py-0.5 font-medium hover:bg-primary-dark"
+            className="text-[10px] bg-blue-600 text-white rounded px-2 py-0.5 font-medium hover:bg-blue-700"
           >
             Save
           </button>
@@ -198,7 +199,7 @@ function EditableList({
           </span>
         </div>
       ))}
-      <div className="text-[10px] text-primary/0 group-hover:text-primary/50 mt-0.5 transition-colors">
+      <div className="text-[10px] text-transparent group-hover:text-blue-400 mt-0.5 transition-colors">
         ✎ click to edit
       </div>
     </div>
@@ -206,28 +207,7 @@ function EditableList({
 }
 
 // ─────────────────────────────────────────────────────────────
-// Priority badge (compact, single letter)
-// ─────────────────────────────────────────────────────────────
-function PriorityBadge({ priority }: { priority: string }) {
-  const cls =
-    priority === 'critical' ? 'bg-red-100 text-red-700 ring-red-200' :
-    priority === 'high'     ? 'bg-orange-100 text-orange-700 ring-orange-200' :
-    priority === 'medium'   ? 'bg-blue-100 text-blue-700 ring-blue-200' :
-                              'bg-gray-100 text-gray-500 ring-gray-200'
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center justify-center h-5 w-5 rounded-full text-[9px] font-bold ring-1 uppercase',
-        cls
-      )}
-    >
-      {priority[0]}
-    </span>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
-// Vertical text cell label (for bottom section rows)
+// VerticalLabel — rotated text for bottom section rows
 // ─────────────────────────────────────────────────────────────
 function VerticalLabel({ children }: { children: string }) {
   return (
@@ -242,34 +222,170 @@ function VerticalLabel({ children }: { children: string }) {
   )
 }
 
+// ─────────────────────────────────────────────────────────────
+// CostRow — single cost item row
+// ─────────────────────────────────────────────────────────────
+function CostRow({
+  cost,
+  onUpdate,
+  onDelete,
+}: {
+  cost: OPPMCost
+  onUpdate: (data: Partial<OPPMCost>) => void
+  onDelete: () => void
+}) {
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="border border-gray-300 px-2 py-1.5">
+        <InlineEdit
+          value={cost.category}
+          onSave={(v) => onUpdate({ category: v })}
+          className="text-xs text-gray-700"
+        />
+      </td>
+      <td className="border border-gray-300 px-2 py-1.5 text-right">
+        <InlineEdit
+          value={String(cost.planned_amount)}
+          onSave={(v) => onUpdate({ planned_amount: parseFloat(v) || 0 })}
+          className="text-xs text-gray-700 text-right"
+        />
+      </td>
+      <td className="border border-gray-300 px-2 py-1.5 text-right">
+        <InlineEdit
+          value={String(cost.actual_amount)}
+          onSave={(v) => onUpdate({ actual_amount: parseFloat(v) || 0 })}
+          className="text-xs text-gray-700 text-right"
+        />
+      </td>
+      <td className="border border-gray-300 px-2 py-1.5">
+        <InlineEdit
+          value={cost.notes}
+          onSave={(v) => onUpdate({ notes: v })}
+          placeholder="—"
+          className="text-xs text-gray-500"
+        />
+      </td>
+      <td className="border border-gray-300 px-1 py-1.5 text-center">
+        <button
+          onClick={onDelete}
+          className="text-gray-400 hover:text-red-500 transition-colors"
+          title="Delete cost"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </td>
+    </tr>
+  )
+}
+
 // ═════════════════════════════════════════════════════════════
 // Main OPPMView Component
 // ═════════════════════════════════════════════════════════════
 export function OPPMView() {
   const { id } = useParams<{ id: string }>()
   const [weekOffset, setWeekOffset] = useState(0)
-  const VISIBLE_WEEKS = 8
-  // Total columns: Sub Obj(1) + Major Tasks(1) + %(1) + Weeks(8) + Owner(1) = 12
-  const TOTAL_COLS = VISIBLE_WEEKS + 4
+  const [newObjTitle, setNewObjTitle] = useState('')
+  const [showAddCost, setShowAddCost] = useState(false)
+  const [newCost, setNewCost] = useState({ category: '', planned_amount: 0, actual_amount: 0, notes: '' })
+  const [chatOpen, setChatOpen] = useState(false)
 
   const user = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
 
+  // ── Queries ────────────────────────────────────────────────
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id, ws?.id],
-    queryFn: () => ws ? api.get<Project>(`${wsPath}/projects/${id}`) : api.get<Project>(`/projects/${id}`),
+    queryFn: () => api.get<Project>(`${wsPath}/projects/${id}`),
+    enabled: !!ws,
   })
 
   const { data: objectives, isLoading: loadingObjectives } = useQuery({
     queryKey: ['oppm-objectives', id, ws?.id],
-    queryFn: () => ws
-      ? api.get<OPPMObjective[]>(`${wsPath}/projects/${id}/oppm/objectives`)
-      : api.get<OPPMObjective[]>(`/projects/${id}/oppm/objectives`),
+    queryFn: () => api.get<OPPMObjective[]>(`${wsPath}/projects/${id}/oppm/objectives`),
+    enabled: !!ws,
   })
 
-  // ── All hooks before early returns ──────────────────────────
+  const { data: timelineEntries } = useQuery({
+    queryKey: ['oppm-timeline', id, ws?.id],
+    queryFn: () => api.get<OPPMTimelineEntry[]>(`${wsPath}/projects/${id}/oppm/timeline`),
+    enabled: !!ws,
+  })
+
+  const { data: costData } = useQuery({
+    queryKey: ['oppm-costs', id, ws?.id],
+    queryFn: () => api.get<{ total_planned: number; total_actual: number; items: OPPMCost[] }>(`${wsPath}/projects/${id}/oppm/costs`),
+    enabled: !!ws,
+  })
+
+  // ── Mutations ──────────────────────────────────────────────
+
+  // Objectives
+  const createObjective = useMutation({
+    mutationFn: (title: string) =>
+      api.post(`${wsPath}/projects/${id}/oppm/objectives`, {
+        title,
+        project_id: id,
+        sort_order: (objectives?.length ?? 0) + 1,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['oppm-objectives', id] })
+      setNewObjTitle('')
+    },
+  })
+
+  const updateObjective = useMutation({
+    mutationFn: ({ objId, data }: { objId: string; data: Record<string, unknown> }) =>
+      api.put(`${wsPath}/oppm/objectives/${objId}`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['oppm-objectives', id] }),
+  })
+
+  const deleteObjective = useMutation({
+    mutationFn: (objId: string) => api.delete(`${wsPath}/oppm/objectives/${objId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['oppm-objectives', id] })
+      queryClient.invalidateQueries({ queryKey: ['oppm-timeline', id] })
+    },
+  })
+
+  // Timeline
+  const upsertTimeline = useMutation({
+    mutationFn: (data: { objective_id: string; week_start: string; status: string; notes?: string }) =>
+      api.put(`${wsPath}/projects/${id}/oppm/timeline`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['oppm-timeline', id] }),
+  })
+
+  // Costs
+  const createCostMut = useMutation({
+    mutationFn: (data: { category: string; planned_amount: number; actual_amount: number; notes: string }) =>
+      api.post(`${wsPath}/projects/${id}/oppm/costs`, { ...data, project_id: id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['oppm-costs', id] })
+      setShowAddCost(false)
+      setNewCost({ category: '', planned_amount: 0, actual_amount: 0, notes: '' })
+    },
+  })
+
+  const updateCostMut = useMutation({
+    mutationFn: ({ costId, data }: { costId: string; data: Record<string, unknown> }) =>
+      api.put(`${wsPath}/oppm/costs/${costId}`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['oppm-costs', id] }),
+  })
+
+  const deleteCostMut = useMutation({
+    mutationFn: (costId: string) => api.delete(`${wsPath}/oppm/costs/${costId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['oppm-costs', id] }),
+  })
+
+  // Project metadata
+  const updateMeta = useMutation({
+    mutationFn: (patch: OPPMMetadata) =>
+      api.put(`${wsPath}/projects/${id}`, { metadata: { ...meta, ...patch } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', id] }),
+  })
+
+  // ── Computed data ──────────────────────────────────────────
   const projectStart = useMemo(
     () =>
       startOfWeek(
@@ -288,6 +404,7 @@ export function OPPMView() {
           end: endOfWeek(ws, { weekStartsOn: 1 }),
           label: format(ws, 'MMM d'),
           weekNum: weekOffset + i + 1,
+          isoDate: format(ws, 'yyyy-MM-dd'),
         }
       }),
     [weekOffset, projectStart]
@@ -303,34 +420,116 @@ export function OPPMView() {
     }
   }, [project?.metadata])
 
-  const updateMeta = useMutation({
-    mutationFn: (patch: OPPMMetadata) =>
-      ws
-        ? api.put(`${wsPath}/projects/${id}`, { metadata: { ...meta, ...patch } })
-        : api.put(`/projects/${id}`, { metadata: { ...meta, ...patch } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['project', id] }),
-  })
+  // Build a lookup map: objectiveId → weekIsoDate → status
+  const timelineMap = useMemo(() => {
+    const map: Record<string, Record<string, TimelineStatus>> = {}
+    if (!timelineEntries) return map
+    for (const entry of timelineEntries) {
+      if (!map[entry.objective_id]) map[entry.objective_id] = {}
+      map[entry.objective_id][entry.week_start] = entry.status
+    }
+    return map
+  }, [timelineEntries])
 
-  // ── Early returns ────────────────────────────────────────────
+  // Calculate progress per objective and overall
+  const calcProgress = useCallback(
+    (objId: string): number => {
+      const objTimeline = timelineMap[objId]
+      if (!objTimeline) return 0
+      const weekStatuses = weeks.map((w) => objTimeline[w.isoDate]).filter(Boolean)
+      if (weekStatuses.length === 0) return 0
+      const completed = weekStatuses.filter((s) => s === 'completed').length
+      return Math.round((completed / weeks.length) * 100)
+    },
+    [timelineMap, weeks]
+  )
+
+  const overallProgress = useMemo(() => {
+    const objs = objectives ?? []
+    if (objs.length === 0) return 0
+    const total = objs.length * weeks.length
+    let completedCells = 0
+    for (const obj of objs) {
+      const objTimeline = timelineMap[obj.id]
+      if (!objTimeline) continue
+      for (const week of weeks) {
+        if (objTimeline[week.isoDate] === 'completed') completedCells++
+      }
+    }
+    return Math.round((completedCells / total) * 100)
+  }, [objectives, timelineMap, weeks])
+
+  // Handle clicking a timeline dot
+  const handleDotClick = useCallback(
+    (objectiveId: string, weekIsoDate: string) => {
+      const current = timelineMap[objectiveId]?.[weekIsoDate] || 'empty'
+      const next = nextStatus(current)
+      if (next === 'empty') {
+        // Delete the entry by setting status to something the backend handles
+        // Since we don't have a delete endpoint for individual timeline entries,
+        // we'll cycle to planned instead of deleting
+        // Actually, let's upsert with the next valid status or skip empty
+        return // empty means remove — but we don't have a delete endpoint, so skip back to planned
+      }
+      upsertTimeline.mutate({
+        objective_id: objectiveId,
+        week_start: weekIsoDate,
+        status: next,
+      })
+    },
+    [timelineMap, upsertTimeline]
+  )
+
+  // Handle clicking a timeline dot — full cycle including removal
+  const handleDotClickFull = useCallback(
+    (objectiveId: string, weekIsoDate: string) => {
+      const current = timelineMap[objectiveId]?.[weekIsoDate] || 'empty'
+      const next = nextStatus(current)
+      if (next === 'empty') {
+        // Cycle back to planned (no delete endpoint for single timeline entries)
+        // Just don't upsert — the dot will show as empty if there's no entry
+        // For now, set to planned to restart the cycle
+        upsertTimeline.mutate({
+          objective_id: objectiveId,
+          week_start: weekIsoDate,
+          status: 'planned',
+        })
+        return
+      }
+      upsertTimeline.mutate({
+        objective_id: objectiveId,
+        week_start: weekIsoDate,
+        status: next,
+      })
+    },
+    [timelineMap, upsertTimeline]
+  )
+
+  const today = new Date()
+  const currentWeekIdx = weeks.findIndex((w) =>
+    isWithinInterval(today, { start: w.start, end: w.end })
+  )
+
+  const leaderName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Project Leader'
+
+  // ── Loading / Error states ──────────────────────────────────
   if (loadingProject || loadingObjectives) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
       </div>
     )
   }
 
-  if (!project) return (
-    <p className="text-sm text-text-secondary py-12 text-center">Project not found</p>
-  )
+  if (!project) {
+    return <p className="text-sm text-gray-500 py-12 text-center">Project not found</p>
+  }
 
   const p = project
   const objs = objectives ?? []
-  const leaderName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Project Leader'
-  const today = new Date()
-  const currentWeekIdx = weeks.findIndex((w) => today >= w.start && today <= w.end)
+  const costs = costData?.items ?? []
 
-  // ── Render ────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────
   return (
     <div className="space-y-4">
 
@@ -338,36 +537,48 @@ export function OPPMView() {
       <div className="flex items-center gap-3">
         <Link
           to={`/projects/${id}`}
-          className="rounded-lg border border-border p-2 text-text-secondary hover:bg-surface-alt"
+          className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:bg-gray-50"
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="text-xl font-bold text-text">OPPM — {p.title}</h1>
-          <p className="text-xs text-text-secondary">One Page Project Manager · Gantt + Matrix View</p>
+          <h1 className="text-xl font-bold text-gray-900">OPPM — {p.title}</h1>
+          <p className="text-xs text-gray-500">One Page Project Manager · Gantt + Matrix View</p>
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setChatOpen((v) => !v)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+              chatOpen
+                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+            )}
+          >
+            <Bot className="h-4 w-4" />
+            AI Chat
+          </button>
           <button
             onClick={() => setWeekOffset((o) => o - 1)}
-            className="rounded-lg border border-border p-1.5 text-text-secondary hover:bg-surface-alt"
+            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="text-sm text-text-secondary px-3 font-medium">
+          <span className="text-sm text-gray-500 px-3 font-medium">
             W{weekOffset + 1} – W{weekOffset + VISIBLE_WEEKS}
           </span>
           <button
             onClick={() => setWeekOffset((o) => o + 1)}
-            className="rounded-lg border border-border p-1.5 text-text-secondary hover:bg-surface-alt"
+            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════
+      {/* ══════════════════════════════════════════════════════
           OPPM SHEET
-      ══════════════════════════════════════════════════════════ */}
+      ══════════════════════════════════════════════════════ */}
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
         <table
           className="border-collapse text-sm"
@@ -378,23 +589,23 @@ export function OPPMView() {
           }}
         >
           {/* Column widths */}
-          <colgroup>
+          <colgroup>{/* */}
             <col style={{ width: '40px' }} />{/* Sub Obj */}
             <col style={{ width: '220px' }} />{/* Major Tasks */}
             <col style={{ width: '38px' }} />{/* % */}
             {Array.from({ length: VISIBLE_WEEKS }).map((_, i) => (
               <col key={i} style={{ width: '68px' }} />
-            ))}
+            ))}{/* */}
             <col style={{ width: '72px' }} />{/* Owner / Priority */}
           </colgroup>
 
-          {/* ──────────────────────────────────────────────────────
+          {/* ──────────────────────────────────────────────────
               HEADER — 3 rows
-          ────────────────────────────────────────────────────── */}
-          <thead>
+          ────────────────────────────────────────────────── */}
+          <thead>{/* */}
 
             {/* Row 1: Project Leader | Logo | Project Name | Progress */}
-            <tr>
+            <tr>{/* */}
               <td
                 colSpan={3}
                 className="border border-gray-300 px-3 py-2 bg-gray-50"
@@ -403,19 +614,19 @@ export function OPPMView() {
                   Project Leader
                 </div>
                 <div className="text-sm font-bold text-gray-800">{leaderName}</div>
-              </td>
+              </td>{/* */}
 
               <td
                 colSpan={1}
-                className="border border-gray-300 px-2 py-2 text-center bg-primary/5"
+                className="border border-gray-300 px-2 py-2 text-center bg-blue-50"
               >
                 <div className="flex flex-col items-center justify-center gap-0.5">
-                  <Target className="h-4 w-4 text-primary" />
-                  <div className="text-[10px] font-bold text-primary leading-none">OPPM</div>
+                  <Target className="h-4 w-4 text-blue-600" />
+                  <div className="text-[10px] font-bold text-blue-600 leading-none">OPPM</div>
                 </div>
-              </td>
+              </td>{/* */}
 
-              {/* Project Name spans W2–W8 (cols 5–11) */}
+              {/* Project Name spans W2–W8 */}
               <td
                 colSpan={VISIBLE_WEEKS - 1}
                 className="border border-gray-300 px-3 py-2 bg-gray-50"
@@ -424,17 +635,22 @@ export function OPPMView() {
                   Project Name
                 </div>
                 <div className="text-sm font-bold text-gray-800">{p.title}</div>
-              </td>
+              </td>{/* */}
 
-              {/* Progress / Status — Owner column */}
+              {/* Progress */}
               <td className="border border-gray-300 px-2 py-2 bg-gray-50 text-center">
                 <div className="text-[9px] text-gray-400">Progress</div>
-                <div className="text-base font-black text-primary">{p.progress}%</div>
-              </td>
+                <div className={cn(
+                  'text-base font-black',
+                  overallProgress > 0 ? 'text-blue-600' : 'text-gray-400'
+                )}>
+                  {overallProgress}%
+                </div>
+              </td>{/* */}
             </tr>
 
             {/* Row 2: Objective + Output | Dates + Legend */}
-            <tr>
+            <tr>{/* */}
               <td
                 colSpan={4}
                 className="border border-gray-300 px-3 py-2 text-xs"
@@ -446,14 +662,15 @@ export function OPPMView() {
                   </div>
                   <div className="flex items-start gap-1 flex-wrap">
                     <span className="font-semibold text-gray-500 shrink-0">Deliverable Output:</span>
-                    <EditableField
+                    <InlineEdit
                       value={meta.deliverable_output}
                       onSave={(v) => updateMeta.mutate({ deliverable_output: v })}
                       placeholder="Click to add deliverable output…"
+                      className="text-xs text-gray-700"
                     />
                   </div>
                 </div>
-              </td>
+              </td>{/* */}
 
               <td
                 colSpan={VISIBLE_WEEKS}
@@ -475,24 +692,18 @@ export function OPPMView() {
                 </div>
                 {/* Legend */}
                 <div className="flex items-center gap-4 flex-wrap">
-                  {[
-                    { label: 'Completed', color: 'bg-emerald-500' },
-                    { label: 'In Progress', color: 'bg-blue-500' },
-                    { label: 'At Risk',     color: 'bg-amber-400' },
-                    { label: 'Blocked',     color: 'bg-red-500'   },
-                    { label: 'Planned',     color: 'bg-gray-300'  },
-                  ].map(({ label, color }) => (
-                    <span key={label} className="flex items-center gap-1 text-[10px] text-gray-500">
-                      <span className={cn('h-2 w-2 rounded-full shrink-0', color)} />
-                      {label}
+                  {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+                    <span key={key} className="flex items-center gap-1 text-[10px] text-gray-500">
+                      <span className={cn('h-2 w-2 rounded-full shrink-0', cfg.bg)} />
+                      {cfg.label}
                     </span>
                   ))}
                 </div>
-              </td>
+              </td>{/* */}
             </tr>
 
             {/* Row 3: Column headers */}
-            <tr className="bg-gray-100">
+            <tr className="bg-gray-100">{/* */}
               <th className="border border-gray-300 px-1 py-2 text-center text-[9px] font-bold text-gray-600 uppercase tracking-wide">
                 Sub<br />Obj
               </th>
@@ -508,173 +719,288 @@ export function OPPMView() {
                   className={cn(
                     'border border-gray-300 px-1 py-2 text-center text-[9px] font-bold uppercase tracking-wide',
                     i === currentWeekIdx
-                      ? 'bg-primary/15 text-primary'
+                      ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-500'
                   )}
                 >
                   <div className="font-black">W{week.weekNum}</div>
                   <div className="font-normal text-[8px] text-gray-400 mt-0.5">{week.label}</div>
                 </th>
-              ))}
+              ))}{/* */}
               <th className="border border-gray-300 px-1 py-2 text-center text-[9px] font-bold text-gray-600 uppercase tracking-wide">
                 Owner /<br />Priority
-              </th>
+              </th>{/* */}
             </tr>
           </thead>
 
-          {/* ──────────────────────────────────────────────────────
-              BODY — Main OPPM Grid + Bottom Section
-          ────────────────────────────────────────────────────── */}
-          <tbody>
+          {/* ──────────────────────────────────────────────────
+              BODY — Objective rows + Bottom Section
+          ────────────────────────────────────────────────── */}
+          <tbody>{/* */}
 
             {/* ── Empty state ── */}
-            {objs.length === 0 && (
-              <tr>
+            {objs.length === 0 && !newObjTitle && (
+              <tr>{/* */}
                 <td
                   colSpan={TOTAL_COLS}
                   className="border border-gray-200 py-14 text-center text-sm text-gray-400 italic"
                 >
-                  No objectives or tasks yet. Open the project detail page to add OPPM objectives and tasks.
-                </td>
+                  No objectives yet. Click "+ Add objective" below to start building your OPPM.
+                </td>{/* */}
               </tr>
             )}
 
-            {/* ── Objectives + Tasks rows ── */}
+            {/* ── Objective rows ── */}
             {objs.map((obj, objIdx) => {
-              const taskCount = obj.tasks.length
-              // Sub Obj cell spans: 1 (obj row) + taskCount (task rows); min 1
-              const subObjSpan = 1 + Math.max(taskCount, 1)
-
+              const objProgress = calcProgress(obj.id)
               return (
-                <React.Fragment key={obj.id}>
-
-                  {/* Objective header row */}
-                  <tr className="bg-slate-50/80">
-                    {/* Sub Obj # — spans across all task rows below */}
-                    <td
-                      rowSpan={subObjSpan}
-                      className="border border-gray-300 text-center font-black text-xl text-primary align-middle"
-                      style={{ backgroundColor: 'rgba(26,86,219,0.06)' }}
-                    >
-                      {objIdx + 1}
-                    </td>
-
-                    {/* Objective title spans Major Tasks + % cols */}
-                    <td
-                      colSpan={2}
-                      className="border border-gray-300 px-3 py-1.5 font-semibold text-sm text-gray-800"
-                    >
-                      <span className="text-primary font-black mr-1.5">{objIdx + 1}.</span>
-                      {obj.title}
-                    </td>
-
-                    {/* Week aggregate dots for this objective */}
-                    {weeks.map((week, wi) => {
-                      const statuses = obj.tasks
-                        .map((t) => getTaskWeekStatus(t, week.start, week.end))
-                        .filter(Boolean)
-                      const worst = getWorstStatus(statuses)
-                      return (
-                        <td
-                          key={wi}
-                          className={cn(
-                            'border border-gray-300 text-center p-1 bg-slate-50/80',
-                            wi === currentWeekIdx && 'bg-primary/8'
-                          )}
-                        >
-                          {worst && <StatusDot status={worst} />}
-                        </td>
-                      )
-                    })}
-
-                    {/* Owner — placeholder for objective row */}
-                    <td className="border border-gray-300 p-1 text-center text-gray-300 text-xs bg-slate-50/80">
-                      —
-                    </td>
-                  </tr>
-
-                  {/* Task rows (or empty row if no tasks) */}
-                  {taskCount === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={TOTAL_COLS - 1}
-                        className="border border-gray-300 px-3 py-1.5 text-xs text-gray-400 italic"
-                      >
-                        No tasks assigned to this objective
-                      </td>
-                    </tr>
-                  ) : (
-                    obj.tasks.map((task, taskIdx) => (
-                      <tr
-                        key={task.id}
-                        className="hover:bg-amber-50/20 transition-colors"
-                      >
-                        {/* Sub Obj col covered by rowSpan above */}
-
-                        {/* Task name + due date */}
-                        <td className="border border-gray-300 px-3 py-1.5 text-sm">
-                          <span className="text-primary font-semibold text-[11px] mr-1.5">
-                            {objIdx + 1}.{taskIdx + 1}
-                          </span>
-                          <span className="text-gray-700">{task.title}</span>
-                          {task.due_date && (
-                            <span className="text-[10px] text-gray-400 ml-1.5">
-                              ({formatDate(task.due_date)})
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Progress % */}
-                        <td className="border border-gray-300 text-center p-1">
-                          <span
-                            className={cn(
-                              'text-[11px] font-bold',
-                              task.progress >= 80 ? 'text-emerald-600' :
-                              task.progress >= 50 ? 'text-blue-600'    :
-                              task.progress >= 25 ? 'text-amber-600'   :
-                                                    'text-gray-400'
-                            )}
-                          >
-                            {task.progress > 0 ? `${task.progress}%` : '—'}
-                          </span>
-                        </td>
-
-                        {/* Week status dots */}
-                        {weeks.map((week, wi) => {
-                          const s = getTaskWeekStatus(task, week.start, week.end)
-                          return (
-                            <td
-                              key={wi}
-                              className={cn(
-                                'border border-gray-300 text-center p-1',
-                                wi === currentWeekIdx && 'bg-primary/5'
-                              )}
-                            >
-                              {s && <StatusDot status={s} />}
-                            </td>
-                          )
-                        })}
-
-                        {/* Owner / Priority */}
-                        <td className="border border-gray-300 p-1 text-center">
-                          <PriorityBadge priority={task.priority} />
-                        </td>
-                      </tr>
-                    ))
+                <tr
+                  key={obj.id}
+                  className={cn(
+                    'group',
+                    objIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'
                   )}
-                </React.Fragment>
+                >
+                  {/* Sub Obj # */}
+                  <td className="border border-gray-300 text-center align-middle">
+                    <span className="text-xs font-bold text-gray-400">
+                      {objIdx + 1}
+                    </span>
+                  </td>
+
+                  {/* Objective title — inline editable */}
+                  <td className="border border-gray-300 px-3 py-2 align-middle">
+                    <div className="flex items-center gap-1">
+                      <InlineEdit
+                        value={obj.title}
+                        onSave={(v) =>
+                          updateObjective.mutate({ objId: obj.id, data: { title: v } })
+                        }
+                        className="text-sm font-medium text-gray-800 flex-1"
+                      />
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete objective "${obj.title}"?`)) {
+                            deleteObjective.mutate(obj.id)
+                          }
+                        }}
+                        className="text-transparent group-hover:text-gray-400 hover:!text-red-500 transition-colors"
+                        title="Delete objective"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </td>
+
+                  {/* Progress % */}
+                  <td className="border border-gray-300 text-center align-middle p-1">
+                    <span
+                      className={cn(
+                        'text-[11px] font-bold',
+                        objProgress >= 80 ? 'text-emerald-600' :
+                        objProgress >= 50 ? 'text-blue-600' :
+                        objProgress > 0   ? 'text-amber-600' :
+                                            'text-gray-400'
+                      )}
+                    >
+                      {objProgress > 0 ? `${objProgress}%` : '—'}
+                    </span>
+                  </td>
+
+                  {/* Week status dots — CLICKABLE */}
+                  {weeks.map((week, wi) => {
+                    const status = timelineMap[obj.id]?.[week.isoDate]
+                    return (
+                      <td
+                        key={wi}
+                        className={cn(
+                          'border border-gray-300 text-center p-1 align-middle',
+                          wi === currentWeekIdx && 'bg-blue-50/60'
+                        )}
+                      >
+                        <StatusDot
+                          status={status}
+                          onClick={() => handleDotClickFull(obj.id, week.isoDate)}
+                        />
+                      </td>
+                    )
+                  })}
+
+                  {/* Owner — inline editable */}
+                  <td className="border border-gray-300 px-1 py-1 text-center align-middle">
+                    <InlineEdit
+                      value={obj.owner?.display_name || obj.owner?.email || ''}
+                      onSave={(v) =>
+                        updateObjective.mutate({ objId: obj.id, data: { owner_id: v } })
+                      }
+                      placeholder="—"
+                      className="text-[10px] text-gray-600"
+                    />
+                  </td>
+                </tr>
               )
             })}
 
-            {/* ══════════════════════════════════════════════════════
-                BOTTOM SECTION — Summary Deliverables / Forecast / Risk
-                Columns: VerticalLabel(1) | Items(colSpan=2) | TeamPanel(colSpan=WEEKS+1, rowSpan=3)
-            ══════════════════════════════════════════════════════ */}
+            {/* ── Add objective row ── */}
+            <tr>{/* */}
+              <td className="border border-gray-300 text-center align-middle p-1">
+                <Plus className="h-3 w-3 text-gray-400 mx-auto" />
+              </td>
+              <td colSpan={TOTAL_COLS - 1} className="border border-gray-300 px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={newObjTitle}
+                    onChange={(e) => setNewObjTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newObjTitle.trim()) {
+                        createObjective.mutate(newObjTitle.trim())
+                      }
+                    }}
+                    placeholder="+ Add objective (press Enter)"
+                    className="flex-1 text-sm text-gray-700 bg-transparent outline-none placeholder:text-gray-400 placeholder:italic"
+                  />
+                  {newObjTitle.trim() && (
+                    <button
+                      onClick={() => createObjective.mutate(newObjTitle.trim())}
+                      disabled={createObjective.isPending}
+                      className="text-xs bg-blue-600 text-white rounded px-3 py-1 font-medium hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {createObjective.isPending ? 'Adding…' : 'Add'}
+                    </button>
+                  )}
+                </div>
+              </td>{/* */}
+            </tr>
+
+            {/* ══════════════════════════════════════════════════
+                COST SECTION
+            ══════════════════════════════════════════════════ */}
+            {(costs.length > 0 || showAddCost) && (
+              <>
+                <tr>{/* */}
+                  <td
+                    colSpan={TOTAL_COLS}
+                    className="border border-gray-300 px-3 py-2 bg-gray-100"
+                  >
+                    <span className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">
+                      Cost / Other Metrics
+                    </span>
+                  </td>{/* */}
+                </tr>
+                <tr>{/* */}
+                  <td colSpan={TOTAL_COLS} className="border border-gray-300 p-0">
+                    <table className="w-full text-xs border-collapse">
+                      <thead>{/* */}
+                        <tr className="bg-gray-50">{/* */}
+                          <th className="border-b border-gray-200 px-2 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase w-1/4">Category</th>
+                          <th className="border-b border-gray-200 px-2 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase w-1/5">Planned</th>
+                          <th className="border-b border-gray-200 px-2 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase w-1/5">Actual</th>
+                          <th className="border-b border-gray-200 px-2 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase">Notes</th>
+                          <th className="border-b border-gray-200 px-1 py-1.5 w-8"></th>{/* */}
+                        </tr>
+                      </thead>
+                      <tbody>{/* */}
+                        {costs.map((cost) => (
+                          <CostRow
+                            key={cost.id}
+                            cost={cost}
+                            onUpdate={(data) => updateCostMut.mutate({ costId: cost.id, data })}
+                            onDelete={() => {
+                              if (confirm(`Delete cost "${cost.category}"?`)) {
+                                deleteCostMut.mutate(cost.id)
+                              }
+                            }}
+                          />
+                        ))}
+                        {/* Totals row */}
+                        {costs.length > 0 && (
+                          <tr className="bg-gray-50 font-semibold">{/* */}
+                            <td className="border-t border-gray-300 px-2 py-1.5 text-xs text-gray-600">Total</td>
+                            <td className="border-t border-gray-300 px-2 py-1.5 text-xs text-right text-gray-600">
+                              {(costData?.total_planned ?? 0).toLocaleString()}
+                            </td>
+                            <td className="border-t border-gray-300 px-2 py-1.5 text-xs text-right text-gray-600">
+                              {(costData?.total_actual ?? 0).toLocaleString()}
+                            </td>
+                            <td className="border-t border-gray-300" colSpan={2}></td>{/* */}
+                          </tr>
+                        )}
+                        {/* Add cost form */}
+                        {showAddCost && (
+                          <tr>{/* */}
+                            <td className="px-2 py-1.5">
+                              <input
+                                value={newCost.category}
+                                onChange={(e) => setNewCost((c) => ({ ...c, category: e.target.value }))}
+                                placeholder="Category"
+                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none"
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="number"
+                                value={newCost.planned_amount || ''}
+                                onChange={(e) => setNewCost((c) => ({ ...c, planned_amount: parseFloat(e.target.value) || 0 }))}
+                                placeholder="0"
+                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="number"
+                                value={newCost.actual_amount || ''}
+                                onChange={(e) => setNewCost((c) => ({ ...c, actual_amount: parseFloat(e.target.value) || 0 }))}
+                                placeholder="0"
+                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                value={newCost.notes}
+                                onChange={(e) => setNewCost((c) => ({ ...c, notes: e.target.value }))}
+                                placeholder="Notes"
+                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none"
+                              />
+                            </td>
+                            <td className="px-1 py-1.5 text-center">
+                              <button
+                                onClick={() => {
+                                  if (newCost.category.trim()) createCostMut.mutate(newCost)
+                                }}
+                                className="text-emerald-600 hover:text-emerald-700"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                            </td>{/* */}
+                          </tr>
+                        )}{/* */}
+                      </tbody>
+                    </table>
+                  </td>{/* */}
+                </tr>
+              </>
+            )}
+
+            {/* Add cost button */}
+            <tr>{/* */}
+              <td colSpan={TOTAL_COLS} className="border border-gray-300 px-3 py-1.5">
+                <button
+                  onClick={() => setShowAddCost((v) => !v)}
+                  className="text-xs text-gray-500 hover:text-blue-600 flex items-center gap-1"
+                >
+                  <Plus className="h-3 w-3" />
+                  {showAddCost ? 'Cancel' : 'Add cost item'}
+                </button>
+              </td>{/* */}
+            </tr>
+
+            {/* ══════════════════════════════════════════════════
+                BOTTOM SECTION — Deliverables / Forecast / Risk / Team / Legend
+            ══════════════════════════════════════════════════ */}
 
             {/* Summary Deliverables row */}
-            <tr>
+            <tr>{/* */}
               <VerticalLabel>Summary Deliverables</VerticalLabel>
-
               <td
                 colSpan={2}
                 className="border border-gray-300 px-3 py-2 align-top"
@@ -685,14 +1011,13 @@ export function OPPMView() {
                 />
               </td>
 
-              {/* Team panel — spans all week + owner cols, rowSpan=3 covers all 3 bottom rows */}
+              {/* Team panel — spans all week + owner cols, rowSpan=3 */}
               <td
                 colSpan={VISIBLE_WEEKS + 1}
                 rowSpan={3}
                 className="border border-gray-300 px-4 py-3 align-top bg-gray-50/40"
               >
                 <div className="grid grid-cols-2 gap-6 h-full">
-
                   {/* Team members */}
                   <div>
                     <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-2">
@@ -718,27 +1043,20 @@ export function OPPMView() {
                       Status Legend
                     </div>
                     <div className="space-y-2">
-                      {[
-                        { label: 'Completed',   color: 'bg-emerald-500' },
-                        { label: 'In Progress', color: 'bg-blue-500'    },
-                        { label: 'At Risk',     color: 'bg-amber-400'   },
-                        { label: 'Blocked',     color: 'bg-red-500'     },
-                        { label: 'Planned',     color: 'bg-gray-300'    },
-                      ].map(({ label, color }) => (
-                        <div key={label} className="flex items-center gap-2">
-                          <span className={cn('h-3 w-8 rounded', color)} />
-                          <span className="text-[10px] text-gray-600">{label}</span>
+                      {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+                        <div key={key} className="flex items-center gap-2">
+                          <span className={cn('h-3 w-8 rounded', cfg.bg)} />
+                          <span className="text-[10px] text-gray-600">{cfg.label}</span>
                         </div>
                       ))}
                     </div>
                   </div>
-
                 </div>
-              </td>
+              </td>{/* */}
             </tr>
 
             {/* Forecast row */}
-            <tr>
+            <tr>{/* */}
               <VerticalLabel>Forecast</VerticalLabel>
               <td
                 colSpan={2}
@@ -748,12 +1066,11 @@ export function OPPMView() {
                   items={meta.forecast}
                   onSave={(v) => updateMeta.mutate({ forecast: v })}
                 />
-              </td>
-              {/* Team panel covered by rowSpan=3 above */}
+              </td>{/* */}
             </tr>
 
             {/* Risk row */}
-            <tr>
+            <tr>{/* */}
               <VerticalLabel>Risk</VerticalLabel>
               <td
                 colSpan={2}
@@ -763,13 +1080,15 @@ export function OPPMView() {
                   items={meta.risks}
                   onSave={(v) => updateMeta.mutate({ risks: v })}
                 />
-              </td>
-              {/* Team panel covered by rowSpan=3 above */}
-            </tr>
+              </td>{/* */}
+            </tr>{/* */}
 
           </tbody>
         </table>
       </div>
+
+      {/* AI Chat Panel */}
+      <ChatPanel projectId={id!} open={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   )
 }
