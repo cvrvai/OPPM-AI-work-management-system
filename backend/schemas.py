@@ -42,6 +42,7 @@ class ProjectUpdate(BaseModel):
     progress: Optional[int] = Field(None, ge=0, le=100)
     start_date: Optional[str] = None
     deadline: Optional[str] = None
+    metadata: Optional[dict] = None
 
 
 class TaskCreate(BaseModel):

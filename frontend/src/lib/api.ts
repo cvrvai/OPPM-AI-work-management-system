@@ -1,9 +1,9 @@
-import { supabase } from './supabase'
+import { useAuthStore } from '@/stores/authStore'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  const { data: { session } } = await supabase.auth.getSession()
+function getAuthHeaders(): Record<string, string> {
+  const { session } = useAuthStore.getState()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
@@ -14,7 +14,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers = await getAuthHeaders()
+  const headers = getAuthHeaders()
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: { ...headers, ...options.headers },

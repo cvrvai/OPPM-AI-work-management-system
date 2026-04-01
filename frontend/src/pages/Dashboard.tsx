@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { DashboardStats, CommitAnalysis } from '@/types'
 import { Link } from 'react-router-dom'
 import {
@@ -10,6 +11,7 @@ import {
   ArrowRight,
   Shield,
   Target,
+  Loader2,
 } from 'lucide-react'
 import { cn, getProgressColor } from '@/lib/utils'
 import {
@@ -22,56 +24,14 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 
-// Placeholder data for demo
-const DEMO_STATS: DashboardStats = {
-  total_projects: 3,
-  active_projects: 2,
-  total_tasks: 18,
-  completed_tasks: 7,
-  total_commits_today: 5,
-  avg_quality_score: 82,
-  avg_alignment_score: 76,
-}
-
-const DEMO_CHART = [
-  { day: 'Mon', commits: 4, quality: 78 },
-  { day: 'Tue', commits: 7, quality: 82 },
-  { day: 'Wed', commits: 3, quality: 85 },
-  { day: 'Thu', commits: 9, quality: 79 },
-  { day: 'Fri', commits: 6, quality: 88 },
-  { day: 'Sat', commits: 2, quality: 90 },
-  { day: 'Sun', commits: 5, quality: 84 },
-]
-
-const DEMO_RECENT: CommitAnalysis[] = [
-  {
-    id: '1',
-    commit_event_id: '1',
-    ai_model: 'kimi-k2.5',
-    task_alignment_score: 92,
-    code_quality_score: 88,
-    progress_delta: 12,
-    summary: 'Implemented OPPM grid component with timeline rendering',
-    quality_flags: ['well-structured'],
-    suggestions: [],
-    matched_task_id: 't1',
-    matched_objective_id: 'o1',
-    analyzed_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    commit_event_id: '2',
-    ai_model: 'ollama/codellama',
-    task_alignment_score: 67,
-    code_quality_score: 74,
-    progress_delta: 5,
-    summary: 'Fixed sidebar navigation active state and routing',
-    quality_flags: ['minor-issues'],
-    suggestions: ['Consider extracting nav config to constants'],
-    matched_task_id: 't2',
-    matched_objective_id: 'o2',
-    analyzed_at: new Date(Date.now() - 3600000).toISOString(),
-  },
+const EMPTY_CHART = [
+  { day: 'Mon', commits: 0, quality: 0 },
+  { day: 'Tue', commits: 0, quality: 0 },
+  { day: 'Wed', commits: 0, quality: 0 },
+  { day: 'Thu', commits: 0, quality: 0 },
+  { day: 'Fri', commits: 0, quality: 0 },
+  { day: 'Sat', commits: 0, quality: 0 },
+  { day: 'Sun', commits: 0, quality: 0 },
 ]
 
 function StatCard({
@@ -104,13 +64,21 @@ function StatCard({
 }
 
 export function Dashboard() {
-  const { data: stats } = useQuery({
-    queryKey: ['dashboard-stats'],
-    queryFn: () => api.get<DashboardStats>('/dashboard/stats'),
-    placeholderData: DEMO_STATS,
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
+
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ['dashboard-stats', ws?.id],
+    queryFn: () => ws ? api.get<DashboardStats>(`${wsPath}/dashboard/stats`) : api.get<DashboardStats>('/dashboard/stats'),
   })
 
-  const s = stats || DEMO_STATS
+  const { data: recentAnalyses } = useQuery({
+    queryKey: ['recent-analyses', ws?.id],
+    queryFn: () => ws ? api.get<CommitAnalysis[]>(`${wsPath}/git/recent-analyses`) : api.get<CommitAnalysis[]>('/dashboard/recent-analyses'),
+  })
+
+  const s = stats || { total_projects: 0, active_projects: 0, total_tasks: 0, completed_tasks: 0, total_commits_today: 0, avg_quality_score: 0, avg_alignment_score: 0 }
+  const analyses = recentAnalyses || []
 
   return (
     <div className="space-y-6">
@@ -131,7 +99,12 @@ export function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Active Projects"
           value={s.active_projects}
@@ -160,6 +133,7 @@ export function Dashboard() {
           color="bg-amber-500"
         />
       </div>
+      )}
 
       {/* Charts + Recent Activity */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -168,7 +142,7 @@ export function Dashboard() {
           <h2 className="text-base font-semibold text-text mb-4">Weekly Activity</h2>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={DEMO_CHART}>
+              <AreaChart data={EMPTY_CHART}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="day" tick={{ fontSize: 12 }} stroke="#94a3b8" />
                 <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" />
@@ -203,35 +177,41 @@ export function Dashboard() {
             </Link>
           </div>
           <div className="space-y-3">
-            {DEMO_RECENT.map((analysis) => (
-              <div
-                key={analysis.id}
-                className="rounded-lg border border-border p-3 space-y-2"
-              >
-                <p className="text-sm font-medium text-text line-clamp-2">
-                  {analysis.summary}
-                </p>
-                <div className="flex items-center gap-3 text-xs text-text-secondary">
-                  <span className="flex items-center gap-1">
-                    <Target className="h-3 w-3" />
-                    <span className={getProgressColor(analysis.task_alignment_score)}>
-                      {analysis.task_alignment_score}%
+            {analyses.length === 0 ? (
+              <p className="text-sm text-text-secondary text-center py-8">
+                No AI analyses yet. Push commits to a linked repo to get started.
+              </p>
+            ) : (
+              analyses.map((analysis) => (
+                <div
+                  key={analysis.id}
+                  className="rounded-lg border border-border p-3 space-y-2"
+                >
+                  <p className="text-sm font-medium text-text line-clamp-2">
+                    {analysis.summary}
+                  </p>
+                  <div className="flex items-center gap-3 text-xs text-text-secondary">
+                    <span className="flex items-center gap-1">
+                      <Target className="h-3 w-3" />
+                      <span className={getProgressColor(analysis.task_alignment_score)}>
+                        {analysis.task_alignment_score}%
+                      </span>
                     </span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Shield className="h-3 w-3" />
-                    <span className={getProgressColor(analysis.code_quality_score)}>
-                      {analysis.code_quality_score}%
+                    <span className="flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      <span className={getProgressColor(analysis.code_quality_score)}>
+                        {analysis.code_quality_score}%
+                      </span>
                     </span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <TrendingUp className="h-3 w-3" />
-                    +{analysis.progress_delta}%
-                  </span>
+                    <span className="flex items-center gap-1">
+                      <TrendingUp className="h-3 w-3" />
+                      +{analysis.progress_delta}%
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-text-secondary/60">{analysis.ai_model}</p>
                 </div>
-                <p className="text-[10px] text-text-secondary/60">{analysis.ai_model}</p>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

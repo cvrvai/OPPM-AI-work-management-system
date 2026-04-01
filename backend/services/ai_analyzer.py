@@ -3,14 +3,14 @@ AI Commit Analyzer — Multi-model analysis service.
 
 Supports: Ollama (local), Kimi K2.5, Claude (Anthropic), OpenAI
 Analyzes each commit against project tasks and OPPM objectives.
+Uses the infrastructure LLM adapter layer for provider abstraction.
 """
 
-import json
-import httpx
+import logging
 from database import get_db
-from config import get_settings
+from infrastructure.llm import get_adapter
 
-settings = get_settings()
+logger = logging.getLogger(__name__)
 
 ANALYSIS_PROMPT = """You are an AI code reviewer for a project management system (OPPM — One Page Project Manager).
 
@@ -57,6 +57,14 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
 
     model = models.data[0]
 
+    # Get LLM adapter for this provider
+    try:
+        adapter_cls = get_adapter(model["provider"])
+        adapter = adapter_cls()
+    except ValueError:
+        logger.warning("Unknown AI provider: %s", model["provider"])
+        return
+
     # Get project tasks for context
     tasks = (
         db.table("tasks")
@@ -79,7 +87,11 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
         )
 
         try:
-            result = await call_ai_model(model, prompt)
+            result = await adapter.call_json(
+                model["model_id"],
+                prompt,
+                endpoint_url=model.get("endpoint_url"),
+            )
             if result:
                 analysis_data = {
                     "commit_event_id": commit["id"],
@@ -95,6 +107,18 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
                 }
                 db.table("commit_analyses").insert(analysis_data).execute()
 
+                # Create notification for the analysis
+                db.table("notifications").insert({
+                    "type": "ai_analysis",
+                    "title": f"AI analyzed commit {commit.get('commit_hash', '')[:7]}",
+                    "message": result.get("summary", ""),
+                    "link": "/commits",
+                    "metadata": {
+                        "quality_score": result.get("code_quality_score", 0),
+                        "alignment_score": result.get("task_alignment_score", 0),
+                    },
+                }).execute()
+
                 # Auto-update task progress if matched
                 matched_task = result.get("matched_task_id")
                 progress_delta = result.get("progress_delta", 0)
@@ -103,7 +127,7 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
                         db.table("tasks")
                         .select("progress")
                         .eq("id", matched_task)
-                        .single()
+                        .maybe_single()
                         .execute()
                     )
                     if task.data:
@@ -113,95 +137,4 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
                         ).eq("id", matched_task).execute()
 
         except Exception as e:
-            print(f"AI analysis failed for commit {commit.get('id')}: {e}")
-
-
-async def call_ai_model(model: dict, prompt: str) -> dict | None:
-    """Route to the correct AI provider and return parsed JSON."""
-    provider = model["provider"]
-
-    if provider == "ollama":
-        return await call_ollama(model, prompt)
-    elif provider == "kimi":
-        return await call_kimi(model, prompt)
-    elif provider == "anthropic":
-        return await call_anthropic(model, prompt)
-    elif provider == "openai":
-        return await call_openai(model, prompt)
-    else:
-        print(f"Unknown provider: {provider}")
-        return None
-
-
-async def call_ollama(model: dict, prompt: str) -> dict | None:
-    url = model.get("endpoint_url") or settings.ollama_url
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{url}/api/chat",
-            json={
-                "model": model["model_id"],
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "format": "json",
-            },
-        )
-        resp.raise_for_status()
-        text = resp.json().get("message", {}).get("content", "")
-        return json.loads(text)
-
-
-async def call_kimi(model: dict, prompt: str) -> dict | None:
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            "https://api.moonshot.cn/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.kimi_api_key}"},
-            json={
-                "model": model["model_id"],
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"]
-        return json.loads(text)
-
-
-async def call_anthropic(model: dict, prompt: str) -> dict | None:
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": settings.anthropic_api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": model["model_id"],
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-        )
-        resp.raise_for_status()
-        text = resp.json()["content"][0]["text"]
-        # Extract JSON from response
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end])
-        return None
-
-
-async def call_openai(model: dict, prompt: str) -> dict | None:
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-            json={
-                "model": model["model_id"],
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"]
-        return json.loads(text)
+            logger.error("AI analysis failed for commit %s: %s", commit.get("id"), e)

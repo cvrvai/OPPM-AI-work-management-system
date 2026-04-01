@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
+import { WorkspaceSelector } from '@/components/workspace/WorkspaceSelector'
 import {
   LayoutDashboard,
   FolderKanban,
@@ -7,6 +8,7 @@ import {
   Settings,
   LogOut,
   Target,
+  Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -37,6 +39,11 @@ export function Sidebar() {
           <h1 className="text-sm font-bold text-white tracking-tight">OPPM AI</h1>
           <p className="text-[10px] text-sidebar-text/60 leading-none">Work Management</p>
         </div>
+      </div>
+
+      {/* Workspace Selector */}
+      <div className="border-b border-white/10">
+        <WorkspaceSelector />
       </div>
 
       {/* Navigation */}

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { Project, ProjectStatus, Priority } from '@/types'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+import type { Project, Priority } from '@/types'
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
 import {
   Plus,
@@ -11,70 +12,37 @@ import {
   Calendar,
   ArrowRight,
   X,
+  Loader2,
 } from 'lucide-react'
-
-const DEMO_PROJECTS: Project[] = [
-  {
-    id: '1',
-    title: 'OPPM AI System',
-    description: 'AI-powered One Page Project Manager with GitHub integration',
-    status: 'in_progress',
-    priority: 'high',
-    progress: 35,
-    start_date: '2026-04-01',
-    deadline: '2026-05-24',
-    lead_id: null,
-    created_at: '2026-04-01T00:00:00Z',
-    updated_at: '2026-04-01T00:00:00Z',
-  },
-  {
-    id: '2',
-    title: 'Frontend Dashboard',
-    description: 'React + Vite + TypeScript dashboard with OPPM Gantt view',
-    status: 'in_progress',
-    priority: 'high',
-    progress: 20,
-    start_date: '2026-04-01',
-    deadline: '2026-05-15',
-    lead_id: null,
-    created_at: '2026-04-01T00:00:00Z',
-    updated_at: '2026-04-01T00:00:00Z',
-  },
-  {
-    id: '3',
-    title: 'AI Pipeline',
-    description: 'Multi-model commit analysis with GitHub MCP',
-    status: 'planning',
-    priority: 'medium',
-    progress: 0,
-    start_date: '2026-04-05',
-    deadline: '2026-05-20',
-    lead_id: null,
-    created_at: '2026-04-01T00:00:00Z',
-    updated_at: '2026-04-01T00:00:00Z',
-  },
-]
 
 export function Projects() {
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const queryClient = useQueryClient()
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
 
-  const { data: projects } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => api.get<Project[]>('/projects'),
-    placeholderData: DEMO_PROJECTS,
+  const { data: projects = [], isLoading } = useQuery<Project[]>({
+    queryKey: ['projects', ws?.id],
+    queryFn: async () => {
+      if (ws) {
+        const res = await api.get<{ data: Project[] }>(`${wsPath}/projects`)
+        return (res as any)?.data ?? res as unknown as Project[]
+      }
+      return api.get<Project[]>('/projects')
+    },
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: Partial<Project>) => api.post<Project>('/projects', data),
+    mutationFn: (data: Partial<Project>) =>
+      ws ? api.post<Project>(`${wsPath}/projects`, data) : api.post<Project>('/projects', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       setShowCreate(false)
     },
   })
 
-  const filtered = (projects || DEMO_PROJECTS).filter((p) =>
+  const filtered = (projects || []).filter((p: Project) =>
     p.title.toLowerCase().includes(search.toLowerCase())
   )
 
@@ -109,6 +77,18 @@ export function Projects() {
       </div>
 
       {/* Project Grid */}
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <FolderKanban className="h-12 w-12 text-text-secondary/30 mb-3" />
+          <p className="text-sm text-text-secondary">
+            {search ? 'No projects match your search' : 'No projects yet. Create your first project to get started.'}
+          </p>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filtered.map((project) => (
           <Link
@@ -174,6 +154,7 @@ export function Projects() {
           </Link>
         ))}
       </div>
+      )}
 
       {/* Create Modal */}
       {showCreate && (

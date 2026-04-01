@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { CommitEvent, CommitAnalysis } from '@/types'
-import { cn, formatRelativeTime, getProgressColor } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import {
   GitCommitHorizontal,
   Target,
@@ -10,61 +11,8 @@ import {
   FileCode,
   User,
   GitBranch,
+  Loader2,
 } from 'lucide-react'
-
-const DEMO_COMMITS: (CommitEvent & { analysis?: CommitAnalysis })[] = [
-  {
-    id: '1', repo_config_id: 'r1',
-    commit_hash: 'a3f8c2d', commit_message: 'feat: implement OPPM Gantt hybrid view with week navigation',
-    author_github_username: 'cvrvai', branch: 'main',
-    files_changed: ['src/pages/OPPMView.tsx', 'src/types/index.ts'],
-    additions: 285, deletions: 12, pushed_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    analysis: {
-      id: 'a1', commit_event_id: '1', ai_model: 'kimi-k2.5',
-      task_alignment_score: 95, code_quality_score: 88, progress_delta: 15,
-      summary: 'Implements the core OPPM Gantt matrix view with week-by-week dot status indicators. Well-structured component with clear separation of demo data and rendering logic.',
-      quality_flags: ['well-structured', 'good-types'],
-      suggestions: ['Consider memoizing week generation', 'Add error boundary'],
-      matched_task_id: 't2', matched_objective_id: 'o2',
-      analyzed_at: new Date().toISOString(),
-    },
-  },
-  {
-    id: '2', repo_config_id: 'r1',
-    commit_hash: 'b7e1a9f', commit_message: 'feat: add sidebar navigation and layout system',
-    author_github_username: 'cvrvai', branch: 'main',
-    files_changed: ['src/components/layout/Sidebar.tsx', 'src/components/layout/Layout.tsx', 'src/components/layout/Header.tsx'],
-    additions: 142, deletions: 0, pushed_at: new Date(Date.now() - 7200000).toISOString(),
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    analysis: {
-      id: 'a2', commit_event_id: '2', ai_model: 'ollama/codellama',
-      task_alignment_score: 78, code_quality_score: 82, progress_delta: 10,
-      summary: 'Sets up the main application layout with dark sidebar, sticky header, and outlet-based routing. Clean and standard approach.',
-      quality_flags: ['clean-code'],
-      suggestions: ['Add responsive mobile sidebar toggle'],
-      matched_task_id: 't1', matched_objective_id: 'o1',
-      analyzed_at: new Date(Date.now() - 7200000).toISOString(),
-    },
-  },
-  {
-    id: '3', repo_config_id: 'r1',
-    commit_hash: 'c4d2e8b', commit_message: 'fix: correct auth redirect flow and session handling',
-    author_github_username: 'cvrvai', branch: 'main',
-    files_changed: ['src/App.tsx', 'src/stores/authStore.ts'],
-    additions: 35, deletions: 18, pushed_at: new Date(Date.now() - 14400000).toISOString(),
-    created_at: new Date(Date.now() - 14400000).toISOString(),
-    analysis: {
-      id: 'a3', commit_event_id: '3', ai_model: 'kimi-k2.5',
-      task_alignment_score: 60, code_quality_score: 90, progress_delta: 3,
-      summary: 'Fixes authentication redirect loop. Session initialization now properly awaits before rendering protected routes.',
-      quality_flags: ['bug-fix', 'security-aware'],
-      suggestions: [],
-      matched_task_id: 't1b', matched_objective_id: 'o1',
-      analyzed_at: new Date(Date.now() - 14400000).toISOString(),
-    },
-  },
-]
 
 function ScoreBadge({
   value,
@@ -91,13 +39,17 @@ function ScoreBadge({
 }
 
 export function Commits() {
-  const { data: commits } = useQuery({
-    queryKey: ['commits'],
-    queryFn: () => api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>('/commits'),
-    placeholderData: DEMO_COMMITS,
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
+
+  const { data: commits, isLoading } = useQuery({
+    queryKey: ['commits', ws?.id],
+    queryFn: () => ws
+      ? api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>(`${wsPath}/commits`)
+      : api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>('/commits'),
   })
 
-  const list = commits || DEMO_COMMITS
+  const list = commits || []
 
   return (
     <div className="space-y-6">
@@ -110,6 +62,18 @@ export function Commits() {
       </div>
 
       {/* Commit List */}
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        </div>
+      ) : list.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <GitCommitHorizontal className="h-12 w-12 text-text-secondary/30 mb-3" />
+          <p className="text-sm text-text-secondary">
+            No commits yet. Push commits to a linked repository to see them here.
+          </p>
+        </div>
+      ) : (
       <div className="space-y-4">
         {list.map((commit) => (
           <div
@@ -215,6 +179,7 @@ export function Commits() {
           </div>
         ))}
       </div>
+      )}
     </div>
   )
 }

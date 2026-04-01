@@ -1,0 +1,10 @@
+# Re-export all schemas for backwards compatibility
+from schemas.common import *  # noqa: F401,F403
+from schemas.workspace import *  # noqa: F401,F403
+from schemas.project import *  # noqa: F401,F403
+from schemas.task import *  # noqa: F401,F403
+from schemas.oppm import *  # noqa: F401,F403
+from schemas.git import *  # noqa: F401,F403
+from schemas.ai import *  # noqa: F401,F403
+from schemas.notification import *  # noqa: F401,F403
+from schemas.dashboard import *  # noqa: F401,F403

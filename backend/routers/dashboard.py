@@ -51,3 +51,16 @@ async def get_dashboard_stats():
         "avg_quality_score": round(avg_quality),
         "avg_alignment_score": round(avg_alignment),
     }
+
+
+@router.get("/dashboard/recent-analyses")
+async def get_recent_analyses():
+    db = get_db()
+    result = (
+        db.table("commit_analyses")
+        .select("*")
+        .order("analyzed_at", desc=True)
+        .limit(5)
+        .execute()
+    )
+    return result.data or []

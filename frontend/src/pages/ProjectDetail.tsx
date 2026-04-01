@@ -1,51 +1,17 @@
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import type { Project, Task, CommitAnalysis } from '@/types'
-import { cn, getStatusColor, formatDate, formatRelativeTime, getProgressColor } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+import type { Project, Task } from '@/types'
+import { cn, getStatusColor, formatDate, getProgressColor } from '@/lib/utils'
 import {
   ArrowLeft,
   Target,
   CheckCircle2,
   Clock,
-  GitCommitHorizontal,
-  Shield,
-  TrendingUp,
   LayoutGrid,
+  Loader2,
 } from 'lucide-react'
-
-const DEMO_TASKS: Task[] = [
-  {
-    id: 't1', title: 'Set up project scaffolding', description: 'Vite + React + TS + Tailwind',
-    project_id: '1', status: 'completed', priority: 'high', progress: 100,
-    project_contribution: 15, due_date: '2026-04-05', created_by: null,
-    completed_at: '2026-04-02T10:00:00Z', created_at: '2026-04-01T00:00:00Z', updated_at: '2026-04-02T10:00:00Z',
-  },
-  {
-    id: 't2', title: 'Build OPPM Gantt hybrid view', description: 'Timeline + matrix view',
-    project_id: '1', status: 'in_progress', priority: 'high', progress: 40,
-    project_contribution: 25, due_date: '2026-04-15', created_by: null,
-    completed_at: null, created_at: '2026-04-01T00:00:00Z', updated_at: '2026-04-01T00:00:00Z',
-  },
-  {
-    id: 't3', title: 'Implement GitHub webhook handler', description: 'FastAPI webhook + HMAC validation',
-    project_id: '1', status: 'todo', priority: 'medium', progress: 0,
-    project_contribution: 20, due_date: '2026-04-20', created_by: null,
-    completed_at: null, created_at: '2026-04-01T00:00:00Z', updated_at: '2026-04-01T00:00:00Z',
-  },
-  {
-    id: 't4', title: 'AI commit analysis pipeline', description: 'Multi-model analysis service',
-    project_id: '1', status: 'todo', priority: 'high', progress: 0,
-    project_contribution: 25, due_date: '2026-04-25', created_by: null,
-    completed_at: null, created_at: '2026-04-01T00:00:00Z', updated_at: '2026-04-01T00:00:00Z',
-  },
-  {
-    id: 't5', title: 'Dashboard + reporting', description: 'Stats, charts, project overview',
-    project_id: '1', status: 'todo', priority: 'low', progress: 0,
-    project_contribution: 15, due_date: '2026-05-01', created_by: null,
-    completed_at: null, created_at: '2026-04-01T00:00:00Z', updated_at: '2026-04-01T00:00:00Z',
-  },
-]
 
 const statusIcons = {
   todo: Clock,
@@ -55,34 +21,30 @@ const statusIcons = {
 
 export function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
 
-  const { data: project } = useQuery({
-    queryKey: ['project', id],
-    queryFn: () => api.get<Project>(`/projects/${id}`),
-    placeholderData: {
-      id: id!,
-      title: 'OPPM AI System',
-      description: 'AI-powered One Page Project Manager with GitHub integration and multi-model commit analysis',
-      status: 'in_progress' as const,
-      priority: 'high' as const,
-      progress: 35,
-      start_date: '2026-04-01',
-      deadline: '2026-05-24',
-      lead_id: null,
-      created_at: '2026-04-01T00:00:00Z',
-      updated_at: '2026-04-01T00:00:00Z',
-    },
+  const { data: project, isLoading: loadingProject } = useQuery({
+    queryKey: ['project', id, ws?.id],
+    queryFn: () => ws ? api.get<Project>(`${wsPath}/projects/${id}`) : api.get<Project>(`/projects/${id}`),
   })
 
-  const { data: tasks } = useQuery({
-    queryKey: ['tasks', id],
-    queryFn: () => api.get<Task[]>(`/projects/${id}/tasks`),
-    placeholderData: DEMO_TASKS,
+  const { data: tasks, isLoading: loadingTasks } = useQuery({
+    queryKey: ['tasks', id, ws?.id],
+    queryFn: () => ws ? api.get<Task[]>(`${wsPath}/tasks?project_id=${id}`) : api.get<Task[]>(`/projects/${id}/tasks`),
   })
 
-  if (!project) return null
+  if (loadingProject) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!project) return <p className="text-sm text-text-secondary py-12 text-center">Project not found</p>
   const p = project
-  const taskList = tasks || DEMO_TASKS
+  const taskList = tasks || []
 
   const tasksByStatus = {
     todo: taskList.filter((t) => t.status === 'todo'),

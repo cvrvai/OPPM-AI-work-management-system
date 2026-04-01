@@ -1,9 +1,45 @@
+// ── Workspace ──
+export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'viewer'
+
+export interface Workspace {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  role?: WorkspaceRole
+}
+
+export interface WorkspaceMember {
+  id: string
+  workspace_id: string
+  user_id: string
+  role: WorkspaceRole
+  joined_at: string
+  email?: string
+  display_name?: string
+}
+
+export interface WorkspaceInvite {
+  id: string
+  workspace_id: string
+  email: string
+  role: WorkspaceRole
+  invited_by: string
+  token: string
+  expires_at: string
+  accepted_at: string | null
+}
+
 // ── Project ──
 export type ProjectStatus = 'planning' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled'
 export type Priority = 'low' | 'medium' | 'high' | 'critical'
 
 export interface Project {
   id: string
+  workspace_id: string
   title: string
   description: string
   status: ProjectStatus
@@ -11,10 +47,21 @@ export interface Project {
   progress: number
   start_date: string | null
   deadline: string | null
+  metadata?: Record<string, unknown>
   lead_id: string | null
-  lead?: Member
+  lead?: WorkspaceMember
   created_at: string
   updated_at: string
+}
+
+export interface ProjectMember {
+  id: string
+  project_id: string
+  workspace_member_id: string
+  role: string
+  joined_at: string
+  display_name?: string
+  email?: string
 }
 
 // ── Task ──
@@ -30,11 +77,11 @@ export interface Task {
   progress: number
   project_contribution: number
   due_date: string | null
+  assignee_id: string | null
   created_by: string | null
   completed_at: string | null
   created_at: string
   updated_at: string
-  assignees?: Member[]
   oppm_objective_id?: string | null
 }
 
@@ -44,7 +91,7 @@ export interface OPPMObjective {
   project_id: string
   title: string
   owner_id: string | null
-  owner?: Member
+  owner?: WorkspaceMember
   sort_order: number
   tasks: Task[]
 }
@@ -53,13 +100,22 @@ export interface OPPMTimelineEntry {
   id: string
   project_id: string
   objective_id: string
-  week_start: string
-  status: 'planned' | 'in_progress' | 'completed' | 'at_risk' | 'blocked'
-  ai_score: number | null
-  notes: string | null
+  year: number
+  month: number
+  status: 'none' | 'planned' | 'in_progress' | 'completed' | 'delayed'
 }
 
-// ── Member ──
+export interface OPPMCost {
+  id: string
+  project_id: string
+  category: string
+  planned_amount: number
+  actual_amount: number
+  notes: string
+  created_at: string
+}
+
+// ── Member (legacy compatibility) ──
 export interface Member {
   id: string
   name: string
@@ -133,4 +189,19 @@ export interface DashboardStats {
   total_commits_today: number
   avg_quality_score: number
   avg_alignment_score: number
+}
+
+// ── Notifications ──
+export type NotificationType = 'info' | 'success' | 'warning' | 'error' | 'ai_analysis' | 'commit' | 'task_update'
+
+export interface Notification {
+  id: string
+  user_id: string | null
+  type: NotificationType
+  title: string
+  message: string
+  is_read: boolean
+  link: string | null
+  metadata: Record<string, unknown>
+  created_at: string
 }
