@@ -30,6 +30,7 @@ def create_project(workspace_id: str, user_id: str, data: dict, member_id: str) 
     # Auto-add creator as project lead
     project_member_repo.add_member(project["id"], member_id, role="lead")
     audit_repo.log(workspace_id, user_id, "create", "project", project["id"], new_data=data)
+    asyncio.create_task(index_project(project, workspace_id))
     return project
 
 
@@ -39,12 +40,14 @@ def update_project(project_id: str, workspace_id: str, user_id: str, data: dict)
     if not result:
         raise HTTPException(status_code=404, detail="Project not found")
     audit_repo.log(workspace_id, user_id, "update", "project", project_id, new_data=data)
+    asyncio.create_task(index_project(result, workspace_id))
     return result
 
 
 def delete_project(project_id: str, workspace_id: str, user_id: str) -> bool:
     get_project(project_id, workspace_id)  # verify exists + workspace
     audit_repo.log(workspace_id, user_id, "delete", "project", project_id)
+    asyncio.create_task(remove_entity("project", project_id))
     return project_repo.delete(project_id)
 
 

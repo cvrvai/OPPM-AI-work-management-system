@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useChatContext } from '@/hooks/useChatContext'
 import type { Project, Task, Priority, TaskStatus } from '@/types'
 import { cn, getStatusColor, formatDate, getProgressColor } from '@/lib/utils'
 import {
@@ -51,6 +52,9 @@ export function ProjectDetail() {
     queryKey: ['project', id, ws?.id],
     queryFn: () => ws ? api.get<Project>(`${wsPath}/projects/${id}`) : api.get<Project>(`/projects/${id}`),
   })
+
+  // Set chat context to this project
+  useChatContext('project', id, project?.title)
 
   const { data: tasks, isLoading: loadingTasks } = useQuery({
     queryKey: ['tasks', id, ws?.id],

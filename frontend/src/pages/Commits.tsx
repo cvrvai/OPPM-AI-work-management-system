@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useChatContext } from '@/hooks/useChatContext'
 import type { CommitEvent, CommitAnalysis } from '@/types'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import {
@@ -41,6 +42,7 @@ function ScoreBadge({
 export function Commits() {
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
+  useChatContext('workspace')
 
   const { data: commits, isLoading } = useQuery({
     queryKey: ['commits', ws?.id],

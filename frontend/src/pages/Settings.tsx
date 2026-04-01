@@ -24,10 +24,12 @@ import {
   Clock,
 } from 'lucide-react'
 import { cn, getInitials } from '@/lib/utils'
+import { useChatContext } from '@/hooks/useChatContext'
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<'profile' | 'members' | 'github' | 'ai'>('profile')
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  useChatContext('workspace')
 
   return (
     <div className="space-y-6">
@@ -783,6 +785,8 @@ function AIModelSettings() {
   const [provider, setProvider] = useState('ollama')
   const [modelId, setModelId] = useState('')
   const [endpointUrl, setEndpointUrl] = useState('')
+  const [reindexStatus, setReindexStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [reindexResult, setReindexResult] = useState<number | null>(null)
 
   const { data: models, isLoading } = useQuery({
     queryKey: ['ai-models', ws?.id],
@@ -813,6 +817,22 @@ function AIModelSettings() {
   })
 
   const list = models || []
+
+  const { data: capabilities } = useQuery({
+    queryKey: ['ai-capabilities', ws?.id],
+    queryFn: () => api.get<{ has_project: boolean; can_execute_tools: boolean; indexed_documents: number }>(`${wsPath}/ai/chat/capabilities`),
+    enabled: !!ws,
+  })
+
+  const reindexMutation = useMutation({
+    mutationFn: () => api.post<{ total_indexed: number }>(`${wsPath}/ai/reindex`, {}),
+    onSuccess: (data) => {
+      setReindexStatus('done')
+      setReindexResult(data.total_indexed)
+      queryClient.invalidateQueries({ queryKey: ['ai-capabilities'] })
+    },
+    onError: () => setReindexStatus('error'),
+  })
 
   const providerIcons: Record<string, string> = {
     ollama: '🦙',
@@ -957,6 +977,46 @@ function AIModelSettings() {
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* RAG / Knowledge Base Section */}
+      <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
+        <h2 className="text-base font-semibold text-text mb-1">AI Knowledge Base (RAG)</h2>
+        <p className="text-xs text-text-secondary mb-4">
+          The AI assistant uses vector embeddings of your workspace data to provide accurate answers.
+          Re-index if data appears stale or after bulk imports.
+        </p>
+
+        <div className="flex items-center justify-between rounded-lg border border-border bg-surface-alt p-4">
+          <div>
+            <p className="text-sm font-medium text-text">Indexed Documents</p>
+            <p className="text-2xl font-bold text-primary mt-0.5">
+              {capabilities?.indexed_documents ?? '—'}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setReindexStatus('running')
+              reindexMutation.mutate()
+            }}
+            disabled={reindexStatus === 'running'}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50 flex items-center gap-2"
+          >
+            {reindexStatus === 'running' && <Loader2 className="h-4 w-4 animate-spin" />}
+            {reindexStatus === 'running' ? 'Re-indexing…' : 'Re-index All Data'}
+          </button>
+        </div>
+
+        {reindexStatus === 'done' && reindexResult !== null && (
+          <p className="mt-3 text-sm text-emerald-600 font-medium">
+            Re-indexing complete — {reindexResult} documents indexed.
+          </p>
+        )}
+        {reindexStatus === 'error' && (
+          <p className="mt-3 text-sm text-red-600 font-medium">
+            Re-indexing failed. Please try again or check server logs.
+          </p>
         )}
       </div>
     </div>

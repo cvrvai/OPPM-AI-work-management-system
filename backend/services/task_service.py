@@ -54,6 +54,7 @@ def create_task(data: dict, workspace_id: str, user_id: str) -> dict:
     task = task_repo.create(data)
     _recalculate_project_progress(task["project_id"])
     audit_repo.log(workspace_id, user_id, "create", "task", task["id"], new_data=data)
+    asyncio.create_task(index_task(task, workspace_id))
     return task
 
 
@@ -68,6 +69,7 @@ def update_task(task_id: str, data: dict, workspace_id: str, user_id: str) -> di
         raise HTTPException(status_code=404, detail="Task not found")
     _recalculate_project_progress(result["project_id"])
     audit_repo.log(workspace_id, user_id, "update", "task", task_id, new_data=data)
+    asyncio.create_task(index_task(result, workspace_id))
     return result
 
 
@@ -78,6 +80,7 @@ def delete_task(task_id: str, workspace_id: str, user_id: str) -> bool:
         raise HTTPException(status_code=403, detail="Task not in this workspace")
     project_id = task["project_id"]
     audit_repo.log(workspace_id, user_id, "delete", "task", task_id)
+    asyncio.create_task(remove_entity("task", task_id))
     task_repo.delete(task_id)
     _recalculate_project_progress(project_id)
     return True

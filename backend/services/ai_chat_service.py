@@ -18,6 +18,7 @@ from repositories.oppm_repo import ObjectiveRepository, TimelineRepository, Cost
 from repositories.project_repo import ProjectRepository
 from repositories.notification_repo import AuditRepository
 from services.oppm_tool_executor import execute_tool
+from services import rag_service
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,8 @@ SYSTEM_PROMPT = """You are OPPM AI, a project management assistant specialized i
 
 ## Current Project Context
 {project_context}
+
+{rag_context}
 
 ## Available Tools
 When the user wants to make changes, include a JSON tool_calls array at the END of your message inside <tool_calls>...</tool_calls> tags.
@@ -163,7 +166,19 @@ def chat(
 
     # Build context and prompt
     context = _build_project_context(project_id, workspace_id)
-    system_prompt = SYSTEM_PROMPT.format(project_context=context)
+
+    # Retrieve RAG context from vector store
+    last_user_msg = messages[-1]["content"] if messages else ""
+    try:
+        import asyncio
+        rag_context = asyncio.run(rag_service.retrieve_context(
+            workspace_id, last_user_msg, project_id
+        ))
+    except Exception as e:
+        logger.warning("RAG retrieval failed: %s", e)
+        rag_context = ""
+
+    system_prompt = SYSTEM_PROMPT.format(project_context=context, rag_context=rag_context)
 
     # Build full prompt for adapter (combine system + conversation)
     conversation = f"System: {system_prompt}\n\n"
@@ -421,4 +436,101 @@ Return ONLY valid JSON:
         "on_track": result.get("on_track", []),
         "blocked": result.get("blocked", []),
         "suggested_actions": result.get("suggested_actions", []),
+    }
+
+
+# ── Workspace-level chat (no project context, no tools) ──
+
+WORKSPACE_SYSTEM_PROMPT = """You are OPPM AI, a project management assistant for the workspace.
+You can answer questions about projects, tasks, objectives, costs, and team members
+across the entire workspace.
+
+{rag_context}
+
+## Rules
+1. Keep responses concise — max 3 sentences unless explaining analysis.
+2. You do NOT have access to tools. You cannot make changes.
+3. For modification requests, tell the user to open the specific project page.
+4. Provide data-driven answers using the retrieved context above.
+"""
+
+
+def workspace_chat(
+    workspace_id: str,
+    user_id: str,
+    messages: list[dict],
+    model_id: str | None = None,
+) -> dict:
+    """
+    Workspace-level chat — answers cross-project questions using RAG.
+    No tool execution (tools are project-scoped).
+    """
+    db = get_db()
+    if model_id:
+        model_result = db.table("ai_models").select("*").eq("id", model_id).eq("workspace_id", workspace_id).limit(1).execute()
+    else:
+        model_result = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).limit(1).execute()
+
+    if not model_result.data:
+        raise HTTPException(status_code=400, detail="No active AI model configured. Add one in Settings → AI Models.")
+
+    model = model_result.data[0]
+
+    # Retrieve RAG context
+    last_user_msg = messages[-1]["content"] if messages else ""
+    try:
+        import asyncio
+        rag_context = asyncio.run(rag_service.retrieve_for_workspace(
+            workspace_id, last_user_msg, top_k=15
+        ))
+    except Exception as e:
+        logger.warning("RAG retrieval failed: %s", e)
+        rag_context = ""
+
+    system_prompt = WORKSPACE_SYSTEM_PROMPT.format(rag_context=rag_context)
+
+    conversation = f"System: {system_prompt}\n\n"
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        conversation += f"{role.capitalize()}: {content}\n\n"
+    conversation += "Assistant: "
+
+    try:
+        adapter_cls = get_adapter(model["provider"])
+        adapter = adapter_cls()
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown AI provider: {model['provider']}")
+
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                response = pool.submit(
+                    asyncio.run,
+                    adapter.call(model["model_id"], conversation, endpoint_url=model.get("endpoint_url"))
+                ).result()
+        else:
+            response = asyncio.run(
+                adapter.call(model["model_id"], conversation, endpoint_url=model.get("endpoint_url"))
+            )
+    except Exception as e:
+        logger.warning("LLM call failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
+
+    audit_repo.log(
+        workspace_id, user_id,
+        "ai_chat", "workspace_chat",
+        new_data={
+            "user_message": last_user_msg[:200],
+            "ai_response": response.text[:500],
+        },
+    )
+
+    return {
+        "message": response.text.strip(),
+        "tool_calls": [],
+        "updated_entities": [],
     }

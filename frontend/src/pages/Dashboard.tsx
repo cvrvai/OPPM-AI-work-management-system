@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useChatContext } from '@/hooks/useChatContext'
 import type { DashboardStats, CommitAnalysis } from '@/types'
 import { Link } from 'react-router-dom'
 import {
@@ -66,6 +67,7 @@ function StatCard({
 export function Dashboard() {
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
+  useChatContext('workspace')
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats', ws?.id],

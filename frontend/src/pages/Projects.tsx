@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useChatContext } from '@/hooks/useChatContext'
 import type { Project, Priority } from '@/types'
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
 import {
@@ -21,6 +22,7 @@ export function Projects() {
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
+  useChatContext('workspace')
 
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],

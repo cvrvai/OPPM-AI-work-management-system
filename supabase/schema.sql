@@ -520,6 +520,35 @@ CREATE POLICY "cost_manage" ON project_costs
     EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND is_workspace_member(p.workspace_id))
   );
 
+-- ══════════════════════════════════════
+-- 18. DOCUMENT EMBEDDINGS (RAG vector store)
+-- ══════════════════════════════════════
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS document_embeddings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  entity_type VARCHAR(50) NOT NULL,
+  entity_id UUID NOT NULL,
+  content TEXT NOT NULL,
+  metadata JSONB DEFAULT '{}',
+  embedding vector(1536) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(entity_type, entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_doc_emb_workspace ON document_embeddings(workspace_id);
+CREATE INDEX IF NOT EXISTS ix_doc_emb_entity ON document_embeddings(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS ix_doc_emb_vector ON document_embeddings
+  USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+
+ALTER TABLE document_embeddings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "emb_select" ON document_embeddings
+  FOR SELECT USING (is_workspace_member(workspace_id));
+CREATE POLICY "emb_manage" ON document_embeddings
+  FOR ALL USING (is_workspace_member(workspace_id));
+
 -- ── GitHub Accounts: workspace-scoped ──
 CREATE POLICY "gh_select" ON github_accounts
   FOR SELECT USING (is_workspace_member(workspace_id));

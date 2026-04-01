@@ -54,3 +54,13 @@ class WeeklySummaryResponse(BaseModel):
     on_track: list[str] = []
     blocked: list[str] = []
     suggested_actions: list[str] = []
+
+
+class CapabilitiesResponse(BaseModel):
+    has_project: bool = False
+    can_execute_tools: bool = False
+    indexed_documents: int = 0
+
+
+class ReindexResponse(BaseModel):
+    total_indexed: int = 0

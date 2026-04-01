@@ -26,6 +26,7 @@ def create_objective(project_id: str, data: dict, workspace_id: str, user_id: st
     data["project_id"] = project_id
     obj = objective_repo.create(data)
     audit_repo.log(workspace_id, user_id, "create", "oppm_objective", obj["id"], new_data=data)
+    asyncio.create_task(index_objective(obj, workspace_id, project_id))
     return obj
 
 
@@ -36,6 +37,7 @@ def update_objective(objective_id: str, data: dict, workspace_id: str, user_id: 
     _verify_project_workspace(obj["project_id"], workspace_id)
     result = objective_repo.update(objective_id, data)
     audit_repo.log(workspace_id, user_id, "update", "oppm_objective", objective_id, new_data=data)
+    asyncio.create_task(index_objective(result, workspace_id, obj["project_id"]))
     return result
 
 
@@ -45,6 +47,7 @@ def delete_objective(objective_id: str, workspace_id: str, user_id: str) -> bool
         raise HTTPException(status_code=404, detail="Objective not found")
     _verify_project_workspace(obj["project_id"], workspace_id)
     audit_repo.log(workspace_id, user_id, "delete", "oppm_objective", objective_id)
+    asyncio.create_task(remove_entity("objective", objective_id))
     return objective_repo.delete(objective_id)
 
 
@@ -73,6 +76,7 @@ def create_cost(project_id: str, data: dict, workspace_id: str, user_id: str) ->
     data["project_id"] = project_id
     cost = cost_repo.create(data)
     audit_repo.log(workspace_id, user_id, "create", "project_cost", cost["id"], new_data=data)
+    asyncio.create_task(index_cost(cost, workspace_id, project_id))
     return cost
 
 
@@ -83,6 +87,7 @@ def update_cost(cost_id: str, data: dict, workspace_id: str, user_id: str) -> di
     _verify_project_workspace(cost["project_id"], workspace_id)
     result = cost_repo.update(cost_id, data)
     audit_repo.log(workspace_id, user_id, "update", "project_cost", cost_id, new_data=data)
+    asyncio.create_task(index_cost(result, workspace_id, cost["project_id"]))
     return result
 
 
@@ -92,6 +97,7 @@ def delete_cost(cost_id: str, workspace_id: str, user_id: str) -> bool:
         raise HTTPException(status_code=404, detail="Cost entry not found")
     _verify_project_workspace(cost["project_id"], workspace_id)
     audit_repo.log(workspace_id, user_id, "delete", "project_cost", cost_id)
+    asyncio.create_task(remove_entity("cost", cost_id))
     return cost_repo.delete(cost_id)
 
 

@@ -22,16 +22,17 @@ import type { Project, OPPMObjective, OPPMTimelineEntry, OPPMCost } from '@/type
 import { cn, formatDate } from '@/lib/utils'
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Loader2, Target,
-  Check, X, Plus, Trash2, Bot,
+  Check, X, Plus, Trash2,
 } from 'lucide-react'
 import { startOfWeek, addWeeks, format, parseISO, isWithinInterval, endOfWeek } from 'date-fns'
-import { ChatPanel } from '@/components/ChatPanel'
+import { useChatContext } from '@/hooks/useChatContext'
 
 // ─────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────
 const VISIBLE_WEEKS = 8
-const TOTAL_COLS = VISIBLE_WEEKS + 4 // SubObj + Tasks + % + weeks + Owner
+const TOTAL_COLS = VISIBLE_WEEKS + 4 // Obj(letter) + Tasks + % + weeks + Owner
+const OBJ_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
   planned:     { color: '#9CA3AF', bg: 'bg-gray-300',     label: 'Planned' },
@@ -223,53 +224,88 @@ function VerticalLabel({ children }: { children: string }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// CostRow — single cost item row
+// CostRow — cost item with horizontal bar chart visualization
 // ─────────────────────────────────────────────────────────────
 function CostRow({
   cost,
+  maxAmount,
   onUpdate,
   onDelete,
 }: {
   cost: OPPMCost
+  maxAmount: number
   onUpdate: (data: Partial<OPPMCost>) => void
   onDelete: () => void
 }) {
+  const safeMax = maxAmount || 1
+  const plannedPct = Math.min((cost.planned_amount / safeMax) * 100, 100)
+  const actualPct = Math.min((cost.actual_amount / safeMax) * 100, 100)
+  const overBudget = cost.actual_amount > cost.planned_amount
+
   return (
-    <tr className="hover:bg-gray-50">
-      <td className="border border-gray-300 px-2 py-1.5">
+    <tr className="hover:bg-gray-50/60">
+      {/* Category */}
+      <td className="border-b border-gray-200 px-2 py-2 align-middle w-[22%]">
         <InlineEdit
           value={cost.category}
           onSave={(v) => onUpdate({ category: v })}
-          className="text-xs text-gray-700"
+          className="text-[11px] font-medium text-gray-700"
         />
       </td>
-      <td className="border border-gray-300 px-2 py-1.5 text-right">
-        <InlineEdit
-          value={String(cost.planned_amount)}
-          onSave={(v) => onUpdate({ planned_amount: parseFloat(v) || 0 })}
-          className="text-xs text-gray-700 text-right"
-        />
+      {/* Bar chart visualization */}
+      <td className="border-b border-gray-200 px-3 py-1.5 align-middle" style={{ width: '50%' }}>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] text-gray-400 w-10 shrink-0 font-medium">Planned</span>
+            <div className="flex-1 h-3 bg-gray-100 rounded-sm overflow-hidden border border-gray-200">
+              <div
+                className="h-full bg-blue-400 rounded-sm transition-all duration-300"
+                style={{ width: `${plannedPct}%` }}
+              />
+            </div>
+            <InlineEdit
+              value={String(cost.planned_amount)}
+              onSave={(v) => onUpdate({ planned_amount: parseFloat(v) || 0 })}
+              className="text-[10px] text-gray-600 w-14 text-right font-mono"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] text-gray-400 w-10 shrink-0 font-medium">Actual</span>
+            <div className="flex-1 h-3 bg-gray-100 rounded-sm overflow-hidden border border-gray-200">
+              <div
+                className={cn(
+                  'h-full rounded-sm transition-all duration-300',
+                  overBudget ? 'bg-red-400' : 'bg-emerald-400',
+                )}
+                style={{ width: `${actualPct}%` }}
+              />
+            </div>
+            <InlineEdit
+              value={String(cost.actual_amount)}
+              onSave={(v) => onUpdate({ actual_amount: parseFloat(v) || 0 })}
+              className={cn(
+                'text-[10px] w-14 text-right font-mono',
+                overBudget ? 'text-red-600 font-bold' : 'text-emerald-600',
+              )}
+            />
+          </div>
+        </div>
       </td>
-      <td className="border border-gray-300 px-2 py-1.5 text-right">
-        <InlineEdit
-          value={String(cost.actual_amount)}
-          onSave={(v) => onUpdate({ actual_amount: parseFloat(v) || 0 })}
-          className="text-xs text-gray-700 text-right"
-        />
-      </td>
-      <td className="border border-gray-300 px-2 py-1.5">
+      {/* Notes */}
+      <td className="border-b border-gray-200 px-2 py-2 align-middle">
         <InlineEdit
           value={cost.notes}
           onSave={(v) => onUpdate({ notes: v })}
           placeholder="—"
-          className="text-xs text-gray-500"
+          className="text-[11px] text-gray-500"
         />
       </td>
-      <td className="border border-gray-300 px-1 py-1.5 text-center">
+      {/* Delete */}
+      <td className="border-b border-gray-200 px-1 py-2 text-center align-middle w-7">
         <button
           onClick={onDelete}
-          className="text-gray-400 hover:text-red-500 transition-colors"
-          title="Delete cost"
+          className="text-gray-300 hover:text-red-500 transition-colors"
+          title="Delete"
         >
           <Trash2 className="h-3 w-3" />
         </button>
@@ -287,7 +323,6 @@ export function OPPMView() {
   const [newObjTitle, setNewObjTitle] = useState('')
   const [showAddCost, setShowAddCost] = useState(false)
   const [newCost, setNewCost] = useState({ category: '', planned_amount: 0, actual_amount: 0, notes: '' })
-  const [chatOpen, setChatOpen] = useState(false)
 
   const user = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
@@ -300,6 +335,9 @@ export function OPPMView() {
     queryFn: () => api.get<Project>(`${wsPath}/projects/${id}`),
     enabled: !!ws,
   })
+
+  // Set chat context to this project
+  useChatContext('project', id, project?.title)
 
   const { data: objectives, isLoading: loadingObjectives } = useQuery({
     queryKey: ['oppm-objectives', id, ws?.id],
@@ -512,6 +550,11 @@ export function OPPMView() {
 
   const leaderName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Project Leader'
 
+  const maxCostAmount = useMemo(
+    () => Math.max(...(costData?.items ?? []).flatMap((c) => [c.planned_amount, c.actual_amount]), 1),
+    [costData],
+  )
+
   // ── Loading / Error states ──────────────────────────────────
   if (loadingProject || loadingObjectives) {
     return (
@@ -547,18 +590,6 @@ export function OPPMView() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={() => setChatOpen((v) => !v)}
-            className={cn(
-              'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
-              chatOpen
-                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-            )}
-          >
-            <Bot className="h-4 w-4" />
-            AI Chat
-          </button>
-          <button
             onClick={() => setWeekOffset((o) => o - 1)}
             className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"
           >
@@ -590,13 +621,13 @@ export function OPPMView() {
         >
           {/* Column widths */}
           <colgroup>{/* */}
-            <col style={{ width: '40px' }} />{/* Sub Obj */}
-            <col style={{ width: '220px' }} />{/* Major Tasks */}
-            <col style={{ width: '38px' }} />{/* % */}
+            <col style={{ width: '40px' }} />{/* Obj letter */}
+            <col style={{ width: '210px' }} />{/* Major Tasks */}
+            <col style={{ width: '36px' }} />{/* % */}
             {Array.from({ length: VISIBLE_WEEKS }).map((_, i) => (
-              <col key={i} style={{ width: '68px' }} />
+              <col key={i} style={{ width: '62px' }} />
             ))}{/* */}
-            <col style={{ width: '72px' }} />{/* Owner / Priority */}
+            <col style={{ width: '70px' }} />{/* Owner / Priority */}
           </colgroup>
 
           {/* ──────────────────────────────────────────────────
@@ -705,7 +736,7 @@ export function OPPMView() {
             {/* Row 3: Column headers */}
             <tr className="bg-gray-100">{/* */}
               <th className="border border-gray-300 px-1 py-2 text-center text-[9px] font-bold text-gray-600 uppercase tracking-wide">
-                Sub<br />Obj
+                Obj
               </th>
               <th className="border border-gray-300 px-3 py-2 text-left text-[9px] font-bold text-gray-600 uppercase tracking-wide">
                 Major Tasks (Deadline)
@@ -761,22 +792,38 @@ export function OPPMView() {
                     objIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'
                   )}
                 >
-                  {/* Sub Obj # */}
-                  <td className="border border-gray-300 text-center align-middle">
-                    <span className="text-xs font-bold text-gray-400">
-                      {objIdx + 1}
-                    </span>
-                  </td>
+                  {/* Objective letter + summary status dot */}
+                  {(() => {
+                    const rowStatuses = Object.values(timelineMap[obj.id] ?? {})
+                    const summaryStatus: string | undefined =
+                      rowStatuses.length === 0 ? undefined
+                      : rowStatuses.every((s) => s === 'completed') ? 'completed'
+                      : rowStatuses.includes('blocked') ? 'blocked'
+                      : rowStatuses.includes('at_risk') ? 'at_risk'
+                      : rowStatuses.includes('in_progress') ? 'in_progress'
+                      : 'planned'
+                    return (
+                      <td className="border border-gray-300 text-center align-middle py-1.5 px-0.5">
+                        <StatusDot status={summaryStatus} />
+                        <div className="text-[10px] font-black text-gray-600 mt-0.5 leading-none">
+                          {OBJ_LETTERS[objIdx % 26]}
+                        </div>
+                      </td>
+                    )
+                  })()}
 
-                  {/* Objective title — inline editable */}
-                  <td className="border border-gray-300 px-3 py-2 align-middle">
+                  {/* Objective title — inline editable with number prefix */}
+                  <td className="border border-gray-300 px-2 py-1.5 align-middle">
                     <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-bold text-gray-400 shrink-0 w-5 text-right">
+                        {objIdx + 1}.
+                      </span>
                       <InlineEdit
                         value={obj.title}
                         onSave={(v) =>
                           updateObjective.mutate({ objId: obj.id, data: { title: v } })
                         }
-                        className="text-sm font-medium text-gray-800 flex-1"
+                        className="text-[11px] font-medium text-gray-800 flex-1"
                       />
                       <button
                         onClick={() => {
@@ -892,11 +939,10 @@ export function OPPMView() {
                     <table className="w-full text-xs border-collapse">
                       <thead>{/* */}
                         <tr className="bg-gray-50">{/* */}
-                          <th className="border-b border-gray-200 px-2 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase w-1/4">Category</th>
-                          <th className="border-b border-gray-200 px-2 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase w-1/5">Planned</th>
-                          <th className="border-b border-gray-200 px-2 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase w-1/5">Actual</th>
+                          <th className="border-b border-gray-200 px-2 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase w-[22%]">Category</th>
+                          <th className="border-b border-gray-200 px-3 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase" style={{width:'50%'}}>Planned / Actual</th>
                           <th className="border-b border-gray-200 px-2 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase">Notes</th>
-                          <th className="border-b border-gray-200 px-1 py-1.5 w-8"></th>{/* */}
+                          <th className="border-b border-gray-200 px-1 py-1.5 w-7"></th>{/* */}
                         </tr>
                       </thead>
                       <tbody>{/* */}
@@ -904,6 +950,7 @@ export function OPPMView() {
                           <CostRow
                             key={cost.id}
                             cost={cost}
+                            maxAmount={maxCostAmount}
                             onUpdate={(data) => updateCostMut.mutate({ costId: cost.id, data })}
                             onDelete={() => {
                               if (confirm(`Delete cost "${cost.category}"?`)) {
@@ -916,11 +963,11 @@ export function OPPMView() {
                         {costs.length > 0 && (
                           <tr className="bg-gray-50 font-semibold">{/* */}
                             <td className="border-t border-gray-300 px-2 py-1.5 text-xs text-gray-600">Total</td>
-                            <td className="border-t border-gray-300 px-2 py-1.5 text-xs text-right text-gray-600">
-                              {(costData?.total_planned ?? 0).toLocaleString()}
-                            </td>
-                            <td className="border-t border-gray-300 px-2 py-1.5 text-xs text-right text-gray-600">
-                              {(costData?.total_actual ?? 0).toLocaleString()}
+                            <td className="border-t border-gray-300 px-3 py-1.5">
+                              <div className="flex gap-6 text-[10px]">
+                                <span className="text-gray-500">Planned: <span className="font-bold text-blue-600">{(costData?.total_planned ?? 0).toLocaleString()}</span></span>
+                                <span className="text-gray-500">Actual: <span className={cn('font-bold', (costData?.total_actual ?? 0) > (costData?.total_planned ?? 0) ? 'text-red-600' : 'text-emerald-600')}>{(costData?.total_actual ?? 0).toLocaleString()}</span></span>
+                              </div>
                             </td>
                             <td className="border-t border-gray-300" colSpan={2}></td>{/* */}
                           </tr>
@@ -936,23 +983,29 @@ export function OPPMView() {
                                 className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none"
                               />
                             </td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                type="number"
-                                value={newCost.planned_amount || ''}
-                                onChange={(e) => setNewCost((c) => ({ ...c, planned_amount: parseFloat(e.target.value) || 0 }))}
-                                placeholder="0"
-                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
-                              />
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                type="number"
-                                value={newCost.actual_amount || ''}
-                                onChange={(e) => setNewCost((c) => ({ ...c, actual_amount: parseFloat(e.target.value) || 0 }))}
-                                placeholder="0"
-                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
-                              />
+                            <td className="px-3 py-1.5">
+                              <div className="flex gap-2">
+                                <div className="flex-1">
+                                  <label className="text-[9px] text-gray-400 block mb-0.5">Planned</label>
+                                  <input
+                                    type="number"
+                                    value={newCost.planned_amount || ''}
+                                    onChange={(e) => setNewCost((c) => ({ ...c, planned_amount: parseFloat(e.target.value) || 0 }))}
+                                    placeholder="0"
+                                    className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
+                                  />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="text-[9px] text-gray-400 block mb-0.5">Actual</label>
+                                  <input
+                                    type="number"
+                                    value={newCost.actual_amount || ''}
+                                    onChange={(e) => setNewCost((c) => ({ ...c, actual_amount: parseFloat(e.target.value) || 0 }))}
+                                    placeholder="0"
+                                    className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
+                                  />
+                                </div>
+                              </div>
                             </td>
                             <td className="px-2 py-1.5">
                               <input
@@ -998,12 +1051,28 @@ export function OPPMView() {
                 BOTTOM SECTION — Deliverables / Forecast / Risk / Team / Legend
             ══════════════════════════════════════════════════ */}
 
+            {/* ══════════════════════════════════════════════════
+                BOTTOM SECTION — Classic OPPM X-cross layout
+            ══════════════════════════════════════════════════ */}
+
+            {/* Section divider row */}
+            <tr>{/* */}
+              <td
+                colSpan={TOTAL_COLS}
+                className="border-t-2 border-gray-400 bg-gray-100 px-3 py-0.5"
+              >
+                <span className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">
+                  Summary &amp; Objectives
+                </span>
+              </td>{/* */}
+            </tr>
+
             {/* Summary Deliverables row */}
             <tr>{/* */}
               <VerticalLabel>Summary Deliverables</VerticalLabel>
               <td
                 colSpan={2}
-                className="border border-gray-300 px-3 py-2 align-top"
+                className="border border-gray-300 px-2 py-2 align-top"
               >
                 <EditableList
                   items={meta.summary_deliverables}
@@ -1011,44 +1080,96 @@ export function OPPMView() {
                 />
               </td>
 
-              {/* Team panel — spans all week + owner cols, rowSpan=3 */}
+              {/* ── X CROSS — spans all week + owner cols, rowSpan=3 ── */}
               <td
                 colSpan={VISIBLE_WEEKS + 1}
                 rowSpan={3}
-                className="border border-gray-300 px-4 py-3 align-top bg-gray-50/40"
+                className="border border-gray-300 p-0 overflow-hidden"
               >
-                <div className="grid grid-cols-2 gap-6 h-full">
-                  {/* Team members */}
-                  <div>
-                    <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-2">
-                      # People working on project
-                    </div>
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-3 pb-1.5 border-b border-gray-200">
-                        <span className="text-[10px] text-gray-500 w-24 shrink-0">Project Leader</span>
-                        <span className="text-[10px] font-semibold text-gray-700">{leaderName}</span>
-                      </div>
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <div key={n} className="flex items-center gap-3">
-                          <span className="text-[10px] text-gray-400 w-24 shrink-0">Member {n}</span>
-                          <span className="text-[10px] text-gray-300">—</span>
-                        </div>
-                      ))}
+                <div
+                  className="relative w-full h-full bg-white"
+                  style={{ minHeight: '168px' }}
+                >
+                  {/* Diagonal X lines via SVG */}
+                  <svg
+                    className="absolute inset-0 w-full h-full pointer-events-none"
+                    preserveAspectRatio="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <line x1="0" y1="0" x2="100%" y2="100%" stroke="#d1d5db" strokeWidth="1.5" />
+                    <line x1="100%" y1="0" x2="0" y2="100%" stroke="#d1d5db" strokeWidth="1.5" />
+                  </svg>
+
+                  {/* Top-left quadrant: Major Tasks */}
+                  <div className="absolute top-3 left-4 pointer-events-none select-none">
+                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                      Major Tasks
                     </div>
                   </div>
 
-                  {/* Status legend */}
-                  <div>
-                    <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-2">
-                      Status Legend
+                  {/* Top-right quadrant: Target Dates */}
+                  <div className="absolute top-3 right-4 pointer-events-none select-none text-right">
+                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                      Target Dates
                     </div>
-                    <div className="space-y-2">
-                      {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                        <div key={key} className="flex items-center gap-2">
-                          <span className={cn('h-3 w-8 rounded', cfg.bg)} />
-                          <span className="text-[10px] text-gray-600">{cfg.label}</span>
-                        </div>
-                      ))}
+                  </div>
+
+                  {/* Center: Summary & Forecast badge */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="bg-white/95 border border-gray-300 rounded-sm px-4 py-2 text-center shadow-md z-10">
+                      <div className="text-[9px] font-black text-gray-600 uppercase tracking-widest leading-snug">
+                        Summary
+                      </div>
+                      <div className="text-[9px] font-black text-gray-600 uppercase tracking-widest leading-snug">
+                        &amp; Forecast
+                      </div>
+                      <div className={cn(
+                        'mt-1.5 text-base font-black leading-none',
+                        overallProgress >= 80 ? 'text-emerald-600'
+                        : overallProgress >= 50 ? 'text-blue-600'
+                        : overallProgress > 0  ? 'text-amber-600'
+                        : 'text-gray-400'
+                      )}>
+                        {overallProgress}%
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bottom-left quadrant: Objectives */}
+                  <div className="absolute bottom-3 left-4 pointer-events-none select-none">
+                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                      Objectives
+                    </div>
+                  </div>
+
+                  {/* Bottom-right quadrant: Cost or Other Metrics */}
+                  <div className="absolute bottom-3 right-4 pointer-events-none select-none text-right">
+                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest leading-snug">
+                      Cost or<br />Other Metrics
+                    </div>
+                  </div>
+
+                  {/* Status legend — floating bottom-left above Objectives label */}
+                  <div className="absolute space-y-0.5 pointer-events-none select-none"
+                    style={{ bottom: '28px', left: '16px' }}
+                  >
+                    {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+                      <div key={key} className="flex items-center gap-1.5">
+                        <span className={cn('h-2 w-4 rounded-sm shrink-0', cfg.bg)} />
+                        <span className="text-[8px] text-gray-500">{cfg.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Team — floating top-right below Target Dates label */}
+                  <div className="absolute pointer-events-none select-none"
+                    style={{ top: '28px', right: '16px' }}
+                  >
+                    <div className="text-[8px] font-bold text-gray-400 uppercase tracking-wider mb-1 text-right">
+                      Project Leader
+                    </div>
+                    <div className="text-[10px] font-semibold text-gray-600 text-right">
+                      {leaderName}
                     </div>
                   </div>
                 </div>
@@ -1060,7 +1181,7 @@ export function OPPMView() {
               <VerticalLabel>Forecast</VerticalLabel>
               <td
                 colSpan={2}
-                className="border border-gray-300 px-3 py-2 align-top"
+                className="border border-gray-300 px-2 py-2 align-top"
               >
                 <EditableList
                   items={meta.forecast}
@@ -1074,7 +1195,7 @@ export function OPPMView() {
               <VerticalLabel>Risk</VerticalLabel>
               <td
                 colSpan={2}
-                className="border border-gray-300 px-3 py-2 align-top"
+                className="border border-gray-300 px-2 py-2 align-top"
               >
                 <EditableList
                   items={meta.risks}
@@ -1087,8 +1208,6 @@ export function OPPMView() {
         </table>
       </div>
 
-      {/* AI Chat Panel */}
-      <ChatPanel projectId={id!} open={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   )
 }
