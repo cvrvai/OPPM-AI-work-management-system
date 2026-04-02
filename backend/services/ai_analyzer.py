@@ -8,7 +8,8 @@ Uses the infrastructure LLM adapter layer for provider abstraction.
 
 import logging
 from database import get_db
-from infrastructure.llm import get_adapter
+from infrastructure.llm import get_adapter, call_with_fallback
+from infrastructure.llm.base import ProviderUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -41,29 +42,27 @@ Return ONLY valid JSON with these fields:
 
 
 async def analyze_commits(commit_events: list[dict], project_id: str):
-    """Analyze a batch of commits using the first active AI model."""
+    """Analyze a batch of commits using active AI models with fallback."""
     db = get_db()
 
-    # Get active AI model
-    models = (
+    # Get project's workspace_id for scoped model lookup
+    project = db.table("projects").select("workspace_id").eq("id", project_id).limit(1).execute()
+    if not project.data:
+        logger.warning("Project %s not found, skipping analysis", project_id)
+        return
+    workspace_id = project.data[0]["workspace_id"]
+
+    # Get all active AI models for fallback chain
+    models_result = (
         db.table("ai_models")
         .select("*")
+        .eq("workspace_id", workspace_id)
         .eq("is_active", True)
-        .limit(1)
         .execute()
     )
-    if not models.data:
+    models = models_result.data or []
+    if not models:
         return  # No active model configured
-
-    model = models.data[0]
-
-    # Get LLM adapter for this provider
-    try:
-        adapter_cls = get_adapter(model["provider"])
-        adapter = adapter_cls()
-    except ValueError:
-        logger.warning("Unknown AI provider: %s", model["provider"])
-        return
 
     # Get project tasks for context
     tasks = (
@@ -87,15 +86,11 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
         )
 
         try:
-            result = await adapter.call_json(
-                model["model_id"],
-                prompt,
-                endpoint_url=model.get("endpoint_url"),
-            )
+            result = await call_with_fallback(models, prompt, json_mode=True)
             if result:
                 analysis_data = {
                     "commit_event_id": commit["id"],
-                    "ai_model": f"{model['provider']}/{model['model_id']}",
+                    "ai_model": "/".join(f"{m['provider']}/{m['model_id']}" for m in models[:1]),
                     "task_alignment_score": result.get("task_alignment_score", 0),
                     "code_quality_score": result.get("code_quality_score", 0),
                     "progress_delta": result.get("progress_delta", 0),
@@ -136,5 +131,7 @@ async def analyze_commits(commit_events: list[dict], project_id: str):
                             {"progress": new_progress}
                         ).eq("id", matched_task).execute()
 
+        except ProviderUnavailableError as e:
+            logger.warning("All AI providers unavailable for commit %s: %s", commit.get("id"), e)
         except Exception as e:
             logger.error("AI analysis failed for commit %s: %s", commit.get("id"), e)

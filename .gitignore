@@ -1,0 +1,29 @@
+# Environment files with real credentials — NEVER commit these
+.env
+.env.local
+.env.*.local
+services/.env
+backend/.env
+frontend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker
+*.log
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp

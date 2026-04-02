@@ -12,7 +12,8 @@ import uuid
 from datetime import datetime
 
 from fastapi import HTTPException
-from infrastructure.llm import get_adapter
+from infrastructure.llm import get_adapter, call_with_fallback
+from infrastructure.llm.base import ProviderUnavailableError
 from database import get_db
 from repositories.oppm_repo import ObjectiveRepository, TimelineRepository, CostRepository
 from repositories.project_repo import ProjectRepository
@@ -30,6 +31,39 @@ audit_repo = AuditRepository()
 
 # In-memory store for plan previews (simple approach; could use Redis/DB for production)
 _plan_cache: dict[str, dict] = {}
+
+
+def _get_models(workspace_id: str, model_id: str | None = None) -> list[dict]:
+    """Return ordered list of AI models for fallback.
+
+    If model_id is given, that model comes first followed by other active models.
+    Otherwise, returns all active models ordered by creation date.
+    """
+    db = get_db()
+    if model_id:
+        primary = db.table("ai_models").select("*").eq("id", model_id).eq("workspace_id", workspace_id).limit(1).execute()
+        others = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).neq("id", model_id).execute()
+        return (primary.data or []) + (others.data or [])
+    else:
+        result = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).execute()
+        return result.data or []
+
+
+def _run_llm(coro):
+    """Run an async LLM coroutine from sync context, handling the event loop."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, coro).result()
+        else:
+            return asyncio.run(coro)
+    except ProviderUnavailableError:
+        raise
+    except Exception:
+        raise
 
 SYSTEM_PROMPT = """You are OPPM AI, a project management assistant specialized in the One Page Project Manager (OPPM) methodology.
 
@@ -154,31 +188,32 @@ def chat(
 
     # Get active model
     db = get_db()
-    if model_id:
-        model_result = db.table("ai_models").select("*").eq("id", model_id).eq("workspace_id", workspace_id).limit(1).execute()
-    else:
-        model_result = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).limit(1).execute()
-
-    if not model_result.data:
+    models = _get_models(workspace_id, model_id)
+    if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured. Add one in Settings → AI Models.")
-
-    model = model_result.data[0]
 
     # Build context and prompt
     context = _build_project_context(project_id, workspace_id)
 
-    # Retrieve RAG context from vector store
+    # Retrieve RAG context via full pipeline
     last_user_msg = messages[-1]["content"] if messages else ""
     try:
         import asyncio
-        rag_context = asyncio.run(rag_service.retrieve_context(
-            workspace_id, last_user_msg, project_id
+        rag_result = asyncio.run(rag_service.retrieve_with_rag_pipeline(
+            workspace_id, last_user_msg, user_id=user_id, project_id=project_id,
         ))
+        rag_context = rag_result.context
+        memory_context = rag_result.memory_context
     except Exception as e:
         logger.warning("RAG retrieval failed: %s", e)
         rag_context = ""
+        memory_context = ""
 
-    system_prompt = SYSTEM_PROMPT.format(project_context=context, rag_context=rag_context)
+    full_rag = rag_context
+    if memory_context:
+        full_rag = f"{memory_context}\n\n{rag_context}"
+
+    system_prompt = SYSTEM_PROMPT.format(project_context=context, rag_context=full_rag)
 
     # Build full prompt for adapter (combine system + conversation)
     conversation = f"System: {system_prompt}\n\n"
@@ -188,28 +223,12 @@ def chat(
         conversation += f"{role.capitalize()}: {content}\n\n"
     conversation += "Assistant: "
 
-    # Call LLM
+    # Call LLM with fallback chain
     try:
-        adapter_cls = get_adapter(model["provider"])
-        adapter = adapter_cls()
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown AI provider: {model['provider']}")
-
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're in an async context already — use run_coroutine_threadsafe
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                response = pool.submit(
-                    asyncio.run,
-                    adapter.call(model["model_id"], conversation, endpoint_url=model.get("endpoint_url"))
-                ).result()
-        else:
-            response = asyncio.run(
-                adapter.call(model["model_id"], conversation, endpoint_url=model.get("endpoint_url"))
-            )
+        response = _run_llm(call_with_fallback(models, conversation))
+    except ProviderUnavailableError as e:
+        logger.warning("All LLM providers unavailable: %s", e)
+        raise HTTPException(status_code=502, detail="All AI models are currently unavailable. Please try again later.")
     except Exception as e:
         logger.warning("LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
@@ -264,11 +283,9 @@ def suggest_plan(
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
     db = get_db()
-    model_result = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).limit(1).execute()
-    if not model_result.data:
+    models = _get_models(workspace_id)
+    if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured.")
-
-    model = model_result.data[0]
 
     prompt = f"""You are an OPPM project planning assistant. Generate a structured project plan.
 
@@ -288,16 +305,10 @@ Return ONLY valid JSON with this structure:
 Generate 3-7 objectives with logical week assignments. Use W1-W8 format."""
 
     try:
-        adapter_cls = get_adapter(model["provider"])
-        adapter = adapter_cls()
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown AI provider: {model['provider']}")
-
-    import asyncio
-    try:
-        result = asyncio.run(
-            adapter.call_json(model["model_id"], prompt, endpoint_url=model.get("endpoint_url"))
-        )
+        result = _run_llm(call_with_fallback(models, prompt, json_mode=True))
+    except ProviderUnavailableError as e:
+        logger.warning("All LLM providers unavailable for suggest_plan: %s", e)
+        raise HTTPException(status_code=502, detail="All AI models are currently unavailable.")
     except Exception as e:
         logger.warning("Suggest plan LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
@@ -386,12 +397,9 @@ def weekly_summary(
 
     context = _build_project_context(project_id, workspace_id)
 
-    db = get_db()
-    model_result = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).limit(1).execute()
-    if not model_result.data:
+    models = _get_models(workspace_id)
+    if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured.")
-
-    model = model_result.data[0]
 
     prompt = f"""Analyze this OPPM project and provide a weekly status summary.
 
@@ -407,16 +415,10 @@ Return ONLY valid JSON:
 }}"""
 
     try:
-        adapter_cls = get_adapter(model["provider"])
-        adapter = adapter_cls()
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown AI provider: {model['provider']}")
-
-    import asyncio
-    try:
-        result = asyncio.run(
-            adapter.call_json(model["model_id"], prompt, endpoint_url=model.get("endpoint_url"))
-        )
+        result = _run_llm(call_with_fallback(models, prompt, json_mode=True))
+    except ProviderUnavailableError as e:
+        logger.warning("All LLM providers unavailable for weekly_summary: %s", e)
+        raise HTTPException(status_code=502, detail="All AI models are currently unavailable.")
     except Exception as e:
         logger.warning("Weekly summary LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
@@ -466,28 +468,29 @@ def workspace_chat(
     No tool execution (tools are project-scoped).
     """
     db = get_db()
-    if model_id:
-        model_result = db.table("ai_models").select("*").eq("id", model_id).eq("workspace_id", workspace_id).limit(1).execute()
-    else:
-        model_result = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).limit(1).execute()
-
-    if not model_result.data:
+    models = _get_models(workspace_id, model_id)
+    if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured. Add one in Settings → AI Models.")
 
-    model = model_result.data[0]
-
-    # Retrieve RAG context
+    # Retrieve RAG context via full pipeline
     last_user_msg = messages[-1]["content"] if messages else ""
     try:
         import asyncio
-        rag_context = asyncio.run(rag_service.retrieve_for_workspace(
-            workspace_id, last_user_msg, top_k=15
+        rag_result = asyncio.run(rag_service.retrieve_with_rag_pipeline(
+            workspace_id, last_user_msg, user_id=user_id, top_k=15,
         ))
+        rag_context = rag_result.context
+        memory_context = rag_result.memory_context
     except Exception as e:
         logger.warning("RAG retrieval failed: %s", e)
         rag_context = ""
+        memory_context = ""
 
-    system_prompt = WORKSPACE_SYSTEM_PROMPT.format(rag_context=rag_context)
+    full_rag = rag_context
+    if memory_context:
+        full_rag = f"{memory_context}\n\n{rag_context}"
+
+    system_prompt = WORKSPACE_SYSTEM_PROMPT.format(rag_context=full_rag)
 
     conversation = f"System: {system_prompt}\n\n"
     for msg in messages:
@@ -496,26 +499,12 @@ def workspace_chat(
         conversation += f"{role.capitalize()}: {content}\n\n"
     conversation += "Assistant: "
 
+    # Call LLM with fallback chain
     try:
-        adapter_cls = get_adapter(model["provider"])
-        adapter = adapter_cls()
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown AI provider: {model['provider']}")
-
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                response = pool.submit(
-                    asyncio.run,
-                    adapter.call(model["model_id"], conversation, endpoint_url=model.get("endpoint_url"))
-                ).result()
-        else:
-            response = asyncio.run(
-                adapter.call(model["model_id"], conversation, endpoint_url=model.get("endpoint_url"))
-            )
+        response = _run_llm(call_with_fallback(models, conversation))
+    except ProviderUnavailableError as e:
+        logger.warning("All LLM providers unavailable: %s", e)
+        raise HTTPException(status_code=502, detail="All AI models are currently unavailable. Please try again later.")
     except Exception as e:
         logger.warning("LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")

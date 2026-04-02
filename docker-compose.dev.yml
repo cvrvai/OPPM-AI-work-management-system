@@ -1,0 +1,43 @@
+# Development overrides — hot reload, volume mounts, direct port access
+services:
+  gateway:
+    ports:
+      - "80:80"
+
+  core:
+    volumes:
+      - ./shared:/shared
+      - ./services/core:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+
+  ai:
+    volumes:
+      - ./shared:/shared
+      - ./services/ai:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    ports:
+      - "8001:8001"
+
+  git:
+    volumes:
+      - ./shared:/shared
+      - ./services/git:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+    ports:
+      - "8002:8002"
+
+  mcp:
+    volumes:
+      - ./shared:/shared
+      - ./services/mcp:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+    ports:
+      - "8003:8003"
+
+  frontend:
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"

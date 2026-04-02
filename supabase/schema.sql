@@ -613,3 +613,40 @@ CREATE POLICY "audit_select" ON audit_log
   FOR SELECT USING (is_workspace_admin(workspace_id));
 CREATE POLICY "audit_insert" ON audit_log
   FOR INSERT WITH CHECK (true);  -- service role inserts
+
+-- ═══════════════════════════════════════════════════════════════════
+-- RPC Functions
+-- ═══════════════════════════════════════════════════════════════════
+
+-- Vector similarity search for RAG retrieval
+CREATE OR REPLACE FUNCTION match_documents(
+  p_workspace_id UUID,
+  p_embedding vector(1536),
+  p_match_count INT DEFAULT 10,
+  p_entity_types TEXT[] DEFAULT NULL
+)
+RETURNS TABLE (
+  id UUID,
+  workspace_id UUID,
+  entity_type VARCHAR(50),
+  entity_id UUID,
+  content TEXT,
+  metadata JSONB,
+  similarity FLOAT
+)
+LANGUAGE sql STABLE
+AS $$
+  SELECT
+    d.id,
+    d.workspace_id,
+    d.entity_type,
+    d.entity_id,
+    d.content,
+    d.metadata,
+    1 - (d.embedding <=> p_embedding) AS similarity
+  FROM document_embeddings d
+  WHERE d.workspace_id = p_workspace_id
+    AND (p_entity_types IS NULL OR d.entity_type = ANY(p_entity_types))
+  ORDER BY d.embedding <=> p_embedding
+  LIMIT p_match_count;
+$$;

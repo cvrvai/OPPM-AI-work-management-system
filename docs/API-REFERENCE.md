@@ -393,6 +393,142 @@ Add an AI model configuration. **Requires admin role.**
 }
 ```
 
+**Provider constraint:** `provider` must be one of `ollama`, `anthropic`, `openai`, `kimi`, `custom`. Invalid values return `400`.
+
+**Ollama cloud models** should use `provider: "ollama"` with `endpoint_url` pointing to the cloud endpoint (e.g., `https://ollama.com/api`). The `model_id` identifies the cloud model.
+
+---
+
+## AI Chat
+
+### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat`
+Chat with AI about a project. Uses `call_with_fallback` across all active workspace AI models.
+
+**Body**
+```json
+{
+  "message": "What tasks are overdue?",
+  "model_id": "uuid"
+}
+```
+
+**Response** `200`
+```json
+{
+  "message": "There are 3 overdue tasks...",
+  "tool_calls": [],
+  "updated_entities": ["tasks"]
+}
+```
+
+### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan`
+Generate an AI-driven OPPM plan preview.
+
+### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan/commit`
+Apply a previously generated plan by `commit_token`.
+
+**Body**
+```json
+{ "commit_token": "uuid" }
+```
+
+### `GET /v1/workspaces/{workspace_id}/projects/{project_id}/ai/weekly-summary`
+Get an AI-generated weekly status summary for the project.
+
+---
+
+## RAG
+
+### `POST /v1/workspaces/{workspace_id}/rag/query`
+Run the RAG retrieval pipeline for a query.  Returns ranked context chunks and conversation memory.
+
+**Body**
+```json
+{
+  "query": "Which objectives are at risk?",
+  "project_id": "uuid",
+  "top_k": 10
+}
+```
+
+**Response** `200`
+```json
+{
+  "chunks": [
+    {
+      "entity_type": "objective",
+      "entity_id": "uuid",
+      "content": "Launch MVP — status: at_risk",
+      "score": 0.87,
+      "source": "vector",
+      "metadata": {}
+    }
+  ],
+  "memory": [
+    { "role": "user", "content": "What tasks are overdue?" },
+    { "role": "assistant", "content": "There are 3 overdue tasks..." }
+  ],
+  "retriever_used": ["vector", "keyword"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `query` | string | Natural language question |
+| `project_id` | uuid? | Optional project scope filter |
+| `top_k` | int | Max chunks to return (default: 10) |
+
+---
+
+## MCP Tools
+
+### `GET /v1/workspaces/{workspace_id}/mcp/tools`
+List all available MCP tools for the workspace.
+
+**Response** `200`
+```json
+[
+  {
+    "name": "get_project_status",
+    "description": "Get status and task counts for a project",
+    "parameters": { "project_id": "uuid" }
+  },
+  {
+    "name": "list_projects",
+    "description": "List all workspace projects",
+    "parameters": {}
+  },
+  {
+    "name": "list_at_risk_objectives",
+    "description": "List objectives with at_risk or blocked timeline entries",
+    "parameters": {}
+  },
+  {
+    "name": "get_task_summary",
+    "description": "Get task counts grouped by status",
+    "parameters": {}
+  },
+  {
+    "name": "summarize_recent_commits",
+    "description": "Summarize commits from the last N days",
+    "parameters": { "project_id": "uuid?", "days": 7 }
+  }
+]
+```
+
+### `POST /v1/workspaces/{workspace_id}/mcp/call`
+Execute an MCP tool by name. `workspace_id` is injected automatically.
+
+**Body**
+```json
+{
+  "tool": "get_project_status",
+  "parameters": { "project_id": "uuid" }
+}
+```
+
+**Response** `200` — tool-specific JSON result.
+
 ---
 
 ## Notifications

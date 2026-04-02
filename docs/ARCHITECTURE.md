@@ -9,6 +9,7 @@
 - [Backend Architecture](#backend-architecture)
 - [Frontend Architecture](#frontend-architecture)
 - [API Design](#api-design)
+- [RAG Architecture](#rag-architecture)
 - [Authentication & Authorization](#authentication--authorization)
 - [Multi-Tenancy Model](#multi-tenancy-model)
 - [Deployment](#deployment)
@@ -160,12 +161,29 @@ src/
 │ workspace_id       │  │ workspace_id    │  │ workspace_id      │
 │ user_id            │  │ name            │  │ user_id           │
 │ type               │  │ provider        │  │ action            │
-│ title              │  │ model_id        │  │ entity_type       │
-│ message            │  │ endpoint_url    │  │ entity_id         │
-│ is_read            │  │ is_active       │  │ old_data          │
-│ link               │  └─────────────────┘  │ new_data          │
-│ metadata           │                       │ ip_address        │
-└────────────────────┘                       └───────────────────┘
+│ title              │  │  (ollama/       │  │ entity_type       │
+│ message            │  │  anthropic/     │  │ entity_id         │
+│ is_read            │  │  openai/kimi/   │  │ old_data          │
+│ link               │  │  custom)        │  │ new_data          │
+│ metadata           │  │ model_id        │  │ ip_address        │
+└────────────────────┘  │ endpoint_url    │  └───────────────────┘
+                        │ is_active       │
+                        └─────────────────┘
+
+┌───────────────────────────────┐
+│     document_embeddings       │
+│───────────────────────────────│
+│ id (PK)                       │
+│ workspace_id (FK)             │
+│ entity_type (task/objective/  │
+│   commit/project)             │
+│ entity_id                     │
+│ content                       │
+│ metadata (JSONB)              │
+│ embedding VECTOR(1536)        │
+└───────────────────────────────┘
+
+Searchable via `match_documents(query_embedding, match_count, filter_workspace_id)` pgvector RPC (cosine similarity).
 ```
 
 ### Row-Level Security (RLS)
@@ -207,17 +225,9 @@ backend/
 │   ├── git_service.py         # Git integration + webhooks
 │   ├── notification_service.py # Notification CRUD
 │   ├── dashboard_service.py   # Aggregated stats
-│   └── ai_analyzer.py         # AI commit analysis orchestrator
-├── schemas/
-│   ├── common.py              # Enums, PaginatedResponse, errors
-│   ├── workspace.py           # Workspace CRUD schemas
-│   ├── project.py             # Project CRUD schemas
-│   ├── task.py                # Task CRUD schemas
-│   ├── oppm.py                # OPPM objective/timeline/cost
-│   ├── git.py                 # Git account/repo schemas
-│   ├── ai.py                  # AI model config schemas
-│   ├── notification.py        # Notification schemas
-│   └── dashboard.py           # Dashboard stats schema
+│   ├── ai_analyzer.py         # AI commit analysis (with LLM fallback)
+│   ├── ai_chat_service.py     # AI chat + suggest-plan + weekly summary
+│   └── rag_service.py         # RAG pipeline orchestration
 ├── routers/
 │   ├── v1/                    # New workspace-scoped routes
 │   │   ├── auth.py            # GET /me
@@ -226,17 +236,52 @@ backend/
 │   │   ├── tasks.py           # Workspace-scoped task CRUD
 │   │   ├── oppm.py            # Objectives + timeline + costs
 │   │   ├── git.py             # Git accounts + repos + commits + webhook
-│   │   ├── ai.py              # AI model config
+│   │   ├── ai.py              # AI model config (ALLOWED_PROVIDERS validation)
+│   │   ├── ai_chat.py         # AI chat, suggest-plan, weekly-summary
+│   │   ├── rag.py             # RAG query endpoint
+│   │   ├── mcp.py             # MCP tool list + execution
 │   │   ├── notifications.py   # User-scoped notifications
 │   │   └── dashboard.py       # Workspace stats
 │   └── *.py                   # Legacy routes (backwards compat)
+├── schemas/
+│   ├── common.py              # Enums, PaginatedResponse, errors
+│   ├── workspace.py           # Workspace CRUD schemas
+│   ├── project.py             # Project CRUD schemas
+│   ├── task.py                # Task CRUD schemas
+│   ├── oppm.py                # OPPM objective/timeline/cost
+│   ├── git.py                 # Git account/repo schemas
+│   ├── ai.py                  # AI model config schemas
+│   ├── ai_chat.py             # Chat request/response schemas
+│   ├── rag.py                 # RAGQueryRequest/Response
+│   ├── notification.py        # Notification schemas
+│   └── dashboard.py           # Dashboard stats schema
 └── infrastructure/
-    └── llm/
-        ├── base.py            # LLMAdapter ABC + LLMResponse
-        ├── ollama.py          # Ollama local adapter
-        ├── kimi.py            # Kimi/Moonshot adapter
-        ├── anthropic.py       # Claude adapter
-        └── openai.py          # OpenAI adapter
+    ├── llm/
+    │   ├── base.py            # LLMAdapter ABC + ProviderUnavailableError
+    │   ├── __init__.py        # call_with_fallback() factory
+    │   ├── ollama.py          # Ollama local/cloud adapter
+    │   ├── kimi.py            # Kimi/Moonshot adapter
+    │   ├── anthropic.py       # Claude adapter
+    │   └── openai.py          # OpenAI adapter
+    ├── rag/
+    │   ├── __init__.py        # Package exports
+    │   ├── embedder.py        # OpenAI text-embedding-3-small (1536 dims)
+    │   ├── reranker.py        # Reciprocal Rank Fusion (RRF)
+    │   ├── memory.py          # Conversation memory from audit_log
+    │   ├── agent.py           # Pattern-based query classifier
+    │   └── retrievers/
+    │       ├── base_retriever.py    # RetrievedChunk dataclass + ABC
+    │       ├── vector_retriever.py  # pgvector cosine similarity
+    │       ├── keyword_retriever.py # ILIKE on tasks/objectives
+    │       └── structured_retriever.py  # Direct DB for costs/projects
+    └── mcp/
+        ├── __init__.py        # Package exports
+        └── tools/
+            ├── __init__.py    # TOOL_REGISTRY dict
+            ├── project_tools.py   # get_project_status, list_projects
+            ├── objective_tools.py # list_at_risk_objectives
+            ├── task_tools.py      # get_task_summary
+            └── commit_tools.py    # summarize_recent_commits
 ```
 
 ### Request Flow
@@ -308,10 +353,77 @@ Supabase Client (service_role_key, bypasses RLS) → PostgreSQL
 | `POST` | `/api/v1/workspaces/:ws/github-accounts` | Admin | Add git account |
 | `GET` | `/api/v1/workspaces/:ws/ai/models` | Member | AI models |
 | `POST` | `/api/v1/workspaces/:ws/ai/models` | Admin | Add AI model |
+| `POST` | `/api/v1/workspaces/:ws/projects/:id/ai/chat` | Member | AI chat |
+| `POST` | `/api/v1/workspaces/:ws/projects/:id/ai/suggest-plan` | Member | Suggest OPPM plan |
+| `GET` | `/api/v1/workspaces/:ws/projects/:id/ai/weekly-summary` | Member | Weekly AI summary |
+| `POST` | `/api/v1/workspaces/:ws/rag/query` | Member | RAG retrieval pipeline |
+| `GET` | `/api/v1/workspaces/:ws/mcp/tools` | Member | List MCP tools |
+| `POST` | `/api/v1/workspaces/:ws/mcp/call` | Member | Execute MCP tool |
 | `GET` | `/api/v1/workspaces/:ws/dashboard/stats` | Member | Dashboard stats |
 | `GET` | `/api/v1/notifications` | JWT | User notifications |
 | `PUT` | `/api/v1/notifications/read-all` | JWT | Mark all read |
 | `POST` | `/api/v1/git/webhook` | HMAC | GitHub webhook |
+
+---
+
+## RAG Architecture
+
+### Pipeline Overview
+
+```
+User Query
+    │
+    ▼
+Query Classifier (pattern-based regex routing)
+    │      │      │
+    ▼      ▼      ▼
+Vector  Keyword  Structured
+Retriever Retriever Retriever
+ (pgvector) (ILIKE) (direct DB)
+    │      │      │
+    └──────┴──────┘
+           │
+           ▼
+    RRF Reranker (k=60)
+           │
+    + Memory Loader
+    (last 20 audit_log ai_chat events)
+           │
+           ▼
+    Top-K Chunks → LLM Context
+```
+
+### Query Routing
+
+| Query Pattern | Retrievers Used |
+|---------------|-----------------|
+| objective / goal | vector + keyword |
+| task / todo | vector + keyword |
+| commit / push | vector only |
+| cost / budget | structured only |
+| status / progress | vector + structured |
+| team / member | structured + vector |
+| timeline | vector + structured |
+| (default) | all three |
+
+### LLM Fallback Chain
+
+```
+call_with_fallback(models=[model1, model2, ...], prompt)
+    │
+    ├── Try model1.call() → success → return
+    │
+    ├── ProviderUnavailableError → log warning → continue
+    │
+    ├── Try model2.call() → success → return
+    │
+    └── All failed → raise ProviderUnavailableError
+```
+
+All LLM adapters raise `ProviderUnavailableError` on:
+- `httpx.ConnectError` (service unreachable)
+- `httpx.TimeoutException`
+- `httpx.HTTPStatusError` with 404 / 502 / 503 / 529
 
 ---
 

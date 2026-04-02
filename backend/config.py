@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     kimi_api_key: str = ""
     openai_api_key: str = ""
 
+    # RAG / Embedding
+    embedding_provider: str = "openai"  # openai | ollama
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimension: int = 1536
+    rag_max_context_chars: int = 6000
+    rag_memory_limit: int = 20
+
     # Email (Resend)
     resend_api_key: str = ""
     app_url: str = "http://localhost:5173"

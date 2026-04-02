@@ -776,11 +776,90 @@ function GitHubSettings() {
   )
 }
 
+const OLLAMA_CLOUD_ENDPOINT = 'https://ollama.com/api'
+
+const AI_MODEL_PRESETS: {
+  id: string
+  provider: string
+  icon: string
+  label: string
+  cloudNote?: string
+  models: { name: string; model_id: string; description: string; endpoint?: string }[]
+}[] = [
+  {
+    id: 'ollama-local',
+    provider: 'ollama',
+    icon: '🦙',
+    label: 'Ollama (Local)',
+    models: [
+      { name: 'Llama 3.2', model_id: 'llama3.2', description: 'Meta · 3B · Fast local inference' },
+      { name: 'Llama 3.1', model_id: 'llama3.1', description: 'Meta · 8B · General purpose' },
+      { name: 'Mistral 7B', model_id: 'mistral', description: 'Mistral AI · 7B · Balanced' },
+      { name: 'Gemma 2', model_id: 'gemma2', description: 'Google · 9B · Efficient' },
+      { name: 'Qwen 2.5', model_id: 'qwen2.5', description: 'Alibaba · 7B · Multilingual' },
+      { name: 'DeepSeek R1', model_id: 'deepseek-r1', description: 'DeepSeek · 7B · Reasoning' },
+    ],
+  },
+  {
+    id: 'ollama-cloud',
+    provider: 'ollama',
+    icon: '☁️',
+    label: 'Ollama Cloud',
+    cloudNote: `Requires Ollama cloud endpoint. Update the endpoint_url after adding if your setup differs.`,
+    models: [
+      { name: 'GPT-OSS 120B', model_id: 'gpt-oss:120b-cloud', description: 'Large open-source model', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'GPT-OSS 20B', model_id: 'gpt-oss:20b-cloud', description: 'Medium open-source model', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'DeepSeek V3.1', model_id: 'deepseek-v3.1:671b-cloud', description: 'DeepSeek · 671B · Powerful reasoning', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'Qwen3 Coder', model_id: 'qwen3-coder:480b-cloud', description: 'Alibaba · Specialized for code', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'Qwen3 VL', model_id: 'qwen3-vl:235b-cloud', description: 'Alibaba · Vision & language', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'MiniMax M2', model_id: 'minimax-m2:cloud', description: 'Efficient high-performance model', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'ALM 4.6', model_id: 'alm-4.6:cloud', description: 'Advanced language model', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'Kimi K2.5', model_id: 'kimi-k2.5:cloud', description: 'Moonshot · Long context · Powerful', endpoint: OLLAMA_CLOUD_ENDPOINT },
+    ],
+  },
+  {
+    id: 'openai',
+    provider: 'openai',
+    icon: '⚡',
+    label: 'OpenAI',
+    models: [
+      { name: 'GPT-4o', model_id: 'gpt-4o', description: 'Latest flagship · Multimodal' },
+      { name: 'GPT-4o Mini', model_id: 'gpt-4o-mini', description: 'Fast & affordable' },
+      { name: 'GPT-4 Turbo', model_id: 'gpt-4-turbo', description: 'High capability · 128K context' },
+      { name: 'GPT-3.5 Turbo', model_id: 'gpt-3.5-turbo', description: 'Fast & cost-effective' },
+    ],
+  },
+  {
+    id: 'anthropic',
+    provider: 'anthropic',
+    icon: '🤖',
+    label: 'Anthropic',
+    models: [
+      { name: 'Claude Opus 4.5', model_id: 'claude-opus-4-5-20251101', description: 'Most powerful · Complex tasks' },
+      { name: 'Claude Sonnet 4.5', model_id: 'claude-sonnet-4-5-20251022', description: 'Balanced performance' },
+      { name: 'Claude 3 Haiku', model_id: 'claude-3-haiku-20240307', description: 'Fastest · Lightweight tasks' },
+    ],
+  },
+  {
+    id: 'kimi',
+    provider: 'kimi',
+    icon: '🌙',
+    label: 'Kimi (Moonshot)',
+    models: [
+      { name: 'Kimi K2.5', model_id: 'kimi-k2-5', description: 'Moonshot · Long context · Chinese/English' },
+      { name: 'Moonshot v1 8K', model_id: 'moonshot-v1-8k', description: 'Moonshot · 8K context' },
+      { name: 'Moonshot v1 32K', model_id: 'moonshot-v1-32k', description: 'Moonshot · 32K context' },
+    ],
+  },
+]
+
 function AIModelSettings() {
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const [showAdd, setShowAdd] = useState(false)
+  const [activeProvider, setActiveProvider] = useState('ollama-local')
+  const [customMode, setCustomMode] = useState(false)
   const [modelName, setModelName] = useState('')
   const [provider, setProvider] = useState('ollama')
   const [modelId, setModelId] = useState('')
@@ -799,6 +878,7 @@ function AIModelSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-models'] })
       setShowAdd(false)
+      setCustomMode(false)
       setModelName('')
       setProvider('ollama')
       setModelId('')
@@ -842,13 +922,16 @@ function AIModelSettings() {
     custom: '🔧',
   }
 
+  const activePreset = AI_MODEL_PRESETS.find((p) => p.id === activeProvider)
+  const addedModelIds = new Set(list.map((m) => m.model_id))
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-text">AI Models for Commit Analysis</h2>
           <button
-            onClick={() => setShowAdd(!showAdd)}
+            onClick={() => { setShowAdd(!showAdd); setCustomMode(false) }}
             className="flex items-center gap-1.5 text-sm font-medium text-primary hover:text-primary-dark"
           >
             <Plus className="h-3.5 w-3.5" /> Add Model
@@ -856,68 +939,165 @@ function AIModelSettings() {
         </div>
 
         {showAdd && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              createModel.mutate({
-                name: modelName,
-                provider,
-                model_id: modelId,
-                endpoint_url: endpointUrl || null,
-              })
-            }}
-            className="mb-4 rounded-lg border border-border bg-surface-alt p-4 space-y-3"
-          >
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                placeholder="Model name (e.g. GPT-4o)"
-                value={modelName}
-                onChange={(e) => setModelName(e.target.value)}
-                required
-                className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
-              />
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
-              >
-                <option value="ollama">Ollama (Local)</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-                <option value="kimi">Kimi</option>
-                <option value="custom">Custom</option>
-              </select>
-              <input
-                placeholder="Model ID (e.g. gpt-4o)"
-                value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
-                required
-                className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
-              />
-              <input
-                placeholder="Endpoint URL (optional)"
-                value={endpointUrl}
-                onChange={(e) => setEndpointUrl(e.target.value)}
-                className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
+          <div className="mb-4 rounded-lg border border-border bg-surface-alt overflow-hidden">
+            {/* Provider tabs */}
+            <div className="flex border-b border-border overflow-x-auto">
+              {AI_MODEL_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => { setActiveProvider(p.id); setCustomMode(false) }}
+                  className={cn(
+                    'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
+                    activeProvider === p.id && !customMode
+                      ? 'border-primary text-primary bg-white'
+                      : 'border-transparent text-text-secondary hover:text-text'
+                  )}
+                >
+                  <span>{p.icon}</span> {p.label}
+                </button>
+              ))}
               <button
-                type="button"
-                onClick={() => setShowAdd(false)}
-                className="rounded-lg border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-white"
+                onClick={() => { setCustomMode(true); setProvider('custom') }}
+                className={cn(
+                  'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
+                  customMode
+                    ? 'border-primary text-primary bg-white'
+                    : 'border-transparent text-text-secondary hover:text-text'
+                )}
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={createModel.isPending}
-                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50"
-              >
-                {createModel.isPending ? 'Adding...' : 'Add Model'}
+                <span>🔧</span> Custom
               </button>
             </div>
-          </form>
+
+            {/* Model list or custom form */}
+            {!customMode ? (
+              <div className="p-3 space-y-1.5">
+                {activePreset?.cloudNote && (
+                  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-1">
+                    ⚠️ {activePreset.cloudNote}
+                  </p>
+                )}
+                {activePreset?.models.map((m) => {
+                  const alreadyAdded = addedModelIds.has(m.model_id)
+                  return (
+                    <div
+                      key={m.model_id}
+                      className="flex items-center justify-between rounded-lg border border-border bg-white px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-text">{m.name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="font-mono text-[11px] bg-surface-alt px-1.5 py-0.5 rounded text-text-secondary">
+                            {m.model_id}
+                          </span>
+                          <span className="text-xs text-text-secondary">{m.description}</span>
+                        </div>
+                      </div>
+                      <button
+                        disabled={alreadyAdded || createModel.isPending}
+                        onClick={() =>
+                          createModel.mutate({
+                            name: m.name,
+                            provider: activeProvider,
+                            model_id: m.model_id,
+                            endpoint_url: m.endpoint ?? null,
+                          })
+                        }
+                        className={cn(
+                          'ml-3 shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                          alreadyAdded
+                            ? 'bg-emerald-50 text-emerald-600 cursor-default'
+                            : 'bg-primary text-white hover:bg-primary-dark disabled:opacity-50'
+                        )}
+                      >
+                        {alreadyAdded ? <span className="flex items-center gap-1"><Check className="h-3 w-3" /> Added</span> : 'Add'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  createModel.mutate({ name: modelName, provider, model_id: modelId, endpoint_url: endpointUrl || null })
+                }}
+                className="p-4 space-y-3"
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-text-secondary">Display Name</label>
+                    <input
+                      placeholder="e.g. My GPT-4o"
+                      value={modelName}
+                      onChange={(e) => setModelName(e.target.value)}
+                      required
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-text-secondary">Provider</label>
+                    <select
+                      value={provider}
+                      onChange={(e) => setProvider(e.target.value)}
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                    >
+                      <option value="ollama">Ollama (Local)</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="openai">OpenAI</option>
+                      <option value="kimi">Kimi</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-text-secondary">Model ID</label>
+                    <input
+                      placeholder="e.g. gpt-4o"
+                      value={modelId}
+                      onChange={(e) => setModelId(e.target.value)}
+                      required
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-text-secondary">Endpoint URL <span className="text-text-secondary/60">(optional)</span></label>
+                    <input
+                      placeholder="https://..."
+                      value={endpointUrl}
+                      onChange={(e) => setEndpointUrl(e.target.value)}
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowAdd(false); setCustomMode(false) }}
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={createModel.isPending}
+                    className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50"
+                  >
+                    {createModel.isPending ? 'Adding...' : 'Add Model'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Close bar */}
+            <div className="flex justify-end border-t border-border px-3 py-2">
+              <button
+                onClick={() => { setShowAdd(false); setCustomMode(false) }}
+                className="text-xs text-text-secondary hover:text-text"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         )}
 
         {isLoading ? (

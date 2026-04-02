@@ -12,6 +12,8 @@ from routers.v1 import (
     ai_chat,
     notifications,
     dashboard,
+    rag,
+    mcp,
 )
 
 router = APIRouter(prefix="/v1")
@@ -26,3 +28,5 @@ router.include_router(ai.router, tags=["ai"])
 router.include_router(ai_chat.router, tags=["ai-chat"])
 router.include_router(notifications.router, tags=["notifications"])
 router.include_router(dashboard.router, tags=["dashboard"])
+router.include_router(rag.router, tags=["rag"])
+router.include_router(mcp.router, tags=["mcp"])

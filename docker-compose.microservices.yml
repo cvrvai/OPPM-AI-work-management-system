@@ -1,0 +1,91 @@
+services:
+  gateway:
+    build: ./gateway
+    ports:
+      - "80:80"
+    depends_on:
+      core:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      git:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
+
+  core:
+    build:
+      context: .
+      dockerfile: services/core/Dockerfile
+    expose:
+      - "8000"
+    env_file:
+      - services/.env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ai:
+    build:
+      context: .
+      dockerfile: services/ai/Dockerfile
+    expose:
+      - "8001"
+    env_file:
+      - services/.env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  git:
+    build:
+      context: .
+      dockerfile: services/git/Dockerfile
+    expose:
+      - "8002"
+    env_file:
+      - services/.env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  mcp:
+    build:
+      context: .
+      dockerfile: services/mcp/Dockerfile
+    expose:
+      - "8003"
+    env_file:
+      - services/.env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    expose:
+      - "5173"
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+
+networks:
+  default:
+    name: oppm-network
+
+volumes:
+  redis_data:
