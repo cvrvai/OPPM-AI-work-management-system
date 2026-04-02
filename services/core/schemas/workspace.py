@@ -41,3 +41,24 @@ class InviteCreate(BaseModel):
 
 class InviteAccept(BaseModel):
     token: str
+
+
+class EmailLookupResponse(BaseModel):
+    exists: bool
+    user_id: Optional[str] = None
+    display_name: Optional[str] = None
+    already_member: bool = False
+
+
+class InvitePreviewResponse(BaseModel):
+    invite_id: str
+    workspace_id: str
+    workspace_name: str
+    workspace_slug: str
+    inviter_name: str
+    role: str
+    expires_at: str
+    accepted_at: Optional[str] = None
+    member_count: int
+    is_expired: bool
+    is_accepted: bool

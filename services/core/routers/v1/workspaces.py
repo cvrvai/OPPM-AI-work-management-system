@@ -1,6 +1,6 @@
 """Workspace routes — CRUD, members, invites."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from shared.auth import CurrentUser, get_current_user, WorkspaceContext, get_workspace_context, require_admin
 from schemas.workspace import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept, DisplayNameUpdate
 from shared.schemas.common import SuccessResponse
@@ -17,6 +17,9 @@ from services.workspace_service import (
     accept_invite,
     get_pending_invites,
     revoke_invite,
+    lookup_user_by_email,
+    get_invite_preview,
+    resend_invite,
 )
 
 router = APIRouter()
@@ -90,6 +93,25 @@ async def revoke_invite_route(invite_id: str, ws: WorkspaceContext = Depends(req
     return SuccessResponse()
 
 
+@router.post("/workspaces/{workspace_id}/invites/{invite_id}/resend", status_code=200)
+async def resend_invite_route(invite_id: str, ws: WorkspaceContext = Depends(require_admin)):
+    return resend_invite(ws.workspace_id, invite_id, ws.user.id)
+
+
+@router.get("/workspaces/{workspace_id}/members/lookup")
+async def lookup_member_route(
+    email: str = Query(..., min_length=3, max_length=255),
+    ws: WorkspaceContext = Depends(require_admin),
+):
+    return lookup_user_by_email(ws.workspace_id, email)
+
+
 @router.post("/invites/accept")
 async def accept_invite_route(data: InviteAccept, user: CurrentUser = Depends(get_current_user)):
     return accept_invite(data.token, user.id)
+
+
+@router.get("/invites/preview/{token}")
+async def invite_preview_route(token: str):
+    """Public — no auth required. Returns workspace preview for the invite."""
+    return get_invite_preview(token)

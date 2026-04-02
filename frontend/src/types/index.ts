@@ -183,6 +183,13 @@ export interface AIModel {
 }
 
 // ── Dashboard Stats ──
+export interface ProjectProgress {
+  project_id: string
+  title: string
+  progress: number
+  status: string
+}
+
 export interface DashboardStats {
   total_projects: number
   active_projects: number
@@ -191,6 +198,7 @@ export interface DashboardStats {
   total_commits_today: number
   avg_quality_score: number
   avg_alignment_score: number
+  project_progress: ProjectProgress[]
 }
 
 // ── Notifications ──

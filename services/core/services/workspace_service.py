@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 import logging
 from fastapi import HTTPException, status
+from shared.database import get_db
 from repositories.workspace_repo import (
     WorkspaceRepository,
     WorkspaceMemberRepository,
@@ -105,6 +106,12 @@ def update_my_display_name(workspace_id: str, user_id: str, display_name: str) -
 def create_invite(workspace_id: str, email: str, role: str, invited_by: str) -> dict:
     token = secrets.token_urlsafe(48)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+
+    # Check if user has an account to set is_new_user flag
+    db = get_db()
+    lookup = db.rpc("lookup_user_by_email", {"p_email": email}).execute()
+    has_account = bool(lookup.data)
+
     invite = invite_repo.create({
         "workspace_id": workspace_id,
         "email": email,
@@ -112,6 +119,8 @@ def create_invite(workspace_id: str, email: str, role: str, invited_by: str) -> 
         "invited_by": invited_by,
         "token": token,
         "expires_at": expires_at,
+        "is_new_user": not has_account,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
     })
     audit_repo.log(workspace_id, invited_by, "invite", "workspace_invite", invite["id"], new_data={"email": email})
 
@@ -166,3 +175,68 @@ def revoke_invite(workspace_id: str, invite_id: str, actor_id: str) -> bool:
         raise HTTPException(status_code=400, detail="Cannot revoke an accepted invite")
     audit_repo.log(workspace_id, actor_id, "revoke_invite", "workspace_invite", invite_id)
     return invite_repo.delete(invite_id)
+
+
+def lookup_user_by_email(workspace_id: str, email: str) -> dict:
+    """Check if email has an account and whether they're already a workspace member."""
+    db = get_db()
+    lookup = db.rpc("lookup_user_by_email", {"p_email": email}).execute()
+    if not lookup.data:
+        return {"exists": False, "user_id": None, "display_name": None, "already_member": False}
+    user_row = lookup.data[0]
+    existing = member_repo.find_by_user_and_workspace(user_row["id"], workspace_id)
+    return {
+        "exists": True,
+        "user_id": user_row["id"],
+        "display_name": user_row.get("display_name"),
+        "already_member": existing is not None,
+    }
+
+
+def get_invite_preview(token: str) -> dict:
+    """Public endpoint — return workspace preview for an invite token."""
+    db = get_db()
+    result = db.rpc("get_invite_preview", {"p_token": token}).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    row = result.data[0]
+    expires_at = datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+    return {
+        "invite_id": row["invite_id"],
+        "workspace_id": row["workspace_id"],
+        "workspace_name": row["workspace_name"],
+        "workspace_slug": row["workspace_slug"],
+        "inviter_name": row["inviter_name"],
+        "role": row["role"],
+        "expires_at": row["expires_at"],
+        "accepted_at": row["accepted_at"],
+        "member_count": row["member_count"],
+        "is_expired": expires_at is not None and expires_at < datetime.now(timezone.utc),
+        "is_accepted": row["accepted_at"] is not None,
+    }
+
+
+def resend_invite(workspace_id: str, invite_id: str, actor_id: str) -> dict:
+    """Regenerate token + expiry and re-send the invite email."""
+    invite = invite_repo.find_by_id(invite_id)
+    if not invite or invite["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite["accepted_at"]:
+        raise HTTPException(status_code=400, detail="Invite already accepted")
+
+    new_token = secrets.token_urlsafe(48)
+    new_expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    updated = invite_repo.update(invite_id, {
+        "token": new_token,
+        "expires_at": new_expires,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    ws = workspace_repo.find_by_id(workspace_id)
+    ws_name = ws["name"] if ws else "a workspace"
+    inviter_member = member_repo.find_by_user_and_workspace(actor_id, workspace_id)
+    inviter_display = inviter_member.get("display_name", "") if inviter_member else ""
+    send_invite_email(invite["email"], ws_name, inviter_display or actor_id, new_token, invite["role"])
+
+    audit_repo.log(workspace_id, actor_id, "resend_invite", "workspace_invite", invite_id)
+    return updated

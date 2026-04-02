@@ -52,13 +52,25 @@ function nextStatus(current: string | undefined): string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Metadata type
+// Metadata types
 // ─────────────────────────────────────────────────────────────
+interface RiskItem {
+  text: string
+  rag: 'green' | 'amber' | 'red'
+}
+
 interface OPPMMetadata {
   deliverable_output?: string
   summary_deliverables?: string[]
-  forecast?: string[]
-  risks?: string[]
+  forecast?: string | string[]
+  risks?: RiskItem[] | string[]
+}
+
+interface NormalizedMeta {
+  deliverable_output: string
+  summary_deliverables: string[]
+  forecast: string
+  risks: RiskItem[]
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -200,6 +212,154 @@ function EditableList({
           </span>
         </div>
       ))}
+      <div className="text-[10px] text-transparent group-hover:text-blue-400 mt-0.5 transition-colors">
+        ✎ click to edit
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RiskEditor — numbered list with RAG (Red/Amber/Green) status
+// ─────────────────────────────────────────────────────────────
+const RAG_COLORS = {
+  green: { dot: 'bg-emerald-500', ring: 'ring-emerald-300' },
+  amber: { dot: 'bg-amber-500', ring: 'ring-amber-300' },
+  red:   { dot: 'bg-red-500', ring: 'ring-red-300' },
+} as const
+
+function RiskEditor({
+  items,
+  onSave,
+}: {
+  items: RiskItem[]
+  onSave: (items: RiskItem[]) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<RiskItem[]>([])
+
+  const startEdit = () => { setDraft(items.map((it) => ({ ...it }))); setEditing(true) }
+
+  if (editing) {
+    return (
+      <div className="space-y-1.5">
+        {draft.map((item, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <span className="text-[10px] text-gray-400 w-4 shrink-0">{i + 1}.</span>
+            {(['green', 'amber', 'red'] as const).map((rag) => (
+              <button
+                key={rag}
+                type="button"
+                onClick={() => {
+                  const next = [...draft]
+                  next[i] = { ...next[i], rag }
+                  setDraft(next)
+                }}
+                className={cn(
+                  'h-3.5 w-3.5 rounded-full shrink-0 transition-all',
+                  RAG_COLORS[rag].dot,
+                  item.rag === rag ? `ring-2 ${RAG_COLORS[rag].ring} scale-110` : 'opacity-40 hover:opacity-70'
+                )}
+                title={rag.charAt(0).toUpperCase() + rag.slice(1)}
+              />
+            ))}
+            <input
+              value={item.text}
+              onChange={(e) => {
+                const next = [...draft]
+                next[i] = { ...next[i], text: e.target.value }
+                setDraft(next)
+              }}
+              className="flex-1 text-xs border border-blue-400 rounded px-1.5 py-0.5 outline-none focus:border-blue-500"
+            />
+          </div>
+        ))}
+        <div className="flex gap-2 mt-1.5">
+          <button
+            onClick={() => { onSave(draft); setEditing(false) }}
+            className="text-[10px] bg-blue-600 text-white rounded px-2 py-0.5 font-medium hover:bg-blue-700"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[10px] text-gray-500 hover:text-gray-700"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="cursor-pointer group" onClick={startEdit}>
+      {items.map((item, i) => (
+        <div key={i} className="flex items-center gap-1.5 text-xs leading-5 hover:bg-amber-50/60 rounded px-0.5">
+          <span className="text-gray-400 shrink-0">{i + 1}.</span>
+          <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', RAG_COLORS[item.rag].dot)} />
+          <span className="text-gray-700">
+            {item.text || <em className="not-italic text-gray-300">—</em>}
+          </span>
+        </div>
+      ))}
+      <div className="text-[10px] text-transparent group-hover:text-blue-400 mt-0.5 transition-colors">
+        ✎ click to edit
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// InlineTextarea — click-to-edit multi-line text
+// ─────────────────────────────────────────────────────────────
+function InlineTextarea({
+  value,
+  onSave,
+}: {
+  value: string
+  onSave: (value: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const startEdit = () => { setDraft(value); setEditing(true) }
+
+  if (editing) {
+    return (
+      <div className="space-y-1.5">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={4}
+          className="w-full text-xs border border-blue-400 rounded px-2 py-1.5 outline-none focus:border-blue-500 resize-none"
+          autoFocus
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => { onSave(draft); setEditing(false) }}
+            className="text-[10px] bg-blue-600 text-white rounded px-2 py-0.5 font-medium hover:bg-blue-700"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[10px] text-gray-500 hover:text-gray-700"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="cursor-pointer group" onClick={startEdit}>
+      {value ? (
+        <p className="text-xs leading-5 text-gray-700 whitespace-pre-wrap">{value}</p>
+      ) : (
+        <p className="text-xs text-gray-300 italic">Click to add forecast narrative...</p>
+      )}
       <div className="text-[10px] text-transparent group-hover:text-blue-400 mt-0.5 transition-colors">
         ✎ click to edit
       </div>
@@ -448,13 +608,31 @@ export function OPPMView() {
     [weekOffset, projectStart]
   )
 
-  const meta: Required<OPPMMetadata> = useMemo(() => {
+  const meta: NormalizedMeta = useMemo(() => {
     const m = (project?.metadata as OPPMMetadata) ?? {}
+    // Normalize risks: handle legacy string[] or new RiskItem[]
+    let risks: RiskItem[]
+    if (m.risks?.length) {
+      risks = (m.risks as (string | RiskItem)[]).map((item) =>
+        typeof item === 'string' ? { text: item, rag: 'green' as const } : item
+      )
+    } else {
+      risks = [{ text: '', rag: 'green' }, { text: '', rag: 'green' }, { text: '', rag: 'green' }, { text: '', rag: 'green' }]
+    }
+    // Normalize forecast: handle legacy string[] or new string
+    let forecast: string
+    if (typeof m.forecast === 'string') {
+      forecast = m.forecast
+    } else if (Array.isArray(m.forecast) && m.forecast.length) {
+      forecast = m.forecast.filter(Boolean).join('\n')
+    } else {
+      forecast = ''
+    }
     return {
       deliverable_output:    m.deliverable_output    ?? '',
       summary_deliverables:  m.summary_deliverables?.length ? m.summary_deliverables : ['', '', '', ''],
-      forecast:              m.forecast?.length             ? m.forecast             : ['', '', '', ''],
-      risks:                 m.risks?.length                ? m.risks                : ['', '', '', ''],
+      forecast,
+      risks,
     }
   }, [project?.metadata])
 
@@ -1183,8 +1361,8 @@ export function OPPMView() {
                 colSpan={2}
                 className="border border-gray-300 px-2 py-2 align-top"
               >
-                <EditableList
-                  items={meta.forecast}
+                <InlineTextarea
+                  value={meta.forecast}
                   onSave={(v) => updateMeta.mutate({ forecast: v })}
                 />
               </td>{/* */}
@@ -1197,7 +1375,7 @@ export function OPPMView() {
                 colSpan={2}
                 className="border border-gray-300 px-2 py-2 align-top"
               >
-                <EditableList
+                <RiskEditor
                   items={meta.risks}
                   onSave={(v) => updateMeta.mutate({ risks: v })}
                 />

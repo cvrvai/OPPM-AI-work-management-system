@@ -253,6 +253,105 @@ POST   /v1/workspaces/{ws}/mcp/call            → execute an MCP tool by name
 
 ---
 
+## Phase 7 — Microservices Migration ✅ COMPLETE
+
+**Goal:** Break the FastAPI monolith into 4 focused microservices behind an nginx reverse proxy for independent scaling, deployment, and development.
+
+### Summary of Changes
+
+| # | Task | Status | Files Changed |
+|---|------|--------|---------------|
+| 7.1 | Split monolith into 4 services (core/ai/git/mcp) | ✅ | `services/core/`, `services/ai/`, `services/git/`, `services/mcp/` |
+| 7.2 | Create `shared/` package for common auth/db/config | ✅ | `shared/auth.py`, `shared/database.py`, `shared/config.py` |
+| 7.3 | nginx gateway with dynamic DNS resolver | ✅ | `gateway/nginx.conf` |
+| 7.4 | Docker Compose production + dev overlay | ✅ | `docker-compose.microservices.yml`, `docker-compose.dev.yml` |
+| 7.5 | Fix nginx 502: static upstream → variable + resolver | ✅ | `gateway/nginx.conf` |
+| 7.6 | Remove duplicate CORS middleware from service containers | ✅ | `services/ai/main.py`, `services/git/main.py`, `services/mcp/main.py` |
+| 7.7 | Fix GitHub webhook HMAC (make required, not optional) | ✅ | `services/git/routers/v1/git.py` |
+| 7.8 | Internal service auth (`X-Internal-API-Key`) | ✅ | `shared/auth.py`, `services/ai/routers/internal/` |
+| 7.9 | Create `MICROSERVICES.md` operational guide | ✅ | `MICROSERVICES.md` |
+| 7.10 | Create `DEVELOPMENT.md` with native run instructions | ✅ | `DEVELOPMENT.md` |
+| 7.11 | Fix `shared/pyproject.toml` for Python 3.11 | ✅ | `shared/pyproject.toml` |
+
+### Architecture
+
+```
+Client → nginx:80 (gateway) → core:8000   (workspaces, projects, tasks, OPPM, dashboard)
+                             → ai:8001     (LLM chat, RAG, AI analysis, AI models)
+                             → git:8002    (GitHub webhooks, commits, repo configs)
+                             → mcp:8003    (MCP tool registry + execution)
+```
+
+### Key Decisions
+- **Shared package**: `pip install -e shared/` in editable mode. Docker uses `ENV PYTHONPATH=/`. Natively: `PYTHONPATH=$(workspace root)` + `uvicorn --app-dir services/<name>`.
+- **nginx DNS**: `resolver 127.0.0.11 valid=5s; set $upstream_core http://core:8000; proxy_pass $upstream_core` — re-queries Docker DNS on every request, prevents stale IPs on container restarts.
+- **CORS**: Handled exclusively by nginx `add_header Access-Control-Allow-Origin`; services have no `CORSMiddleware`.
+- **Internal API**: Git service calls AI service fire-and-forget via `asyncio.create_task(trigger_ai_analysis(...))` to avoid blocking GitHub webhook timeout.
+
+---
+
+## Phase 8 — Production Invite Flow ✅ COMPLETE
+
+**Goal:** Replace the basic invite link with a production-grade flow supporting live email lookup, user-type detection, workspace preview, and invite resend.
+
+### Summary of Changes
+
+| # | Task | Status | Files Changed |
+|---|------|--------|---------------|
+| 8.1 | DB migration: `lookup_user_by_email` RPC (SECURITY DEFINER, queries auth.users) | ✅ | Supabase migration `invite_flow_helpers` |
+| 8.2 | DB migration: `get_invite_preview` RPC (public, returns workspace preview) | ✅ | Supabase migration `invite_flow_helpers` |
+| 8.3 | DB migration: add `is_new_user BOOLEAN` + `sent_at TIMESTAMPTZ` to `workspace_invites` | ✅ | Supabase migration `invite_flow_helpers` |
+| 8.4 | Backend: `lookup_user_by_email` service + endpoint | ✅ | `services/core/services/workspace_service.py`, `routers/v1/workspaces.py` |
+| 8.5 | Backend: `get_invite_preview` service + endpoint (public, no auth) | ✅ | `services/core/services/workspace_service.py`, `routers/v1/workspaces.py` |
+| 8.6 | Backend: `resend_invite` service + endpoint | ✅ | `services/core/services/workspace_service.py`, `routers/v1/workspaces.py` |
+| 8.7 | Backend: update `create_invite` to set `is_new_user` + `sent_at` | ✅ | `services/core/services/workspace_service.py` |
+| 8.8 | Frontend: `Settings.tsx` — `MembersSettings` full redesign | ✅ | `frontend/src/pages/Settings.tsx` |
+| 8.9 | Frontend: `AcceptInvite.tsx` — workspace preview before accepting | ✅ | `frontend/src/pages/AcceptInvite.tsx` |
+| 8.10 | Frontend: `Login.tsx` — invite token handling + auto-accept after sign-in | ✅ | `frontend/src/pages/Login.tsx` |
+
+### New API Endpoints
+
+```
+GET  /v1/workspaces/{id}/members/lookup?email=  → admin: email lookup (exists, already_member)
+GET  /v1/invites/preview/{token}                → public: workspace preview (no auth required)
+POST /v1/workspaces/{id}/invites/{invite_id}/resend → admin: regenerate token + resend email
+```
+
+### Key UX Changes
+- **Settings Members tab**: live debounced email lookup (500ms), color-coded banners (green = has account, amber = new user, red = already member), role picker cards with descriptions + "recommended" badge, dynamic CTA ("Send Sign-Up Invite" vs "Send Invite"), pending invites with `is_new_user`/`is_existing` badges + expiry countdown + **Resend** button.
+- **AcceptInvite page**: fetches public workspace preview first — shows name, member count, role, inviter, expiry. Handles expired/accepted/not-found states. Unauthenticated users see "Sign In to Join" → preserves token in query param.
+- **Login page**: reads `?invite=token`, shows invite context banner, auto-accepts then navigates after sign-in.
+
+---
+
+## Phase 9 — Dashboard UX Overhaul + Loading Skeletons ✅ COMPLETE
+
+**Goal:** Replace the static fake chart and spinner with real data visualisation and smooth skeleton loading states across the Dashboard.
+
+### Summary of Changes
+
+| # | Task | Status | Files Changed |
+|---|------|--------|---------------|
+| 9.1 | Backend: add `project_progress` to `DashboardStats` schema | ✅ | `services/core/schemas/dashboard.py` |
+| 9.2 | Backend: populate `project_progress` from projects list (no extra DB call) | ✅ | `services/core/services/dashboard_service.py` |
+| 9.3 | Frontend: create shared `Skeleton` component | ✅ | `frontend/src/components/Skeleton.tsx` |
+| 9.4 | Frontend: add `ProjectProgress` type + update `DashboardStats` | ✅ | `frontend/src/types/index.ts` |
+| 9.5 | Frontend: replace fake `AreaChart` with live `BarChart` per project | ✅ | `frontend/src/pages/Dashboard.tsx` |
+| 9.6 | Frontend: stat cards with `border-l-4` color accent | ✅ | `frontend/src/pages/Dashboard.tsx` |
+| 9.7 | Frontend: skeleton layout for loading state (cards, chart, analysis list) | ✅ | `frontend/src/pages/Dashboard.tsx` |
+| 9.8 | Frontend: score pills with semantic background colors | ✅ | `frontend/src/pages/Dashboard.tsx` |
+| 9.9 | Frontend: project progress list section with inline progress bars | ✅ | `frontend/src/pages/Dashboard.tsx` |
+| 9.10 | Frontend: empty states with icons for chart + analyses panels | ✅ | `frontend/src/pages/Dashboard.tsx` |
+
+### Architecture Decisions
+- **Skeleton component**: generic `<Skeleton className="">` using `animate-pulse bg-slate-200`. Each loading section renders a matching shape skeleton rather than a centered spinner.
+- **`project_progress` data**: computed in `dashboard_service.py` from the projects list already loaded — no extra DB query.
+- **Bar chart**: Recharts `BarChart` with per-bar `Cell` coloring by project status. Custom `ProjectTooltip`. Bars truncated to 10 chars on X-axis.
+- **`StatCard`**: `border-l-4` accent (blue/green/violet/amber) gives immediate visual grouping; icon square moved to top-right; value typography enlarged to `text-3xl`.
+- **`ScorePill`**: semantic background (emerald ≥80, blue ≥60, amber ≥40, red <40) replaces plain text class colors.
+
+---
+
 ## Reference Files
 - **OPPM reference JSX**: `task/Oppmeditor · JSX.md` — target UI with StatusDot, InlineEdit, ChatPanel
 - **AI API spec**: `task/Oppm api spec.md` — chat, suggest-plan, weekly-summary endpoints
@@ -260,3 +359,27 @@ POST   /v1/workspaces/{ws}/mcp/call            → execute an MCP tool by name
 - **DB schema**: `supabase/schema.sql` — all 17 tables
 - **Architecture**: `docs/ARCHITECTURE.md`
 - **API reference**: `docs/API-REFERENCE.md`
+
+---
+
+## Phase 10 — OPPM Compliance Redesign (April 2026)
+
+**Goal:** Align TaskForm and OPPMView with Clark A. Campbell's OPPM standard (5 pillars + Risks/RAG + Summary & Forecast narrative).
+
+### Status: ✅ Complete
+
+| # | Task | Status | Files |
+|---|------|--------|-------|
+| 10.1 | Add OPPM objective dropdown to TaskForm | ✅ | `frontend/src/pages/ProjectDetail.tsx` |
+| 10.2 | Add Owner assignment dropdown to TaskForm | ✅ | `frontend/src/pages/ProjectDetail.tsx` |
+| 10.3 | Add OPPM compliance hint banner + footer indicator | ✅ | `frontend/src/pages/ProjectDetail.tsx` |
+| 10.4 | Remove non-standard "Project Contribution Weight" field | ✅ | `frontend/src/pages/ProjectDetail.tsx` |
+| 10.5 | Enhance TaskCard with objective (indigo) + owner (slate) badges | ✅ | `frontend/src/pages/ProjectDetail.tsx` |
+| 10.6 | Upgrade Risk section with RAG (Green/Amber/Red) status indicators | ✅ | `frontend/src/pages/OPPMView.tsx` |
+| 10.7 | Convert Forecast from numbered list to narrative textarea | ✅ | `frontend/src/pages/OPPMView.tsx` |
+| 10.8 | Backward-compatible normalization for legacy risk/forecast data | ✅ | `frontend/src/pages/OPPMView.tsx` |
+
+### Key Changes
+- **No backend changes** — all endpoints and schemas already supported `oppm_objective_id`, `assignee_id`, JSONB metadata
+- **Backward compatible** — existing `string[]` risk data auto-converts to `RiskItem[]`; legacy `string[]` forecast joins to narrative string
+- **New inline components**: `RiskEditor` (RAG color selectors per risk), `InlineTextarea` (click-to-edit multi-line)

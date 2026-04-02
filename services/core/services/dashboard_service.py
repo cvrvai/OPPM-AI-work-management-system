@@ -50,6 +50,16 @@ def get_dashboard_stats(workspace_id: str) -> dict:
 
     active = sum(1 for p in projects if p["status"] in ("in_progress", "planning"))
 
+    project_progress = [
+        {
+            "project_id": p["id"],
+            "title": p["title"],
+            "progress": p.get("progress", 0),
+            "status": p.get("status", "planning"),
+        }
+        for p in projects
+    ]
+
     return {
         "total_projects": len(projects),
         "active_projects": active,
@@ -58,4 +68,5 @@ def get_dashboard_stats(workspace_id: str) -> dict:
         "total_commits_today": commits_today,
         "avg_quality_score": round(avg_quality),
         "avg_alignment_score": round(avg_alignment),
+        "project_progress": project_progress,
     }

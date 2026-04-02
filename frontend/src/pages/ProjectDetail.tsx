@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatContext } from '@/hooks/useChatContext'
-import type { Project, Task, Priority, TaskStatus } from '@/types'
+import type { Project, Task, Priority, TaskStatus, OPPMObjective, WorkspaceMember } from '@/types'
 import { cn, getStatusColor, formatDate, getProgressColor } from '@/lib/utils'
 import {
   ArrowLeft,
@@ -17,7 +17,7 @@ import {
   X,
   Trash2,
   ChevronRight,
-  AlertCircle,
+  User,
 } from 'lucide-react'
 
 const statusIcons = {
@@ -59,6 +59,18 @@ export function ProjectDetail() {
   const { data: tasks, isLoading: loadingTasks } = useQuery({
     queryKey: ['tasks', id, ws?.id],
     queryFn: () => ws ? api.get<Task[]>(`${wsPath}/tasks?project_id=${id}`) : api.get<Task[]>(`/projects/${id}/tasks`),
+  })
+
+  const { data: objectives } = useQuery({
+    queryKey: ['oppm-objectives', id, ws?.id],
+    queryFn: () => api.get<OPPMObjective[]>(`${wsPath}/projects/${id}/oppm/objectives`),
+    enabled: !!ws,
+  })
+
+  const { data: members } = useQuery({
+    queryKey: ['workspace-members', ws?.id],
+    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    enabled: !!ws,
   })
 
   // ── Mutations ──
@@ -108,6 +120,9 @@ export function ProjectDetail() {
     in_progress: taskList.filter((t) => t.status === 'in_progress'),
     completed: taskList.filter((t) => t.status === 'completed'),
   }
+
+  const objectiveMap = new Map((objectives ?? []).map((o) => [o.id, o.title]))
+  const memberMap = new Map((members ?? []).map((m) => [m.user_id, m.display_name || m.email || m.user_id.slice(0, 8)]))
 
   return (
     <div className="space-y-6">
@@ -171,6 +186,8 @@ export function ProjectDetail() {
       {showCreate && (
         <TaskForm
           title="Create Task"
+          objectives={objectives ?? []}
+          members={members ?? []}
           onSubmit={(data) => createTask.mutate(data)}
           onCancel={() => setShowCreate(false)}
           isPending={createTask.isPending}
@@ -182,6 +199,8 @@ export function ProjectDetail() {
         <TaskForm
           title="Edit Task"
           initial={editingTask}
+          objectives={objectives ?? []}
+          members={members ?? []}
           onSubmit={(data) => updateTask.mutate({ taskId: editingTask.id, data })}
           onCancel={() => setEditingTask(null)}
           isPending={updateTask.isPending}
@@ -213,6 +232,8 @@ export function ProjectDetail() {
                     <TaskCard
                       key={task.id}
                       task={task}
+                      objectiveName={task.oppm_objective_id ? objectiveMap.get(task.oppm_objective_id) : undefined}
+                      ownerName={task.assignee_id ? memberMap.get(task.assignee_id) : undefined}
                       onEdit={() => setEditingTask(task)}
                       onStatusChange={() =>
                         updateTask.mutate({
@@ -246,11 +267,15 @@ export function ProjectDetail() {
 
 function TaskCard({
   task,
+  objectiveName,
+  ownerName,
   onEdit,
   onStatusChange,
   onDelete,
 }: {
   task: Task
+  objectiveName?: string
+  ownerName?: string
   onEdit: () => void
   onStatusChange: () => void
   onDelete: () => void
@@ -279,6 +304,22 @@ function TaskCard({
       </div>
       {task.description && (
         <p className="text-xs text-text-secondary line-clamp-2 mt-1">{task.description}</p>
+      )}
+      {(objectiveName || ownerName) && (
+        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+          {objectiveName && (
+            <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600">
+              <Target className="h-2.5 w-2.5" />
+              {objectiveName}
+            </span>
+          )}
+          {ownerName && (
+            <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+              <User className="h-2.5 w-2.5" />
+              {ownerName}
+            </span>
+          )}
+        </div>
       )}
       <div className="flex items-center gap-2 mt-2 flex-wrap">
         <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', PRIORITY_COLORS[task.priority])}>
@@ -310,12 +351,16 @@ function TaskCard({
 function TaskForm({
   title,
   initial,
+  objectives,
+  members,
   onSubmit,
   onCancel,
   isPending,
 }: {
   title: string
   initial?: Task
+  objectives: OPPMObjective[]
+  members: WorkspaceMember[]
   onSubmit: (data: Record<string, unknown>) => void
   onCancel: () => void
   isPending: boolean
@@ -327,7 +372,8 @@ function TaskForm({
     status: initial?.status || 'todo',
     progress: initial?.progress ?? 0,
     due_date: initial?.due_date || '',
-    project_contribution: initial?.project_contribution ?? 0,
+    oppm_objective_id: initial?.oppm_objective_id || '',
+    assignee_id: initial?.assignee_id || '',
   })
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -335,13 +381,19 @@ function TaskForm({
     if (!form.title.trim()) return
     const data: Record<string, unknown> = { ...form }
     if (!data.due_date) delete data.due_date
-    // For create, don't send status/progress defaults that are already defaults
+    if (!data.oppm_objective_id) delete data.oppm_objective_id
+    if (!data.assignee_id) delete data.assignee_id
     if (!initial) {
       delete data.status
       if (data.progress === 0) delete data.progress
     }
     onSubmit(data)
   }
+
+  const missingPillars: string[] = []
+  if (!form.oppm_objective_id) missingPillars.push('Objective')
+  if (!form.assignee_id) missingPillars.push('Owner')
+  if (!form.due_date) missingPillars.push('Due date')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
@@ -356,7 +408,18 @@ function TaskForm({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="space-y-4 px-5 py-4">
+        <div className="space-y-4 px-5 py-4 max-h-[70vh] overflow-y-auto">
+          {/* OPPM compliance hint */}
+          {missingPillars.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-xs font-medium text-amber-700">
+                OPPM requires: {missingPillars.join(', ')}
+              </p>
+              <p className="text-[10px] text-amber-600 mt-0.5">
+                Link this task to an objective and assign an owner for full OPPM compliance.
+              </p>
+            </div>
+          )}
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1">Title *</label>
@@ -374,9 +437,66 @@ function TaskForm({
             <textarea
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              rows={3}
+              rows={2}
               className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 resize-none"
             />
+          </div>
+          {/* Linked Objective (OPPM Pillar 1) */}
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              <span className="flex items-center gap-1.5">
+                <Target className="h-3.5 w-3.5 text-indigo-500" />
+                Linked Objective
+                <span className="text-[10px] font-normal text-indigo-500">(OPPM Pillar)</span>
+              </span>
+            </label>
+            {objectives.length > 0 ? (
+              <select
+                value={form.oppm_objective_id}
+                onChange={(e) => setForm((f) => ({ ...f, oppm_objective_id: e.target.value }))}
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+              >
+                <option value="">&mdash; None (not linked to OPPM) &mdash;</option>
+                {objectives.map((obj, i) => (
+                  <option key={obj.id} value={obj.id}>
+                    {String.fromCharCode(65 + i)}. {obj.title}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs text-text-secondary italic rounded-lg border border-dashed border-gray-200 px-3 py-2">
+                No objectives yet. Create objectives in the OPPM View first.
+              </p>
+            )}
+          </div>
+          {/* Owner (OPPM Pillar 5) */}
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              <span className="flex items-center gap-1.5">
+                <User className="h-3.5 w-3.5 text-slate-500" />
+                Owner
+                <span className="text-[10px] font-normal text-slate-500">(OPPM Pillar)</span>
+              </span>
+            </label>
+            {members.length > 0 ? (
+              <select
+                value={form.assignee_id}
+                onChange={(e) => setForm((f) => ({ ...f, assignee_id: e.target.value }))}
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+              >
+                <option value="">&mdash; Unassigned &mdash;</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.user_id}>
+                    {m.display_name || m.email || m.user_id.slice(0, 8)}
+                    {m.role === 'owner' ? ' (Owner)' : m.role === 'admin' ? ' (Admin)' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs text-text-secondary italic rounded-lg border border-dashed border-gray-200 px-3 py-2">
+                No workspace members found.
+              </p>
+            )}
           </div>
           {/* Row: priority + status */}
           <div className="grid grid-cols-2 gap-4">
@@ -431,34 +551,31 @@ function TaskForm({
               />
             </div>
           </div>
-          {/* Project weight */}
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Project Contribution Weight (0-100)</label>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={form.project_contribution}
-              onChange={(e) => setForm((f) => ({ ...f, project_contribution: parseInt(e.target.value) || 0 }))}
-              className="w-full max-w-[120px] rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-          </div>
         </div>
-        <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface-alt"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isPending || !form.title.trim()}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
-          >
-            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : initial ? 'Save Changes' : 'Create Task'}
-          </button>
+        <div className="flex items-center justify-between border-t border-border px-5 py-3">
+          {missingPillars.length === 0 ? (
+            <span className="text-xs text-emerald-600 font-medium">✓ OPPM compliant</span>
+          ) : (
+            <span className="text-xs text-amber-600">
+              {missingPillars.length} OPPM field{missingPillars.length > 1 ? 's' : ''} missing
+            </span>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface-alt"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isPending || !form.title.trim()}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
+            >
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : initial ? 'Save Changes' : 'Create Task'}
+            </button>
+          </div>
         </div>
       </form>
     </div>

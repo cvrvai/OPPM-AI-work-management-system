@@ -1,6 +1,8 @@
-import { useState} from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { api } from '@/lib/api'
 import { Target } from 'lucide-react'
 
 export function Login() {
@@ -10,7 +12,31 @@ export function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { signIn, signUp } = useAuthStore()
+  const { fetchWorkspaces, setCurrentWorkspace } = useWorkspaceStore()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const inviteToken = searchParams.get('invite')
+
+  // After auth, if there's an invite token, accept it then navigate
+  const handlePostAuth = async () => {
+    if (inviteToken) {
+      try {
+        const result = await api.post<{ workspace_id: string; workspace_name: string }>(
+          '/v1/invites/accept',
+          { token: inviteToken }
+        )
+        await fetchWorkspaces()
+        const ws = useWorkspaceStore.getState().workspaces.find(w => w.id === result.workspace_id)
+        if (ws) setCurrentWorkspace(ws)
+        navigate('/', { replace: true })
+      } catch {
+        // Invite accept failed (e.g. already a member) — still navigate home
+        navigate('/', { replace: true })
+      }
+    } else {
+      navigate('/', { replace: true })
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -19,10 +45,15 @@ export function Login() {
     try {
       if (isSignUp) {
         await signUp(email, password)
-        setError('Check your email to confirm your account')
+        if (inviteToken) {
+          // Supabase requires email confirmation by default; show message
+          setError('Check your email to confirm your account, then click the invite link again.')
+        } else {
+          setError('Check your email to confirm your account')
+        }
       } else {
         await signIn(email, password)
-        navigate('/')
+        await handlePostAuth()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed')
@@ -43,6 +74,13 @@ export function Login() {
           <p className="text-sm text-text-secondary mt-1">Work Management System</p>
         </div>
 
+        {/* Invite context banner */}
+        {inviteToken && (
+          <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary text-center">
+            Sign in or create an account to join the workspace you were invited to.
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleSubmit} className="rounded-xl border border-border bg-white p-6 shadow-sm space-y-4">
           <h2 className="text-lg font-semibold text-center">
@@ -50,7 +88,7 @@ export function Login() {
           </h2>
 
           {error && (
-            <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
+            <div className={`rounded-lg px-3 py-2 text-sm ${error.includes('Check your email') ? 'bg-emerald-50 text-emerald-700' : 'bg-danger/10 text-danger'}`}>
               {error}
             </div>
           )}
