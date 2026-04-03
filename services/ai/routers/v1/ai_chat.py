@@ -2,7 +2,9 @@
 
 import logging
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_write, require_admin
+from shared.database import get_session
 from schemas.ai_chat import (
     ChatRequest, ChatResponse, SuggestPlanRequest, SuggestPlanResponse,
     CommitPlanRequest, CapabilitiesResponse, ReindexResponse,
@@ -13,7 +15,6 @@ from repositories.vector_repo import VectorRepository
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-vector_repo = VectorRepository()
 
 
 # ── Workspace-level chat (no project_id) ──
@@ -22,9 +23,11 @@ vector_repo = VectorRepository()
 async def workspace_chat_route(
     data: ChatRequest,
     ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
 ):
     """Workspace-level AI chat — cross-project questions, no tool execution."""
-    return workspace_chat(
+    return await workspace_chat(
+        session=session,
         workspace_id=ws.workspace_id,
         user_id=ws.user.id,
         messages=[m.model_dump() for m in data.messages],
@@ -35,9 +38,11 @@ async def workspace_chat_route(
 @router.get("/workspaces/{workspace_id}/ai/chat/capabilities", response_model=CapabilitiesResponse)
 async def capabilities_route(
     ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
 ):
     """Return AI capabilities for the current context."""
-    count = vector_repo.count_by_workspace(ws.workspace_id)
+    vector_repo = VectorRepository(session)
+    count = await vector_repo.count_by_workspace(ws.workspace_id)
     return CapabilitiesResponse(
         has_project=False,
         can_execute_tools=False,
@@ -63,9 +68,11 @@ async def chat_route(
     project_id: str,
     data: ChatRequest,
     ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
 ):
     """Send a message to the project AI assistant."""
-    return chat(
+    return await chat(
+        session=session,
         project_id=project_id,
         workspace_id=ws.workspace_id,
         user_id=ws.user.id,
@@ -79,9 +86,11 @@ async def suggest_plan_route(
     project_id: str,
     data: SuggestPlanRequest,
     ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
 ):
     """Ask AI to generate an OPPM plan from a description."""
-    return suggest_plan(
+    return await suggest_plan(
+        session=session,
         project_id=project_id,
         workspace_id=ws.workspace_id,
         user_id=ws.user.id,
@@ -94,9 +103,11 @@ async def commit_plan_route(
     project_id: str,
     data: CommitPlanRequest,
     ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
 ):
     """Commit a previously suggested AI plan — creates objectives and timeline entries."""
-    return commit_plan(
+    return await commit_plan(
+        session=session,
         workspace_id=ws.workspace_id,
         user_id=ws.user.id,
         commit_token=data.commit_token,
@@ -107,9 +118,11 @@ async def commit_plan_route(
 async def weekly_summary_route(
     project_id: str,
     ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
 ):
     """Generate an AI weekly status summary for the project."""
-    return weekly_summary(
+    return await weekly_summary(
+        session=session,
         project_id=project_id,
         workspace_id=ws.workspace_id,
         user_id=ws.user.id,
