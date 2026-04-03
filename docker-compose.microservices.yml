@@ -1,4 +1,24 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: oppm
+      POSTGRES_USER: oppm
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-oppm_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oppm"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-oppm_dev_password}
+    volumes:
+      - redis_data:/data
+
   gateway:
     build: ./gateway
     ports:
@@ -21,6 +41,14 @@ services:
       - "8000"
     env_file:
       - services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -36,6 +64,11 @@ services:
       - "8001"
     env_file:
       - services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 10s
@@ -51,6 +84,12 @@ services:
       - "8002"
     env_file:
       - services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - AI_SERVICE_URL=http://ai:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
       interval: 10s
@@ -66,6 +105,11 @@ services:
       - "8003"
     env_file:
       - services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
       interval: 10s
@@ -78,14 +122,10 @@ services:
     expose:
       - "5173"
 
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-
 networks:
   default:
     name: oppm-network
 
 volumes:
+  postgres_data:
   redis_data:

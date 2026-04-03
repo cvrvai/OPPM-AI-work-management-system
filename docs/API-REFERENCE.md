@@ -1,8 +1,9 @@
 # OPPM AI — API Reference
 
-> Base URL: `http://localhost:8000/api`
-> Authentication: Bearer JWT token from Supabase Auth
-> Dev Note: Frontend uses Vite proxy (`/api` → `localhost:8000`). Do NOT set `VITE_API_URL` in development.
+> Base URL (dev): `http://localhost:8080/api` via Vite proxy → gateway → service
+> Base URL (prod): `http://your-domain/api` via nginx gateway
+> Authentication: Bearer JWT token (obtained from `POST /api/auth/login`)
+> Dev Note: Vite proxy routes all `/api` and `/mcp` to `localhost:8080` (gateway). Do NOT set `VITE_API_URL` in development.
 
 ---
 
@@ -23,19 +24,89 @@ Returns server health status.
 
 ## Authentication
 
-### `GET /v1/auth/me`
-Get current authenticated user info.
+All auth endpoints are handled by `core` service via `POST /api/auth/...`. The frontend never contacts Supabase directly.
 
-**Headers:** `Authorization: Bearer {jwt}`
+### `POST /api/auth/login`
+Sign in with email and password.
+
+**Body**
+```json
+{ "email": "user@example.com", "password": "secret" }
+```
+
+**Response** `200`
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "expires_in": 3600,
+  "user": { "id": "uuid", "email": "user@example.com" }
+}
+```
+
+### `POST /api/auth/signup`
+Register a new account.
+
+**Body**
+```json
+{ "email": "user@example.com", "password": "secret", "full_name": "Jane Doe" }
+```
+
+**Response** `201` — same shape as login response.
+
+### `POST /api/auth/refresh`
+Exchange a refresh token for a new access token.
+
+**Body**
+```json
+{ "refresh_token": "eyJ..." }
+```
+
+**Response** `200`
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "expires_in": 3600
+}
+```
+
+### `POST /api/auth/signout`
+Invalidate the current session.
+
+**Headers:** `Authorization: Bearer {access_token}`
+
+**Response** `200` `{ "message": "Signed out" }`
+
+### `GET /api/auth/me`
+Get the current authenticated user.
+
+**Headers:** `Authorization: Bearer {access_token}`
 
 **Response** `200`
 ```json
 {
   "id": "uuid",
   "email": "user@example.com",
+  "full_name": "Jane Doe",
   "role": "authenticated"
 }
 ```
+
+### `PATCH /api/auth/profile`
+Update display name or user metadata.
+
+**Headers:** `Authorization: Bearer {access_token}`
+
+**Body**
+```json
+{ "full_name": "New Name" }
+```
+
+**Response** `200` — updated user object.
+
+### `GET /v1/auth/me`
+Legacy alias for `GET /api/auth/me`. Kept for backward compatibility.
 
 ---
 

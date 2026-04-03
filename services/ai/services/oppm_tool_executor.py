@@ -4,6 +4,7 @@ Used by the AI chat service when the LLM wants to make changes.
 """
 
 import logging
+from sqlalchemy.ext.asyncio import AsyncSession
 from repositories.oppm_repo import ObjectiveRepository, TimelineRepository, CostRepository
 from repositories.task_repo import TaskRepository
 from repositories.project_repo import ProjectRepository
@@ -11,15 +12,9 @@ from repositories.notification_repo import AuditRepository
 
 logger = logging.getLogger(__name__)
 
-objective_repo = ObjectiveRepository()
-timeline_repo = TimelineRepository()
-cost_repo = CostRepository()
-task_repo = TaskRepository()
-project_repo = ProjectRepository()
-audit_repo = AuditRepository()
 
-
-def execute_tool(
+async def execute_tool(
+    session: AsyncSession,
     tool_name: str,
     tool_input: dict,
     project_id: str,
@@ -27,6 +22,12 @@ def execute_tool(
     user_id: str,
 ) -> dict:
     """Routes AI tool calls to the correct repository method."""
+    objective_repo = ObjectiveRepository(session)
+    timeline_repo = TimelineRepository(session)
+    cost_repo = CostRepository(session)
+    task_repo = TaskRepository(session)
+    audit_repo = AuditRepository(session)
+
     try:
         match tool_name:
 
@@ -38,11 +39,11 @@ def execute_tool(
                 }
                 if tool_input.get("owner_id"):
                     data["owner_id"] = tool_input["owner_id"]
-                result = objective_repo.create(data)
+                result = await objective_repo.create(data)
                 updated = ["oppm_objectives"]
 
             case "update_objective":
-                result = objective_repo.update(tool_input["objective_id"], {
+                result = await objective_repo.update(tool_input["objective_id"], {
                     k: v for k, v in tool_input.items() if k != "objective_id"
                 })
                 updated = ["oppm_objectives"]
@@ -56,7 +57,7 @@ def execute_tool(
                 }
                 if tool_input.get("notes"):
                     entry_data["notes"] = tool_input["notes"]
-                result = timeline_repo.upsert_entry(entry_data)
+                result = await timeline_repo.upsert_entry(entry_data)
                 updated = ["oppm_timeline_entries"]
 
             case "bulk_set_timeline":
@@ -70,7 +71,7 @@ def execute_tool(
                     }
                     if entry.get("notes"):
                         entry_data["notes"] = entry["notes"]
-                    results.append(timeline_repo.upsert_entry(entry_data))
+                    results.append(await timeline_repo.upsert_entry(entry_data))
                 result = {"count": len(results), "entries": results}
                 updated = ["oppm_timeline_entries"]
 
@@ -80,25 +81,25 @@ def execute_tool(
                     "title": tool_input["title"],
                     "created_by": user_id,
                 }
-                for field in ("description", "priority", "due_date", "oppm_objective_id", "assignee_id", "project_contribution"):
-                    if field in tool_input:
-                        data[field] = tool_input[field]
-                result = task_repo.create(data)
+                for f in ("description", "priority", "due_date", "oppm_objective_id", "assignee_id", "project_contribution"):
+                    if f in tool_input:
+                        data[f] = tool_input[f]
+                result = await task_repo.create(data)
                 updated = ["tasks", "projects"]
 
             case "update_task":
                 task_id = tool_input.pop("task_id", None)
                 if not task_id:
                     return {"success": False, "error": "task_id required", "updated_entities": []}
-                result = task_repo.update(task_id, tool_input)
+                result = await task_repo.update(task_id, tool_input)
                 updated = ["tasks", "projects"]
 
             case "update_project_costs":
                 data = {"project_id": project_id}
-                for field in ("category", "planned_amount", "actual_amount", "notes"):
-                    if field in tool_input:
-                        data[field] = tool_input[field]
-                result = cost_repo.create(data)
+                for f in ("category", "planned_amount", "actual_amount", "notes"):
+                    if f in tool_input:
+                        data[f] = tool_input[f]
+                result = await cost_repo.create(data)
                 updated = ["project_costs"]
 
             case _:
@@ -108,7 +109,7 @@ def execute_tool(
                     "updated_entities": [],
                 }
 
-        audit_repo.log(
+        await audit_repo.log(
             workspace_id, user_id,
             f"ai_tool:{tool_name}", tool_name,
             new_data=tool_input,

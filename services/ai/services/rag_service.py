@@ -10,6 +10,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.embedding import generate_embedding
 from infrastructure.rag.agent import classify_query
 from infrastructure.rag.memory import load_memory
@@ -24,13 +25,11 @@ from repositories.vector_repo import VectorRepository
 
 logger = logging.getLogger(__name__)
 
-vector_repo = VectorRepository()
-
 # Max characters of RAG context to inject (roughly ~2000 tokens)
 MAX_CONTEXT_CHARS = 6000
 
-# Retriever registry
-_RETRIEVERS = {
+# Retriever registry (now constructed per-call with session)
+_RETRIEVER_CLASSES = {
     "vector": VectorRetriever,
     "keyword": KeywordRetriever,
     "structured": StructuredRetriever,
@@ -49,6 +48,7 @@ class RAGResult:
 # ── Full RAG pipeline ──
 
 async def retrieve_with_rag_pipeline(
+    session: AsyncSession,
     workspace_id: str,
     query: str,
     user_id: str | None = None,
@@ -60,7 +60,7 @@ async def retrieve_with_rag_pipeline(
     memory_context = ""
     if user_id:
         try:
-            memory_context = await load_memory(workspace_id, user_id)
+            memory_context = await load_memory(session, workspace_id, user_id)
         except Exception as e:
             logger.warning("Memory loading failed: %s", e)
 
@@ -74,9 +74,9 @@ async def retrieve_with_rag_pipeline(
 
     tasks = []
     for name in retriever_names:
-        retriever_cls = _RETRIEVERS.get(name)
+        retriever_cls = _RETRIEVER_CLASSES.get(name)
         if retriever_cls:
-            retriever = retriever_cls()
+            retriever = retriever_cls(session)
             tasks.append(retriever.retrieve(query, workspace_id, top_k=top_k, **filters))
 
     ranked_lists: list[list[RetrievedChunk]] = []
@@ -152,6 +152,7 @@ def _format_chunks(chunks: list[RetrievedChunk]) -> str:
 # ── Legacy pipeline (backwards-compatible) ──
 
 async def retrieve_context(
+    session: AsyncSession,
     workspace_id: str,
     query: str,
     project_id: str | None = None,
@@ -159,18 +160,20 @@ async def retrieve_context(
 ) -> str:
     """Legacy retrieval — embedding + vector search + format."""
     if project_id:
-        return await retrieve_for_project(workspace_id, project_id, query, top_k)
-    return await retrieve_for_workspace(workspace_id, query, top_k)
+        return await retrieve_for_project(session, workspace_id, project_id, query, top_k)
+    return await retrieve_for_workspace(session, workspace_id, query, top_k)
 
 
 async def retrieve_for_workspace(
+    session: AsyncSession,
     workspace_id: str,
     query: str,
     top_k: int = 15,
 ) -> str:
     """Cross-project retrieval for workspace-level questions."""
+    vector_repo = VectorRepository(session)
     query_embedding = await generate_embedding(query)
-    results = vector_repo.similarity_search(
+    results = await vector_repo.similarity_search(
         workspace_id=workspace_id,
         query_embedding=query_embedding,
         top_k=top_k,
@@ -179,15 +182,17 @@ async def retrieve_for_workspace(
 
 
 async def retrieve_for_project(
+    session: AsyncSession,
     workspace_id: str,
     project_id: str,
     query: str,
     top_k: int = 10,
 ) -> str:
     """Project-scoped retrieval."""
+    vector_repo = VectorRepository(session)
     query_embedding = await generate_embedding(query)
 
-    all_results = vector_repo.similarity_search(
+    all_results = await vector_repo.similarity_search(
         workspace_id=workspace_id,
         query_embedding=query_embedding,
         top_k=top_k + 5,

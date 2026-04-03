@@ -6,23 +6,38 @@
 sequenceDiagram
     actor User
     participant Frontend
+    participant Gateway
+    participant Core Service
     participant Supabase Auth
-    participant Backend API
     participant Database
 
     User->>Frontend: Enter email + password
-    Frontend->>Supabase Auth: signInWithPassword()
-    Supabase Auth-->>Frontend: JWT access_token + refresh_token
-    Frontend->>Frontend: Store token in authStore
+    Frontend->>Gateway: POST /api/auth/login<br/>{email, password}
+    Gateway->>Core Service: Route to core:8000
+    Core Service->>Supabase Auth: signInWithPassword(email, password)
+    Supabase Auth-->>Core Service: {access_token, refresh_token, user}
+    Core Service-->>Gateway: {access_token, refresh_token, expires_in, user}
+    Gateway-->>Frontend: {access_token, refresh_token, expires_in, user}
+    Frontend->>Frontend: Store tokens in localStorage<br/>via authStore (no Supabase JS client)
 
-    Note over Frontend,Backend API: Subsequent API calls
+    Note over Frontend,Database: Subsequent API calls
 
-    Frontend->>Backend API: GET /api/v1/workspaces<br/>Authorization: Bearer {JWT}
-    Backend API->>Supabase Auth: get_current_user()<br/>db.auth.get_user(token)
-    Supabase Auth-->>Backend API: User object (id, email, role)
-    Backend API->>Database: Query workspace_members<br/>WHERE user_id = {user.id}
-    Database-->>Backend API: User's workspaces
-    Backend API-->>Frontend: 200 OK [{workspaces}]
+    Frontend->>Gateway: GET /api/v1/workspaces<br/>Authorization: Bearer {access_token}
+    Gateway->>Core Service: Round-robin to core:8000
+    Core Service->>Supabase Auth: get_current_user()<br/>db.auth.get_user(token)
+    Supabase Auth-->>Core Service: User object (id, email, role)
+    Core Service->>Database: Query workspace_members<br/>WHERE user_id = {user.id}
+    Database-->>Core Service: User's workspaces
+    Core Service-->>Frontend: 200 OK [{workspaces}]
+
+    Note over Frontend: On 401 response
+
+    Frontend->>Gateway: POST /api/auth/refresh<br/>{refresh_token}
+    Gateway->>Core Service: Route to core:8000
+    Core Service->>Supabase Auth: refreshSession(refresh_token)
+    Supabase Auth-->>Core Service: New {access_token, refresh_token}
+    Core Service-->>Frontend: New tokens
+    Frontend->>Frontend: Update localStorage, retry original request
 ```
 
 ## 2. Workspace Creation & Invite Flow
@@ -204,7 +219,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph Zustand Stores
-        AS[authStore<br/>user, session, isAuthenticated]
+        AS[authStore<br/>user, accessToken, refreshToken, loading]
         WS[workspaceStore<br/>workspaces, currentWorkspace]
     end
 

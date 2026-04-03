@@ -19,7 +19,7 @@ const queryClient = new QueryClient({
 })
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuthStore()
+  const { isAuthenticated, loading } = useAuthStore()
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -27,7 +27,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     )
   }
-  return session ? <>{children}</> : <Navigate to="/login" replace />
+  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
 }
 
 export default function App() {

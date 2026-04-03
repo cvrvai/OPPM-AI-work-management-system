@@ -5,7 +5,10 @@ Vector repository — pgvector-backed storage for document embeddings.
 import logging
 from typing import Any
 
-from shared.database import get_db
+from sqlalchemy import select, delete, func, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from shared.models.embedding import DocumentEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +16,10 @@ logger = logging.getLogger(__name__)
 class VectorRepository:
     """CRUD + similarity search for the document_embeddings table."""
 
-    def __init__(self) -> None:
-        self.db = get_db()
-        self.table_name = "document_embeddings"
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
 
-    def _query(self):
-        return self.db.table(self.table_name)
-
-    def upsert_embedding(
+    async def upsert_embedding(
         self,
         workspace_id: str,
         entity_type: str,
@@ -28,69 +27,92 @@ class VectorRepository:
         content: str,
         metadata: dict[str, Any],
         embedding: list[float],
-    ) -> dict:
-        data = {
-            "workspace_id": workspace_id,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "content": content,
-            "metadata": metadata,
-            "embedding": embedding,
-            "updated_at": "now()",
-        }
-        result = (
-            self._query()
-            .upsert(data, on_conflict="entity_type,entity_id")
-            .execute()
+    ) -> DocumentEmbedding:
+        stmt = (
+            select(DocumentEmbedding)
+            .where(
+                DocumentEmbedding.entity_type == entity_type,
+                DocumentEmbedding.entity_id == entity_id,
+            )
+            .limit(1)
         )
-        return result.data[0] if result.data else data
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
 
-    def delete_embedding(self, entity_type: str, entity_id: str) -> bool:
-        result = (
-            self._query()
-            .delete()
-            .eq("entity_type", entity_type)
-            .eq("entity_id", entity_id)
-            .execute()
+        if existing:
+            existing.content = content
+            existing.metadata_ = metadata
+            existing.embedding = embedding
+            existing.workspace_id = workspace_id
+            await self.session.flush()
+            return existing
+
+        doc = DocumentEmbedding(
+            workspace_id=workspace_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            content=content,
+            metadata_=metadata,
+            embedding=embedding,
         )
-        return bool(result.data)
+        self.session.add(doc)
+        await self.session.flush()
+        return doc
 
-    def delete_by_workspace(self, workspace_id: str) -> int:
-        result = (
-            self._query()
-            .delete()
-            .eq("workspace_id", workspace_id)
-            .execute()
+    async def delete_embedding(self, entity_type: str, entity_id: str) -> bool:
+        stmt = delete(DocumentEmbedding).where(
+            DocumentEmbedding.entity_type == entity_type,
+            DocumentEmbedding.entity_id == entity_id,
         )
-        return len(result.data) if result.data else 0
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount > 0
 
-    def count_by_workspace(self, workspace_id: str) -> int:
-        result = (
-            self._query()
-            .select("id", count="exact")
-            .eq("workspace_id", workspace_id)
-            .execute()
-        )
-        return result.count or 0
+    async def delete_by_workspace(self, workspace_id: str) -> int:
+        stmt = delete(DocumentEmbedding).where(DocumentEmbedding.workspace_id == workspace_id)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
 
-    def similarity_search(
+    async def count_by_workspace(self, workspace_id: str) -> int:
+        stmt = select(func.count(DocumentEmbedding.id)).where(DocumentEmbedding.workspace_id == workspace_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
+
+    async def similarity_search(
         self,
         workspace_id: str,
         query_embedding: list[float],
         top_k: int = 10,
         entity_types: list[str] | None = None,
     ) -> list[dict]:
-        params: dict[str, Any] = {
-            "p_workspace_id": workspace_id,
-            "p_embedding": query_embedding,
-            "p_match_count": top_k,
-        }
-        if entity_types:
-            params["p_entity_types"] = entity_types
-
         try:
-            result = self.db.rpc("match_documents", params).execute()
-            return result.data or []
+            stmt = (
+                select(
+                    DocumentEmbedding.id,
+                    DocumentEmbedding.entity_type,
+                    DocumentEmbedding.entity_id,
+                    DocumentEmbedding.content,
+                    DocumentEmbedding.metadata_,
+                    DocumentEmbedding.embedding.cosine_distance(query_embedding).label("distance"),
+                )
+                .where(DocumentEmbedding.workspace_id == workspace_id)
+            )
+            if entity_types:
+                stmt = stmt.where(DocumentEmbedding.entity_type.in_(entity_types))
+            stmt = stmt.order_by("distance").limit(top_k)
+            result = await self.session.execute(stmt)
+            return [
+                {
+                    "id": str(r.id),
+                    "entity_type": r.entity_type,
+                    "entity_id": r.entity_id,
+                    "content": r.content,
+                    "metadata": r.metadata_,
+                    "similarity": 1 - r.distance,
+                }
+                for r in result.all()
+            ]
         except Exception as e:
             logger.warning("Vector similarity search failed: %s", e)
             return []

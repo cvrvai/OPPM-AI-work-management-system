@@ -1,68 +1,71 @@
 """Workspace & workspace member repository."""
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from repositories.base import BaseRepository
-from shared.database import get_db
+from shared.models.workspace import Workspace, WorkspaceMember, WorkspaceInvite
 
 
 class WorkspaceRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("workspaces")
+    model = Workspace
 
-    def find_by_slug(self, slug: str) -> dict | None:
-        result = self._query().select("*").eq("slug", slug).limit(1).execute()
-        return result.data[0] if result.data else None
+    async def find_by_slug(self, slug: str) -> Workspace | None:
+        stmt = select(Workspace).where(Workspace.slug == slug).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    def find_user_workspaces(self, user_id: str) -> list[dict]:
-        db = get_db()
-        memberships = (
-            db.table("workspace_members")
-            .select("workspace_id, role")
-            .eq("user_id", user_id)
-            .execute()
+    async def find_user_workspaces(self, user_id: str) -> list[dict]:
+        stmt = (
+            select(Workspace, WorkspaceMember.role)
+            .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+            .where(WorkspaceMember.user_id == user_id)
+            .order_by(Workspace.name)
         )
-        if not memberships.data:
-            return []
-        ws_ids = [m["workspace_id"] for m in memberships.data]
-        result = self._query().select("*").in_("id", ws_ids).order("name").execute()
-        role_map = {m["workspace_id"]: m["role"] for m in memberships.data}
-        for ws in result.data or []:
-            ws["current_user_role"] = role_map.get(ws["id"], "member")
-        return result.data or []
+        result = await self.session.execute(stmt)
+        workspaces = []
+        for ws, role in result.all():
+            d = {c.name: getattr(ws, c.name) for c in ws.__table__.columns}
+            d["current_user_role"] = role
+            workspaces.append(d)
+        return workspaces
 
 
 class WorkspaceMemberRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("workspace_members")
+    model = WorkspaceMember
 
-    def find_by_user_and_workspace(self, user_id: str, workspace_id: str) -> dict | None:
-        result = (
-            self._query()
-            .select("*")
-            .eq("workspace_id", workspace_id)
-            .eq("user_id", user_id)
+    async def find_by_user_and_workspace(self, user_id: str, workspace_id: str) -> WorkspaceMember | None:
+        stmt = (
+            select(WorkspaceMember)
+            .where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == user_id,
+            )
             .limit(1)
-            .execute()
         )
-        return result.data[0] if result.data else None
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    def find_members(self, workspace_id: str) -> list[dict]:
-        return self.find_all(filters={"workspace_id": workspace_id}, order_by="joined_at", desc=False)
+    async def find_members(self, workspace_id: str) -> list[WorkspaceMember]:
+        return await self.find_all(filters={"workspace_id": workspace_id}, order_by="joined_at", desc=False)
 
 
 class WorkspaceInviteRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("workspace_invites")
+    model = WorkspaceInvite
 
-    def find_by_token(self, token: str) -> dict | None:
-        result = self._query().select("*").eq("token", token).limit(1).execute()
-        return result.data[0] if result.data else None
+    async def find_by_token(self, token: str) -> WorkspaceInvite | None:
+        stmt = select(WorkspaceInvite).where(WorkspaceInvite.token == token).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    def find_pending(self, workspace_id: str) -> list[dict]:
-        return (
-            self._query()
-            .select("*")
-            .eq("workspace_id", workspace_id)
-            .is_("accepted_at", "null")
-            .order("created_at", desc=True)
-            .execute()
-        ).data or []
+    async def find_pending(self, workspace_id: str) -> list[WorkspaceInvite]:
+        stmt = (
+            select(WorkspaceInvite)
+            .where(
+                WorkspaceInvite.workspace_id == workspace_id,
+                WorkspaceInvite.accepted_at.is_(None),
+            )
+            .order_by(WorkspaceInvite.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

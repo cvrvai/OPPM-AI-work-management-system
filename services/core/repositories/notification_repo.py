@@ -1,47 +1,91 @@
 """Notification & audit log repositories."""
 
+from sqlalchemy import select, update, delete, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from repositories.base import BaseRepository
+from shared.models.notification import Notification, AuditLog
 
 
 class NotificationRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("notifications")
+    model = Notification
 
-    def find_user_notifications(
+    async def find_user_notifications(
         self,
         user_id: str,
         unread_only: bool = False,
         limit: int = 20,
         offset: int = 0,
-    ) -> list[dict]:
-        q = self._query().select("*").eq("user_id", user_id)
+    ) -> list[Notification]:
+        stmt = select(Notification).where(Notification.user_id == user_id)
         if unread_only:
-            q = q.eq("is_read", False)
-        result = q.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
-        return result.data or []
+            stmt = stmt.where(Notification.is_read == False)
+        stmt = stmt.order_by(Notification.created_at.desc()).offset(offset).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
-    def unread_count(self, user_id: str) -> int:
-        result = (
-            self._query()
-            .select("id", count="exact")
-            .eq("user_id", user_id)
-            .eq("is_read", False)
-            .execute()
+    async def unread_count(self, user_id: str) -> int:
+        stmt = (
+            select(func.count(Notification.id))
+            .where(Notification.user_id == user_id, Notification.is_read == False)
         )
-        return result.count or 0
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
 
-    def mark_read(self, notification_id: str) -> None:
-        self._query().update({"is_read": True}).eq("id", notification_id).execute()
+    async def mark_read(self, notification_id: str) -> None:
+        stmt = update(Notification).where(Notification.id == notification_id).values(is_read=True)
+        await self.session.execute(stmt)
+        await self.session.flush()
 
-    def mark_read_for_user(self, notification_id: str, user_id: str) -> None:
-        self._query().update({"is_read": True}).eq("id", notification_id).eq("user_id", user_id).execute()
+    async def mark_read_for_user(self, notification_id: str, user_id: str) -> None:
+        stmt = (
+            update(Notification)
+            .where(Notification.id == notification_id, Notification.user_id == user_id)
+            .values(is_read=True)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
 
-    def mark_all_read(self, user_id: str) -> None:
-        self._query().update({"is_read": True}).eq("user_id", user_id).eq("is_read", False).execute()
+    async def mark_all_read(self, user_id: str) -> None:
+        stmt = (
+            update(Notification)
+            .where(Notification.user_id == user_id, Notification.is_read == False)
+            .values(is_read=True)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
 
-    def delete_for_user(self, notification_id: str, user_id: str) -> bool:
-        self._query().delete().eq("id", notification_id).eq("user_id", user_id).execute()
+    async def delete_for_user(self, notification_id: str, user_id: str) -> bool:
+        stmt = delete(Notification).where(
+            Notification.id == notification_id, Notification.user_id == user_id
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
         return True
+
+
+class AuditRepository(BaseRepository):
+    model = AuditLog
+
+    async def log(
+        self,
+        workspace_id: str,
+        user_id: str,
+        action: str,
+        entity_type: str,
+        entity_id: str | None = None,
+        old_data: dict | None = None,
+        new_data: dict | None = None,
+    ) -> AuditLog:
+        return await self.create({
+            "workspace_id": workspace_id,
+            "user_id": user_id,
+            "action": action,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "old_data": old_data,
+            "new_data": new_data,
+        })
 
 
 class AuditRepository(BaseRepository):

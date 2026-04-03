@@ -40,7 +40,11 @@ def list_tasks(
 
 def get_task(task_id: str, workspace_id: str) -> dict:
     task = task_repo.find_by_id(task_id)
-    if not task or task.get("workspace_id") != workspace_id:
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Tasks don't have workspace_id — scope through project
+    project = project_repo.find_by_id(task["project_id"])
+    if not project or project.get("workspace_id") != workspace_id:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
@@ -59,11 +63,7 @@ def create_task(data: dict, workspace_id: str, user_id: str) -> dict:
 
 
 def update_task(task_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
-    task = get_task(task_id)
-    # Verify workspace
-    project = project_repo.find_by_id(task["project_id"])
-    if not project or project.get("workspace_id") != workspace_id:
-        raise HTTPException(status_code=403, detail="Task not in this workspace")
+    task = get_task(task_id, workspace_id)
     result = task_repo.update(task_id, data)
     if not result:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -74,10 +74,7 @@ def update_task(task_id: str, data: dict, workspace_id: str, user_id: str) -> di
 
 
 def delete_task(task_id: str, workspace_id: str, user_id: str) -> bool:
-    task = get_task(task_id)
-    project = project_repo.find_by_id(task["project_id"])
-    if not project or project.get("workspace_id") != workspace_id:
-        raise HTTPException(status_code=403, detail="Task not in this workspace")
+    task = get_task(task_id, workspace_id)
     project_id = task["project_id"]
     audit_repo.log(workspace_id, user_id, "delete", "task", task_id)
     asyncio.create_task(remove_entity("task", task_id))

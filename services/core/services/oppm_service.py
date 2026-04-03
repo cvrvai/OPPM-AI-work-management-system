@@ -2,110 +2,122 @@
 OPPM service — objectives, timeline entries, and costs.
 """
 
-import asyncio
+import logging
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from repositories.oppm_repo import ObjectiveRepository, TimelineRepository, CostRepository
 from repositories.project_repo import ProjectRepository
 from repositories.notification_repo import AuditRepository
-from services.document_indexer import index_objective, index_cost, remove_entity
 
-objective_repo = ObjectiveRepository()
-timeline_repo = TimelineRepository()
-cost_repo = CostRepository()
-project_repo = ProjectRepository()
-audit_repo = AuditRepository()
+logger = logging.getLogger(__name__)
 
 
 # ── Objectives ──
 
-def get_objectives_with_tasks(project_id: str, workspace_id: str) -> list[dict]:
-    _verify_project_workspace(project_id, workspace_id)
-    return objective_repo.find_with_tasks(project_id)
+async def get_objectives_with_tasks(session: AsyncSession, project_id: str, workspace_id: str) -> list[dict]:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    objective_repo = ObjectiveRepository(session)
+    return await objective_repo.find_with_tasks(project_id)
 
 
-def create_objective(project_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
-    _verify_project_workspace(project_id, workspace_id)
+async def create_objective(session: AsyncSession, project_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    objective_repo = ObjectiveRepository(session)
+    audit_repo = AuditRepository(session)
+
     data["project_id"] = project_id
-    obj = objective_repo.create(data)
-    audit_repo.log(workspace_id, user_id, "create", "oppm_objective", obj["id"], new_data=data)
-    asyncio.create_task(index_objective(obj, workspace_id, project_id))
+    obj = await objective_repo.create(data)
+    await audit_repo.log(workspace_id, user_id, "create", "oppm_objective", str(obj.id), new_data=data)
     return obj
 
 
-def update_objective(objective_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
-    obj = objective_repo.find_by_id(objective_id)
+async def update_objective(session: AsyncSession, objective_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
+    objective_repo = ObjectiveRepository(session)
+    audit_repo = AuditRepository(session)
+
+    obj = await objective_repo.find_by_id(objective_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Objective not found")
-    _verify_project_workspace(obj["project_id"], workspace_id)
-    result = objective_repo.update(objective_id, data)
-    audit_repo.log(workspace_id, user_id, "update", "oppm_objective", objective_id, new_data=data)
-    asyncio.create_task(index_objective(result, workspace_id, obj["project_id"]))
+    await _verify_project_workspace(session, str(obj.project_id), workspace_id)
+    result = await objective_repo.update(objective_id, data)
+    await audit_repo.log(workspace_id, user_id, "update", "oppm_objective", objective_id, new_data=data)
     return result
 
 
-def delete_objective(objective_id: str, workspace_id: str, user_id: str) -> bool:
-    obj = objective_repo.find_by_id(objective_id)
+async def delete_objective(session: AsyncSession, objective_id: str, workspace_id: str, user_id: str) -> bool:
+    objective_repo = ObjectiveRepository(session)
+    audit_repo = AuditRepository(session)
+
+    obj = await objective_repo.find_by_id(objective_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Objective not found")
-    _verify_project_workspace(obj["project_id"], workspace_id)
-    audit_repo.log(workspace_id, user_id, "delete", "oppm_objective", objective_id)
-    asyncio.create_task(remove_entity("objective", objective_id))
-    return objective_repo.delete(objective_id)
+    await _verify_project_workspace(session, str(obj.project_id), workspace_id)
+    await audit_repo.log(workspace_id, user_id, "delete", "oppm_objective", objective_id)
+    return await objective_repo.delete(objective_id)
 
 
 # ── Timeline ──
 
-def get_timeline(project_id: str, workspace_id: str) -> list[dict]:
-    _verify_project_workspace(project_id, workspace_id)
-    return timeline_repo.find_project_timeline(project_id)
+async def get_timeline(session: AsyncSession, project_id: str, workspace_id: str) -> list[dict]:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    timeline_repo = TimelineRepository(session)
+    return await timeline_repo.find_project_timeline(project_id)
 
 
-def upsert_timeline_entry(data: dict, workspace_id: str, user_id: str) -> dict:
-    _verify_project_workspace(data["project_id"], workspace_id)
-    entry = timeline_repo.upsert_entry(data)
-    return entry
+async def upsert_timeline_entry(session: AsyncSession, data: dict, workspace_id: str, user_id: str) -> dict:
+    await _verify_project_workspace(session, data["project_id"], workspace_id)
+    timeline_repo = TimelineRepository(session)
+    return await timeline_repo.upsert_entry(data)
 
 
 # ── Costs ──
 
-def get_costs(project_id: str, workspace_id: str) -> dict:
-    _verify_project_workspace(project_id, workspace_id)
-    return cost_repo.get_cost_summary(project_id)
+async def get_costs(session: AsyncSession, project_id: str, workspace_id: str) -> dict:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    cost_repo = CostRepository(session)
+    return await cost_repo.get_cost_summary(project_id)
 
 
-def create_cost(project_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
-    _verify_project_workspace(project_id, workspace_id)
+async def create_cost(session: AsyncSession, project_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    cost_repo = CostRepository(session)
+    audit_repo = AuditRepository(session)
+
     data["project_id"] = project_id
-    cost = cost_repo.create(data)
-    audit_repo.log(workspace_id, user_id, "create", "project_cost", cost["id"], new_data=data)
-    asyncio.create_task(index_cost(cost, workspace_id, project_id))
+    cost = await cost_repo.create(data)
+    await audit_repo.log(workspace_id, user_id, "create", "project_cost", str(cost.id), new_data=data)
     return cost
 
 
-def update_cost(cost_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
-    cost = cost_repo.find_by_id(cost_id)
+async def update_cost(session: AsyncSession, cost_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
+    cost_repo = CostRepository(session)
+    audit_repo = AuditRepository(session)
+
+    cost = await cost_repo.find_by_id(cost_id)
     if not cost:
         raise HTTPException(status_code=404, detail="Cost entry not found")
-    _verify_project_workspace(cost["project_id"], workspace_id)
-    result = cost_repo.update(cost_id, data)
-    audit_repo.log(workspace_id, user_id, "update", "project_cost", cost_id, new_data=data)
-    asyncio.create_task(index_cost(result, workspace_id, cost["project_id"]))
+    await _verify_project_workspace(session, str(cost.project_id), workspace_id)
+    result = await cost_repo.update(cost_id, data)
+    await audit_repo.log(workspace_id, user_id, "update", "project_cost", cost_id, new_data=data)
     return result
 
 
-def delete_cost(cost_id: str, workspace_id: str, user_id: str) -> bool:
-    cost = cost_repo.find_by_id(cost_id)
+async def delete_cost(session: AsyncSession, cost_id: str, workspace_id: str, user_id: str) -> bool:
+    cost_repo = CostRepository(session)
+    audit_repo = AuditRepository(session)
+
+    cost = await cost_repo.find_by_id(cost_id)
     if not cost:
         raise HTTPException(status_code=404, detail="Cost entry not found")
-    _verify_project_workspace(cost["project_id"], workspace_id)
-    audit_repo.log(workspace_id, user_id, "delete", "project_cost", cost_id)
-    asyncio.create_task(remove_entity("cost", cost_id))
-    return cost_repo.delete(cost_id)
+    await _verify_project_workspace(session, str(cost.project_id), workspace_id)
+    await audit_repo.log(workspace_id, user_id, "delete", "project_cost", cost_id)
+    return await cost_repo.delete(cost_id)
 
 
 # ── Helpers ──
 
-def _verify_project_workspace(project_id: str, workspace_id: str):
-    project = project_repo.find_by_id(project_id)
-    if not project or project.get("workspace_id") != workspace_id:
+async def _verify_project_workspace(session: AsyncSession, project_id: str, workspace_id: str):
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")

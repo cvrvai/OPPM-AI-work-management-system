@@ -2,10 +2,15 @@
 
 import hashlib
 import hmac
-from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
+import logging
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Header, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_write, require_admin
 from schemas.git import GitAccountCreate, RepoConfigCreate
 from shared.schemas.common import SuccessResponse
+from shared.database import get_session, get_session_factory
+from shared.models.git import RepoConfig
 from services.git_service import (
     list_accounts,
     create_account,
@@ -19,44 +24,66 @@ from services.git_service import (
     store_commits,
     trigger_ai_analysis,
 )
-from shared.database import get_db
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ── GitHub Accounts ──
 
 @router.get("/workspaces/{workspace_id}/github-accounts")
-async def list_accounts_route(ws: WorkspaceContext = Depends(get_workspace_context)):
-    return list_accounts(ws.workspace_id)
+async def list_accounts_route(
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await list_accounts(session, ws.workspace_id)
 
 
 @router.post("/workspaces/{workspace_id}/github-accounts", status_code=201)
-async def create_account_route(data: GitAccountCreate, ws: WorkspaceContext = Depends(require_admin)):
-    return create_account(ws.workspace_id, data.model_dump(), ws.user.id)
+async def create_account_route(
+    data: GitAccountCreate,
+    ws: WorkspaceContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    return await create_account(session, ws.workspace_id, data.model_dump(), ws.user.id)
 
 
 @router.delete("/workspaces/{workspace_id}/github-accounts/{account_id}")
-async def delete_account_route(account_id: str, ws: WorkspaceContext = Depends(require_admin)) -> SuccessResponse:
-    delete_account(account_id, ws.workspace_id, ws.user.id)
+async def delete_account_route(
+    account_id: str,
+    ws: WorkspaceContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    await delete_account(session, account_id, ws.workspace_id, ws.user.id)
     return SuccessResponse()
 
 
 # ── Repo Configs ──
 
 @router.get("/workspaces/{workspace_id}/git/repos")
-async def list_repos_route(ws: WorkspaceContext = Depends(get_workspace_context)):
-    return list_repos(ws.workspace_id)
+async def list_repos_route(
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await list_repos(session, ws.workspace_id)
 
 
 @router.post("/workspaces/{workspace_id}/git/repos", status_code=201)
-async def create_repo_route(data: RepoConfigCreate, ws: WorkspaceContext = Depends(require_write)):
-    return create_repo(data.model_dump(), ws.workspace_id, ws.user.id)
+async def create_repo_route(
+    data: RepoConfigCreate,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    return await create_repo(session, data.model_dump(), ws.workspace_id, ws.user.id)
 
 
 @router.delete("/workspaces/{workspace_id}/git/repos/{config_id}")
-async def delete_repo_route(config_id: str, ws: WorkspaceContext = Depends(require_write)) -> SuccessResponse:
-    delete_repo(config_id, ws.workspace_id, ws.user.id)
+async def delete_repo_route(
+    config_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    await delete_repo(session, config_id, ws.workspace_id, ws.user.id)
     return SuccessResponse()
 
 
@@ -67,18 +94,27 @@ async def list_commits_route(
     project_id: str | None = None,
     limit: int = Query(20, ge=1, le=100),
     ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
 ):
-    return list_commits(ws.workspace_id, project_id, limit)
+    return await list_commits(session, ws.workspace_id, project_id, limit)
 
 
 @router.get("/workspaces/{workspace_id}/git/report/{project_id}")
-async def developer_report_route(project_id: str, days: int = Query(7, ge=1, le=90), ws: WorkspaceContext = Depends(get_workspace_context)):
-    return get_developer_report(project_id, days)
+async def developer_report_route(
+    project_id: str,
+    days: int = Query(7, ge=1, le=90),
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await get_developer_report(session, project_id, days)
 
 
 @router.get("/workspaces/{workspace_id}/git/recent-analyses")
-async def recent_analyses_route(ws: WorkspaceContext = Depends(get_workspace_context)):
-    return get_recent_analyses(ws.workspace_id)
+async def recent_analyses_route(
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await get_recent_analyses(session, ws.workspace_id)
 
 
 # ── Webhook (no auth — uses HMAC signature) ──
@@ -86,36 +122,34 @@ async def recent_analyses_route(ws: WorkspaceContext = Depends(get_workspace_con
 @router.post("/git/webhook")
 async def github_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_hub_signature_256: str | None = Header(None),
     x_github_event: str | None = Header(None),
+    session: AsyncSession = Depends(get_session),
 ):
-    """Receives GitHub push webhooks. Validates HMAC, stores commits, triggers AI analysis."""
+    """Receives GitHub push webhooks. Validates HMAC, accepts instantly,
+    stores commits and triggers AI analysis in the background."""
     body = await request.body()
     payload = await request.json()
     repo_full_name = payload.get("repository", {}).get("full_name", "")
 
-    db = get_db()
-    repo_config = (
-        db.table("repo_configs")
-        .select("*")
-        .eq("repo_name", repo_full_name)
-        .eq("is_active", True)
+    result = await session.execute(
+        select(RepoConfig)
+        .where(RepoConfig.repo_name == repo_full_name, RepoConfig.is_active == True)
         .limit(1)
-        .execute()
     )
+    config = result.scalar_one_or_none()
 
-    if not repo_config.data:
+    if not config:
         raise HTTPException(status_code=404, detail="No active repo config found")
-
-    config = repo_config.data[0]
 
     # Validate HMAC signature — required; reject if header missing or invalid
     if not x_hub_signature_256:
         raise HTTPException(status_code=401, detail="Missing X-Hub-Signature-256 header")
-    if not config.get("webhook_secret"):
+    if not config.webhook_secret:
         raise HTTPException(status_code=500, detail="Webhook secret not configured for this repo")
     expected = "sha256=" + hmac.new(
-        config["webhook_secret"].encode(),
+        config.webhook_secret.encode(),
         body,
         hashlib.sha256,
     ).hexdigest()
@@ -125,13 +159,29 @@ async def github_webhook(
     if x_github_event != "push":
         return {"status": "ignored", "event": x_github_event}
 
-    # Store commits
+    # Accept instantly — GitHub won't retry on slow responses
     commits = payload.get("commits", [])
     branch = payload.get("ref", "").replace("refs/heads/", "")
-    stored = store_commits(commits, config, branch)
+    project_id = str(config.project_id)
+    config_id = str(config.id)
+    background_tasks.add_task(_process_push_event, commits, config_id, project_id, branch)
 
-    # Trigger AI analysis via HTTP to AI service (fire-and-forget, non-blocking)
-    import asyncio
-    asyncio.create_task(trigger_ai_analysis(stored, config["project_id"]))
+    return {"status": "accepted", "project_id": project_id}
 
-    return {"status": "processed", "commits_stored": len(stored), "project_id": config["project_id"]}
+
+async def _process_push_event(commits: list[dict], config_id: str, project_id: str, branch: str):
+    """Runs after the webhook response is already sent. Creates own session."""
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            from repositories.git_repo import RepoConfigRepository, CommitRepository
+            repo_config_repo = RepoConfigRepository(session)
+            config = await repo_config_repo.find_by_id(config_id)
+            if not config:
+                logger.error("Config %s not found in background task", config_id)
+                return
+            stored = await store_commits(session, commits, config, branch)
+            await session.commit()
+        await trigger_ai_analysis(stored, project_id)
+    except Exception as e:
+        logger.error("Webhook background task failed: %s", e)

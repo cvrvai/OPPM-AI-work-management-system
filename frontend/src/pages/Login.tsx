@@ -46,10 +46,10 @@ export function Login() {
       if (isSignUp) {
         await signUp(email, password)
         if (inviteToken) {
-          // Supabase requires email confirmation by default; show message
-          setError('Check your email to confirm your account, then click the invite link again.')
+          // After signup, user can proceed to accept invite
+          await handlePostAuth()
         } else {
-          setError('Check your email to confirm your account')
+          await handlePostAuth()
         }
       } else {
         await signIn(email, password)

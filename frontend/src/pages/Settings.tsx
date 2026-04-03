@@ -89,11 +89,8 @@ function ProfileSettings() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      const { supabase } = await import('@/lib/supabase')
-      // Update Supabase Auth user metadata
-      await supabase.auth.updateUser({
-        data: { full_name: displayName },
-      })
+      // Update profile via gateway → core auth endpoint
+      await api.patch('/auth/profile', { full_name: displayName })
       // Also update workspace_members.display_name if workspace is selected
       if (ws) {
         await api.patch(`/v1/workspaces/${ws.id}/members/me/display-name`, {

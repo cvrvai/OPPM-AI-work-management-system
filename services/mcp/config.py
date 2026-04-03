@@ -5,7 +5,7 @@ from shared.config import SharedSettings
 
 class MCPSettings(SharedSettings):
     """MCP-specific settings."""
-    cors_origins: str = ""
+    pass
 
 _settings: MCPSettings | None = None
 

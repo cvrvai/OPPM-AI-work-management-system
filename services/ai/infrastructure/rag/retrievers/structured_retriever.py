@@ -1,8 +1,11 @@
-"""Structured retriever — direct DB queries for project/cost/timeline data."""
+"""Structured retriever — direct DB queries for project/cost/timeline data via SQLAlchemy."""
 
 import logging
 
-from shared.database import get_db
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from shared.models.project import Project
+from shared.models.oppm import ProjectCost
 from infrastructure.rag.retrievers.base_retriever import BaseRetriever, RetrievedChunk
 
 logger = logging.getLogger(__name__)
@@ -13,6 +16,9 @@ class StructuredRetriever(BaseRetriever):
 
     name = "structured"
 
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
     async def retrieve(
         self,
         query: str,
@@ -20,37 +26,36 @@ class StructuredRetriever(BaseRetriever):
         top_k: int = 10,
         **filters,
     ) -> list[RetrievedChunk]:
-        db = get_db()
         chunks: list[RetrievedChunk] = []
         project_id: str | None = filters.get("project_id")
 
         # Fetch project overviews
         try:
-            q = (
-                db.table("projects")
-                .select("id, title, description, status, progress, start_date, deadline")
-                .eq("workspace_id", workspace_id)
+            stmt = (
+                select(Project)
+                .where(Project.workspace_id == workspace_id)
                 .limit(top_k)
             )
             if project_id:
-                q = q.eq("id", project_id)
-            result = q.execute()
+                stmt = stmt.where(Project.id == project_id)
+            result = await self._session.execute(stmt)
+            projects = result.scalars().all()
 
-            for p in result.data or []:
+            for p in projects:
                 content = (
-                    f"Project: {p['title']}\n"
-                    f"Status: {p['status']} | Progress: {p.get('progress', 0)}%\n"
-                    f"Start: {p.get('start_date', '—')} | Deadline: {p.get('deadline', '—')}"
+                    f"Project: {p.title}\n"
+                    f"Status: {p.status} | Progress: {p.progress or 0}%\n"
+                    f"Start: {p.start_date or '—'} | Deadline: {p.deadline or '—'}"
                 )
-                if p.get("description"):
-                    content += f"\n{p['description']}"
+                if p.description:
+                    content += f"\n{p.description}"
                 chunks.append(RetrievedChunk(
                     entity_type="project",
-                    entity_id=str(p["id"]),
+                    entity_id=str(p.id),
                     content=content,
                     score=0.6,
                     source=self.name,
-                    metadata={"title": p["title"], "status": p["status"]},
+                    metadata={"title": p.title, "status": p.status},
                 ))
         except Exception as e:
             logger.warning("Structured project retrieval failed: %s", e)
@@ -59,23 +64,24 @@ class StructuredRetriever(BaseRetriever):
         query_lower = query.lower()
         if any(w in query_lower for w in ("cost", "budget", "spend", "expense", "money")):
             try:
-                q = db.table("project_costs").select("*").limit(top_k)
+                stmt = select(ProjectCost).limit(top_k)
                 if project_id:
-                    q = q.eq("project_id", project_id)
-                result = q.execute()
+                    stmt = stmt.where(ProjectCost.project_id == project_id)
+                result = await self._session.execute(stmt)
+                costs = result.scalars().all()
 
-                for c in result.data or []:
+                for c in costs:
                     content = (
-                        f"Cost: {c.get('category', '—')}\n"
-                        f"Planned: {c.get('planned_amount', 0)} | Actual: {c.get('actual_amount', 0)}"
+                        f"Cost: {c.category or '—'}\n"
+                        f"Planned: {c.planned_amount or 0} | Actual: {c.actual_amount or 0}"
                     )
                     chunks.append(RetrievedChunk(
                         entity_type="cost",
-                        entity_id=str(c["id"]),
+                        entity_id=str(c.id),
                         content=content,
                         score=0.8,
                         source=self.name,
-                        metadata={"category": c.get("category"), "project_id": c.get("project_id")},
+                        metadata={"category": c.category, "project_id": str(c.project_id) if c.project_id else None},
                     ))
             except Exception as e:
                 logger.warning("Structured cost retrieval failed: %s", e)

@@ -17,9 +17,6 @@ class AISettings(SharedSettings):
     # Kimi
     kimi_api_key: str = ""
 
-    # CORS
-    cors_origins: str = ""
-
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

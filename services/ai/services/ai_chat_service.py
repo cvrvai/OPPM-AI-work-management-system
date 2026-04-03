@@ -12,9 +12,12 @@ import uuid
 from datetime import datetime
 
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.llm import get_adapter, call_with_fallback
 from infrastructure.llm.base import ProviderUnavailableError
-from shared.database import get_db
+from shared.models.ai_model import AIModel
+from shared.models.workspace import WorkspaceMember
 from repositories.oppm_repo import ObjectiveRepository, TimelineRepository, CostRepository
 from repositories.project_repo import ProjectRepository
 from repositories.notification_repo import AuditRepository
@@ -23,43 +26,28 @@ from services import rag_service
 
 logger = logging.getLogger(__name__)
 
-objective_repo = ObjectiveRepository()
-timeline_repo = TimelineRepository()
-cost_repo = CostRepository()
-project_repo = ProjectRepository()
-audit_repo = AuditRepository()
-
 # In-memory store for plan previews (simple approach; could use Redis/DB for production)
 _plan_cache: dict[str, dict] = {}
 
 
-def _get_models(workspace_id: str, model_id: str | None = None) -> list[dict]:
+async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | None = None) -> list[dict]:
     """Return ordered list of AI models for fallback."""
-    db = get_db()
     if model_id:
-        primary = db.table("ai_models").select("*").eq("id", model_id).eq("workspace_id", workspace_id).limit(1).execute()
-        others = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).neq("id", model_id).execute()
-        return (primary.data or []) + (others.data or [])
+        primary = await session.execute(
+            select(AIModel).where(AIModel.id == model_id, AIModel.workspace_id == workspace_id).limit(1)
+        )
+        others = await session.execute(
+            select(AIModel).where(AIModel.workspace_id == workspace_id, AIModel.is_active == True, AIModel.id != model_id)
+        )
+        models = list(primary.scalars().all()) + list(others.scalars().all())
     else:
-        result = db.table("ai_models").select("*").eq("workspace_id", workspace_id).eq("is_active", True).execute()
-        return result.data or []
-
-
-def _run_llm(coro):
-    """Run an async LLM coroutine from sync context, handling the event loop."""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                return pool.submit(asyncio.run, coro).result()
-        else:
-            return asyncio.run(coro)
-    except ProviderUnavailableError:
-        raise
-    except Exception:
-        raise
+        result = await session.execute(
+            select(AIModel).where(AIModel.workspace_id == workspace_id, AIModel.is_active == True)
+        )
+        models = list(result.scalars().all())
+    return [{"id": str(m.id), "provider": m.provider, "model_id": m.model_id,
+             "api_key": m.api_key, "base_url": m.base_url, "name": m.name,
+             "is_active": m.is_active} for m in models]
 
 SYSTEM_PROMPT = """You are OPPM AI, a project management assistant specialized in the One Page Project Manager (OPPM) methodology.
 
@@ -93,15 +81,20 @@ Example:
 """
 
 
-def _build_project_context(project_id: str, workspace_id: str) -> str:
+async def _build_project_context(session: AsyncSession, project_id: str, workspace_id: str) -> str:
     """Build a text representation of the current project state for the LLM."""
-    project = project_repo.find_by_id(project_id)
+    project_repo = ProjectRepository(session)
+    objective_repo = ObjectiveRepository(session)
+    timeline_repo = TimelineRepository(session)
+    cost_repo = CostRepository(session)
+
+    project = await project_repo.find_by_id(project_id)
     if not project:
         return "Project not found."
 
-    objectives = objective_repo.find_with_tasks(project_id)
-    timeline = timeline_repo.find_project_timeline(project_id)
-    costs = cost_repo.get_cost_summary(project_id)
+    objectives = await objective_repo.find_with_tasks(project_id)
+    timeline = await timeline_repo.find_project_timeline(project_id)
+    costs = await cost_repo.get_cost_summary(project_id)
 
     # Build timeline lookup
     tl_map: dict[str, dict[str, str]] = {}
@@ -112,15 +105,17 @@ def _build_project_context(project_id: str, workspace_id: str) -> str:
         tl_map[oid][entry["week_start"]] = entry["status"]
 
     # Get workspace members
-    db = get_db()
-    members = db.table("workspace_members").select("user_id, display_name, email, role").eq("workspace_id", workspace_id).execute()
-    member_list = members.data or []
+    result = await session.execute(
+        select(WorkspaceMember.user_id, WorkspaceMember.display_name, WorkspaceMember.email, WorkspaceMember.role)
+        .where(WorkspaceMember.workspace_id == workspace_id)
+    )
+    member_list = result.all()
 
     lines = [
-        f'Project: "{project["title"]}"',
-        f'Description: {project.get("description", "—")}',
-        f'Status: {project["status"]} | Progress: {project.get("progress", 0)}%',
-        f'Start: {project.get("start_date", "—")} | Deadline: {project.get("deadline", "—")}',
+        f'Project: "{project.title}"',
+        f'Description: {project.description or "—"}',
+        f'Status: {project.status} | Progress: {project.progress or 0}%',
+        f'Start: {project.start_date or "—"} | Deadline: {project.deadline or "—"}',
         f'Today: {datetime.now().strftime("%Y-%m-%d")}',
         "",
         "## Objectives & Timeline",
@@ -142,8 +137,8 @@ def _build_project_context(project_id: str, workspace_id: str) -> str:
     lines.append("")
     lines.append("## Team Members")
     for m in member_list:
-        name = m.get("display_name") or m.get("email") or m["user_id"][:8]
-        lines.append(f'- {name} ({m["role"]})')
+        name = m.display_name or m.email or str(m.user_id)[:8]
+        lines.append(f'- {name} ({m.role})')
 
     return "\n".join(lines)
 
@@ -167,6 +162,7 @@ def _parse_tool_calls(text: str) -> tuple[str, list[dict]]:
 
 
 def chat(
+    session: AsyncSession,
     project_id: str,
     workspace_id: str,
     user_id: str,
@@ -177,27 +173,38 @@ def chat(
     Send a chat message to the AI about a project.
     Returns the AI response message + any tool call results.
     """
-    # Verify project
-    project = project_repo.find_by_id(project_id)
-    if not project or project.get("workspace_id") != workspace_id:
+    import asyncio
+    return asyncio.get_event_loop().run_until_complete(
+        _chat_async(session, project_id, workspace_id, user_id, messages, model_id)
+    )
+
+
+async def _chat_async(
+    session: AsyncSession,
+    project_id: str,
+    workspace_id: str,
+    user_id: str,
+    messages: list[dict],
+    model_id: str | None = None,
+) -> dict:
+    project_repo = ProjectRepository(session)
+    audit_repo = AuditRepository(session)
+
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
-    # Get active model
-    db = get_db()
-    models = _get_models(workspace_id, model_id)
+    models = await _get_models(session, workspace_id, model_id)
     if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured. Add one in Settings → AI Models.")
 
-    # Build context and prompt
-    context = _build_project_context(project_id, workspace_id)
+    context = await _build_project_context(session, project_id, workspace_id)
 
-    # Retrieve RAG context via full pipeline
     last_user_msg = messages[-1]["content"] if messages else ""
     try:
-        import asyncio
-        rag_result = asyncio.run(rag_service.retrieve_with_rag_pipeline(
-            workspace_id, last_user_msg, user_id=user_id, project_id=project_id,
-        ))
+        rag_result = await rag_service.retrieve_with_rag_pipeline(
+            session, workspace_id, last_user_msg, user_id=user_id, project_id=project_id,
+        )
         rag_context = rag_result.context
         memory_context = rag_result.memory_context
     except Exception as e:
@@ -211,7 +218,6 @@ def chat(
 
     system_prompt = SYSTEM_PROMPT.format(project_context=context, rag_context=full_rag)
 
-    # Build full prompt for adapter (combine system + conversation)
     conversation = f"System: {system_prompt}\n\n"
     for msg in messages:
         role = msg.get("role", "user")
@@ -219,9 +225,8 @@ def chat(
         conversation += f"{role.capitalize()}: {content}\n\n"
     conversation += "Assistant: "
 
-    # Call LLM with fallback chain
     try:
-        response = _run_llm(call_with_fallback(models, conversation))
+        response = await call_with_fallback(models, conversation)
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable: %s", e)
         raise HTTPException(status_code=502, detail="All AI models are currently unavailable. Please try again later.")
@@ -229,16 +234,14 @@ def chat(
         logger.warning("LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
 
-    # Parse tool calls
     clean_text, tool_calls_raw = _parse_tool_calls(response.text)
 
-    # Execute tool calls
     tool_results = []
     all_updated = set()
     for tc in tool_calls_raw:
         tool_name = tc.get("tool", "")
         tool_input = tc.get("input", {})
-        result = execute_tool(tool_name, tool_input, project_id, workspace_id, user_id)
+        result = await execute_tool(session, tool_name, tool_input, project_id, workspace_id, user_id)
         tool_results.append({
             "tool": tool_name,
             "input": tool_input,
@@ -248,8 +251,7 @@ def chat(
         })
         all_updated.update(result.get("updated_entities", []))
 
-    # Log the chat interaction
-    audit_repo.log(
+    await audit_repo.log(
         workspace_id, user_id,
         "ai_chat", "chat",
         new_data={
@@ -267,27 +269,28 @@ def chat(
     }
 
 
-def suggest_plan(
+async def suggest_plan(
+    session: AsyncSession,
     project_id: str,
     workspace_id: str,
     user_id: str,
     description: str,
 ) -> dict:
     """Ask AI to generate an OPPM plan from a description. Returns a preview."""
-    project = project_repo.find_by_id(project_id)
-    if not project or project.get("workspace_id") != workspace_id:
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
-    db = get_db()
-    models = _get_models(workspace_id)
+    models = await _get_models(session, workspace_id)
     if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured.")
 
     prompt = f"""You are an OPPM project planning assistant. Generate a structured project plan.
 
-Project: "{project['title']}"
-Start: {project.get('start_date', 'not set')}
-Deadline: {project.get('deadline', 'not set')}
+Project: "{project.title}"
+Start: {project.start_date or 'not set'}
+Deadline: {project.deadline or 'not set'}
 Description from user: {description}
 
 Return ONLY valid JSON with this structure:
@@ -301,7 +304,7 @@ Return ONLY valid JSON with this structure:
 Generate 3-7 objectives with logical week assignments. Use W1-W8 format."""
 
     try:
-        result = _run_llm(call_with_fallback(models, prompt, json_mode=True))
+        result = await call_with_fallback(models, prompt, json_mode=True)
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable for suggest_plan: %s", e)
         raise HTTPException(status_code=502, detail="All AI models are currently unavailable.")
@@ -328,7 +331,8 @@ Generate 3-7 objectives with logical week assignments. Use W1-W8 format."""
     }
 
 
-def commit_plan(
+async def commit_plan(
+    session: AsyncSession,
     workspace_id: str,
     user_id: str,
     commit_token: str,
@@ -342,19 +346,22 @@ def commit_plan(
         raise HTTPException(status_code=403, detail="Not authorized to commit this plan")
 
     project_id = plan["project_id"]
+    objective_repo = ObjectiveRepository(session)
+    timeline_repo = TimelineRepository(session)
+    project_repo = ProjectRepository(session)
+    audit_repo = AuditRepository(session)
     created_objectives = []
 
     for i, obj_data in enumerate(plan.get("objectives", [])):
-        obj = objective_repo.create({
+        obj = await objective_repo.create({
             "project_id": project_id,
             "title": obj_data["title"],
             "sort_order": i + 1,
         })
         created_objectives.append(obj)
 
-        # Create timeline entries for suggested weeks
-        project = project_repo.find_by_id(project_id)
-        start_date = project.get("start_date")
+        project = await project_repo.find_by_id(project_id)
+        start_date = str(project.start_date) if project and project.start_date else None
         if start_date:
             from datetime import timedelta
             from dateutil.parser import parse as parse_date
@@ -362,14 +369,14 @@ def commit_plan(
             for week_label in obj_data.get("suggested_weeks", []):
                 week_num = int(week_label.replace("W", "")) - 1
                 week_start = base + timedelta(weeks=week_num)
-                timeline_repo.upsert_entry({
+                await timeline_repo.upsert_entry({
                     "project_id": project_id,
-                    "objective_id": obj["id"],
+                    "objective_id": str(obj.id),
                     "week_start": week_start.strftime("%Y-%m-%d"),
                     "status": "planned",
                 })
 
-    audit_repo.log(
+    await audit_repo.log(
         workspace_id, user_id,
         "ai_commit_plan", "oppm_plan",
         new_data={"objectives_created": len(created_objectives)},
@@ -381,19 +388,21 @@ def commit_plan(
     }
 
 
-def weekly_summary(
+async def weekly_summary(
+    session: AsyncSession,
     project_id: str,
     workspace_id: str,
     user_id: str,
 ) -> dict:
     """Generate a weekly status summary using AI."""
-    project = project_repo.find_by_id(project_id)
-    if not project or project.get("workspace_id") != workspace_id:
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
-    context = _build_project_context(project_id, workspace_id)
+    context = await _build_project_context(session, project_id, workspace_id)
 
-    models = _get_models(workspace_id)
+    models = await _get_models(session, workspace_id)
     if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured.")
 
@@ -411,7 +420,7 @@ Return ONLY valid JSON:
 }}"""
 
     try:
-        result = _run_llm(call_with_fallback(models, prompt, json_mode=True))
+        result = await call_with_fallback(models, prompt, json_mode=True)
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable for weekly_summary: %s", e)
         raise HTTPException(status_code=502, detail="All AI models are currently unavailable.")
@@ -453,7 +462,8 @@ across the entire workspace.
 """
 
 
-def workspace_chat(
+async def workspace_chat(
+    session: AsyncSession,
     workspace_id: str,
     user_id: str,
     messages: list[dict],
@@ -463,18 +473,16 @@ def workspace_chat(
     Workspace-level chat — answers cross-project questions using RAG.
     No tool execution (tools are project-scoped).
     """
-    db = get_db()
-    models = _get_models(workspace_id, model_id)
+    models = await _get_models(session, workspace_id, model_id)
     if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured. Add one in Settings → AI Models.")
 
     # Retrieve RAG context via full pipeline
     last_user_msg = messages[-1]["content"] if messages else ""
     try:
-        import asyncio
-        rag_result = asyncio.run(rag_service.retrieve_with_rag_pipeline(
-            workspace_id, last_user_msg, user_id=user_id, top_k=15,
-        ))
+        rag_result = await rag_service.retrieve_with_rag_pipeline(
+            session, workspace_id, last_user_msg, user_id=user_id, top_k=15,
+        )
         rag_context = rag_result.context
         memory_context = rag_result.memory_context
     except Exception as e:
@@ -497,7 +505,7 @@ def workspace_chat(
 
     # Call LLM with fallback chain
     try:
-        response = _run_llm(call_with_fallback(models, conversation))
+        response = await call_with_fallback(models, conversation)
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable: %s", e)
         raise HTTPException(status_code=502, detail="All AI models are currently unavailable. Please try again later.")
@@ -505,7 +513,8 @@ def workspace_chat(
         logger.warning("LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
 
-    audit_repo.log(
+    audit_repo = AuditRepository(session)
+    await audit_repo.log(
         workspace_id, user_id,
         "ai_chat", "workspace_chat",
         new_data={

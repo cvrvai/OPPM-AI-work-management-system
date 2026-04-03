@@ -13,44 +13,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // AI service (port 8001) — most specific first
-      '^/api/v1/workspaces/[^/]+/projects/[^/]+/ai/': {
-        target: 'http://localhost:8001',
-        changeOrigin: true,
-      },
-      '^/api/v1/workspaces/[^/]+/rag/': {
-        target: 'http://localhost:8001',
-        changeOrigin: true,
-      },
-      '^/api/v1/workspaces/[^/]+/ai/': {
-        target: 'http://localhost:8001',
-        changeOrigin: true,
-      },
-      // MCP service (port 8003)
-      '^/api/v1/workspaces/[^/]+/mcp/': {
-        target: 'http://localhost:8003',
-        changeOrigin: true,
-      },
-      // Git service (port 8002)
-      '^/api/v1/workspaces/[^/]+/github-accounts': {
-        target: 'http://localhost:8002',
-        changeOrigin: true,
-      },
-      '^/api/v1/workspaces/[^/]+/commits': {
-        target: 'http://localhost:8002',
-        changeOrigin: true,
-      },
-      '^/api/v1/workspaces/[^/]+/git/': {
-        target: 'http://localhost:8002',
-        changeOrigin: true,
-      },
-      '^/api/v1/git/webhook': {
-        target: 'http://localhost:8002',
-        changeOrigin: true,
-      },
-      // All other API routes → core service (port 8000)
+      // All API and MCP traffic goes through the gateway (port 8080).
+      // The gateway decides which service to call — frontend never talks
+      // to services directly. If the gateway is down, all API calls fail.
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/mcp': {
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },

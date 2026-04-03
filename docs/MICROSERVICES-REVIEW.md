@@ -26,18 +26,42 @@ docker compose -f docker-compose.microservices.yml up -d
 docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up -d
 ```
 
-### Service URLs (dev)
-| Service | Port | URL |
-|---------|------|-----|
-| Gateway | 80 | http://localhost |
-| Core | 8000 | http://localhost:8000 (dev only) |
-| AI | 8001 | http://localhost:8001 (dev only) |
-| Git | 8002 | http://localhost:8002 (dev only) |
-| MCP | 8003 | http://localhost:8003 (dev only) |
+### Native Development (no Docker)
+
+Each service has a `start.ps1` that automatically sets `PYTHONPATH` to the workspace root and loads its own `.env` file. No manual environment setup needed.
+
+```powershell
+# Start gateway first — all services must be reachable through it
+./services/gateway/start.ps1    # Python FastAPI gateway, port 8080
+
+./services/core/start.ps1       # port 8000
+./services/ai/start.ps1         # port 8001
+./services/git/start.ps1        # port 8002
+./services/mcp/start.ps1        # port 8003
+
+cd frontend ; npm run dev       # port 5173
+```
+
+`vite.config.ts` proxies all `/api` and `/mcp` to `http://localhost:8080` (gateway only).
+
+**Load balancing (native):** Add comma-separated URLs in `services/gateway/.env`:
+```dotenv
+CORE_URLS=http://localhost:8000,http://localhost:8010
+```
+
+### Service URLs
+| Service | Native Port | Docker Port |
+|---------|-------------|-------------|
+| Gateway | 8080 | 80 |
+| Core | 8000 | 8000 (dev only) |
+| AI | 8001 | 8001 (dev only) |
+| Git | 8002 | 8002 (dev only) |
+| MCP | 8003 | 8003 (dev only) |
 
 ### Environment
-- Copy `services/.env.example` to `services/.env` and populate real credentials.
-- `services/.env` is in `.gitignore` — never commit credentials.
+- **Native dev:** each service reads its own `services/{service}/.env` (e.g. `services/core/.env`).
+- **Docker:** copy `services/.env.example` to `services/.env` and populate credentials.
+- `services/.env` and `services/*/.env` are in `.gitignore` — never commit credentials.
 - `OLLAMA_URL` must point to `http://host.docker.internal:11434` when running in Docker.
 
 ---
@@ -51,7 +75,27 @@ docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up 
 - Import via `PYTHONPATH=/` (set in each Dockerfile) — `pip install /shared` installs dependencies only.
 
 ### CORS Policy
-CORS is handled exclusively by nginx (`gateway/nginx.conf`). Service containers do NOT add `CORSMiddleware`. This prevents duplicate headers which browsers reject.
+CORS is handled differently per environment:
+- **Docker:** exclusively by nginx (`gateway/nginx.conf`). Service containers do NOT add `CORSMiddleware`. This prevents duplicate headers which browsers reject.
+- **Native dev:** the Python gateway (`services/gateway/main.py`) adds `CORSMiddleware` with `allow_origin_regex`. Services may also add their own CORS middleware since they are behind the Python gateway (no nginx).
+
+### Python Gateway (`services/gateway/`)
+A FastAPI reverse proxy that mirrors the nginx routing table for native development:
+- Reads upstream URL lists from env vars (`CORE_URLS`, `AI_URLS`, `GIT_URLS`, `MCP_URLS`) as comma-separated values.
+- Uses `itertools.cycle` for round-robin load balancing across the list.
+- Same path-routing rules as nginx (most-specific-first order).
+- Returns `502` if upstream is unreachable, `504` on timeout.
+- Must be started before any other service when running natively.
+
+### Auth Through Gateway
+The frontend has no direct Supabase connection. All auth operations go through:
+```
+Frontend → Gateway → core/routers/auth.py → Supabase Auth (server-side)
+```
+- `POST /api/auth/login|signup|refresh|signout` and `GET /api/auth/me` / `PATCH /api/auth/profile` are in `services/core/routers/auth.py`.
+- Tokens (`access_token`, `refresh_token`) are stored in `localStorage` by `authStore.ts`.
+- On 401, `api.ts` auto-calls `authStore.refreshSession()` then retries the original request once.
+- No Supabase JS client is used in the frontend.
 
 ### Internal API
 Service-to-service calls use `X-Internal-API-Key` header (validated by `shared/auth.py#verify_internal_key`). Only the AI service exposes an `/internal/` router. The git service calls `ai:8001/internal/analyze-commits` fire-and-forget (`asyncio.create_task`).

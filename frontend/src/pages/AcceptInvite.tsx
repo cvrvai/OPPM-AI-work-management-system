@@ -33,7 +33,7 @@ const ROLE_CONFIG: Record<WorkspaceRole, { label: string; color: string; icon: t
 export function AcceptInvite() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { session, loading: authLoading } = useAuthStore()
+  const { isAuthenticated: session, loading: authLoading } = useAuthStore()
   const { fetchWorkspaces, setCurrentWorkspace } = useWorkspaceStore()
 
   const [preview, setPreview] = useState<InvitePreview | null>(null)

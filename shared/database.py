@@ -1,28 +1,72 @@
 """
-Supabase client singleton shared across all microservices.
-Uses service_role_key (bypasses RLS) with fallback to anon_key.
+SQLAlchemy async engine + session factory shared across all microservices.
 """
 
 import logging
-from supabase import create_client, Client
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
 from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_client: Client | None = None
-_PLACEHOLDER = "your-service-role-key-here"
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def get_db() -> Client:
-    global _client
-    if _client is None:
+class Base(DeclarativeBase):
+    """Declarative base for all ORM models."""
+    pass
+
+
+def get_engine() -> AsyncEngine:
+    global _engine
+    if _engine is None:
         settings = get_settings()
-        key = settings.supabase_service_role_key
-        if not key or key == _PLACEHOLDER:
-            logger.warning(
-                "SUPABASE_SERVICE_ROLE_KEY not set — falling back to anon key. "
-                "Set the real service role key in .env for full access."
-            )
-            key = settings.supabase_anon_key
-        _client = create_client(settings.supabase_url, key)
-    return _client
+        _engine = create_async_engine(
+            settings.database_url,
+            echo=(settings.environment == "development"),
+            pool_size=20,
+            max_overflow=10,
+            pool_pre_ping=True,
+        )
+    return _engine
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    global _session_factory
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(
+            bind=get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+    return _session_factory
+
+
+async def get_session() -> AsyncSession:
+    """FastAPI dependency — yields an AsyncSession per request."""
+    factory = get_session_factory()
+    async with factory() as session:
+        yield session
+
+
+async def init_db() -> None:
+    """Create engine and verify connectivity on startup."""
+    engine = get_engine()
+    async with engine.begin() as conn:
+        logger.info("Database connection verified")
+
+
+async def close_db() -> None:
+    """Dispose engine on shutdown."""
+    global _engine, _session_factory
+    if _engine:
+        await _engine.dispose()
+        _engine = None
+        _session_factory = None
+        logger.info("Database connection closed")

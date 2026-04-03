@@ -1,6 +1,6 @@
 # OPPM Implementation — Phase Tracker
 
-> Last updated: 2026-06-01
+> Last updated: 2026-04-03
 
 ---
 
@@ -383,3 +383,58 @@ POST /v1/workspaces/{id}/invites/{invite_id}/resend → admin: regenerate token 
 - **No backend changes** — all endpoints and schemas already supported `oppm_objective_id`, `assignee_id`, JSONB metadata
 - **Backward compatible** — existing `string[]` risk data auto-converts to `RiskItem[]`; legacy `string[]` forecast joins to narrative string
 - **New inline components**: `RiskEditor` (RAG color selectors per risk), `InlineTextarea` (click-to-edit multi-line)
+
+---
+
+## Phase 11 — API Gateway, Load Balancing & Auth Redesign ✅ COMPLETE
+
+**Goal:** Replace ad-hoc native dev setup with a proper Python gateway for local development, introduce round-robin load balancing, enforce gateway as the single entry point, and route all frontend auth through the backend (no direct Supabase JS client).
+
+### Summary of Changes
+
+| # | Task | Status | Files Changed |
+|---|------|--------|---------------|
+| 11.1 | Create Python gateway service with round-robin load balancer | ✅ | `services/gateway/main.py`, `services/gateway/config.py` |
+| 11.2 | Gateway mirrors nginx routing table (most-specific-first) | ✅ | `services/gateway/main.py` |
+| 11.3 | Create `start.ps1` for each service (PYTHONPATH + .env auto-load) | ✅ | `services/{gateway,core,ai,git,mcp}/start.ps1` |
+| 11.4 | Create per-service `.env` files (replacing shared `services/.env` for native dev) | ✅ | `services/{gateway,core,ai,git,mcp}/.env` |
+| 11.5 | Simplify `vite.config.ts` to proxy all traffic to gateway (:8080) | ✅ | `frontend/vite.config.ts` |
+| 11.6 | Create `services/core/routers/auth.py` — server-side auth endpoints | ✅ | `services/core/routers/auth.py` |
+| 11.7 | Register auth router in `services/core/main.py` | ✅ | `services/core/main.py` |
+| 11.8 | Rewrite `authStore.ts` — remove Supabase JS client, use REST API | ✅ | `frontend/src/stores/authStore.ts` |
+| 11.9 | Update `api.ts` — read `accessToken` from store, auto-retry on 401 | ✅ | `frontend/src/lib/api.ts` |
+| 11.10 | Update `App.tsx`, `AcceptInvite.tsx` — `session` → `accessToken` | ✅ | `frontend/src/App.tsx`, `frontend/src/pages/AcceptInvite.tsx` |
+| 11.11 | Update `Settings.tsx` — replace `supabase.auth.updateUser` with `api.patch('/auth/profile')` | ✅ | `frontend/src/pages/Settings.tsx` |
+| 11.12 | Remove Supabase public keys from `frontend/.env` | ✅ | `frontend/.env` |
+| 11.13 | Update `DEVELOPMENT.md` with simplified native run instructions | ✅ | `DEVELOPMENT.md` |
+
+### Architecture Decisions
+
+- **Python gateway** (`services/gateway/main.py`): FastAPI reverse proxy using `httpx.AsyncClient`. Reads `CORE_URLS`, `AI_URLS`, `GIT_URLS`, `MCP_URLS` from `.env` as comma-separated strings, builds `itertools.cycle` iterators for round-robin. Returns `502` on upstream unreachable, `504` on timeout. Must start before all other services in native dev.
+
+- **`start.ps1` pattern**: Each script uses `$PSScriptRoot` (immune to CWD) to set `PYTHONPATH` to workspace root and call `Set-Location $PSScriptRoot` before uvicorn. Reads its own `.env` via `Get-Content` + regex parse into `[System.Environment]::SetEnvironmentVariable`. No global shell setup needed.
+
+- **Per-service `.env`**: Each `services/{name}/.env` contains only that service's credentials. `services/gateway/.env` only has upstream URLs. `pydantic-settings` resolves `.env` relative to CWD (= `$PSScriptRoot`).
+
+- **Auth through gateway**: The frontend `authStore` stores `access_token` and `refresh_token` in `localStorage`. `api.ts` reads `accessToken` from the store for every request. On `401`, it calls `authStore.refreshSession()` then retries once. No Supabase JS client anywhere in the frontend.
+
+- **`git/.env` routing**: `AI_SERVICE_URL=http://localhost:8080` — the git service routes AI analysis calls through the gateway, not directly to `ai:8001`.
+
+### Auth Endpoints Added (`services/core/routers/auth.py`)
+
+```
+POST   /api/auth/login       → signInWithPassword(email, password) → {access_token, refresh_token, user}
+POST   /api/auth/signup      → signUp(email, password, full_name)  → {access_token, refresh_token, user}
+POST   /api/auth/refresh     → refreshSession(refresh_token)       → {access_token, refresh_token}
+POST   /api/auth/signout     → signOut()                           → {message}
+GET    /api/auth/me          → getUser(access_token)               → {id, email, full_name, role}
+PATCH  /api/auth/profile     → updateUser({data: {full_name}})     → updated user object
+```
+
+### New Auth Flow
+
+```
+Browser → Vite (:5173) → gateway (:8080) → core (:8000) → Supabase Auth (server-side)
+```
+
+Previously: `Browser → Vite → Supabase JS client (direct)`

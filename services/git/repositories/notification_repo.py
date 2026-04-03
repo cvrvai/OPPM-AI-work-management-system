@@ -1,14 +1,15 @@
 """Notification/audit repository for git service (audit logging only)."""
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from repositories.base import BaseRepository
-from shared.database import get_db
+from shared.models.notification import AuditLog
 
 
 class AuditRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("audit_log")
+    model = AuditLog
 
-    def log(
+    async def log(
         self,
         workspace_id: str,
         user_id: str,
@@ -17,8 +18,8 @@ class AuditRepository(BaseRepository):
         entity_id: str | None = None,
         old_data: dict | None = None,
         new_data: dict | None = None,
-    ) -> dict:
-        return self.create({
+    ) -> AuditLog:
+        return await self.create({
             "workspace_id": workspace_id,
             "user_id": user_id,
             "action": action,
