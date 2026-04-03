@@ -6,7 +6,7 @@ Validates JWT tokens locally via python-jose HS256 and checks workspace membersh
 import logging
 import time
 from dataclasses import dataclass
-from fastapi import Depends, HTTPException, Request, status, Path
+from fastapi import Depends, Header, HTTPException, Request, status, Path
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from sqlalchemy import select
@@ -192,17 +192,7 @@ def require_admin(ws: WorkspaceContext = Depends(get_workspace_context)) -> Work
 
 
 def require_write(ws: WorkspaceContext = Depends(get_workspace_context)) -> WorkspaceContext:
-    """Dependency that requires write access (owner, admin, or member role)."""
-    if not ws.can_write:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Write access required",
-        )
-    return ws
-
-
-def require_write(ws: WorkspaceContext = Depends(get_workspace_context)) -> WorkspaceContext:
-    """Dependency that requires at least member role (not viewer)."""
+    """Dependency that requires at least member role (owner, admin, or member — not viewer)."""
     if not ws.can_write:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

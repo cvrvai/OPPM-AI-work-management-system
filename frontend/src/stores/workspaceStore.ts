@@ -26,9 +26,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         try {
           const workspaces = await api.get<Workspace[]>('/v1/workspaces')
           set({ workspaces, loading: false })
-          // Auto-select first workspace if none selected
-          if (!get().currentWorkspace && workspaces.length > 0) {
-            set({ currentWorkspace: workspaces[0] })
+          // Validate that the persisted workspace belongs to this user.
+          // If not (stale data from a previous session/user), switch to first available.
+          const current = get().currentWorkspace
+          if (!current || !workspaces.find((w) => w.id === current.id)) {
+            set({ currentWorkspace: workspaces[0] ?? null })
           }
         } catch {
           set({ loading: false })

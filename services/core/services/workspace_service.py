@@ -54,6 +54,20 @@ async def get_user_workspaces(session: AsyncSession, user_id: str) -> list[dict]
     return await workspace_repo.find_user_workspaces(user_id)
 
 
+async def get_workspace(session: AsyncSession, workspace_id: str, user_id: str) -> dict:
+    workspace_repo = WorkspaceRepository(session)
+    member_repo = WorkspaceMemberRepository(session)
+    ws = await workspace_repo.find_by_id(workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    member = await member_repo.find_by_user_and_workspace(user_id, workspace_id)
+    if not member:
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    d = ws.to_dict()
+    d["current_user_role"] = member.role
+    return d
+
+
 async def update_workspace(session: AsyncSession, workspace_id: str, user_id: str, data: dict) -> dict:
     workspace_repo = WorkspaceRepository(session)
     audit_repo = AuditRepository(session)
@@ -129,7 +143,7 @@ async def create_invite(session: AsyncSession, workspace_id: str, email: str, ro
     audit_repo = AuditRepository(session)
 
     token = secrets.token_urlsafe(48)
-    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
     # Check if user has an account via direct query
     result = await session.execute(select(User).where(User.email == email).limit(1))
@@ -142,8 +156,6 @@ async def create_invite(session: AsyncSession, workspace_id: str, email: str, ro
         "invited_by": invited_by,
         "token": token,
         "expires_at": expires_at,
-        "is_new_user": not has_account,
-        "sent_at": datetime.now(timezone.utc).isoformat(),
     })
     await audit_repo.log(workspace_id, invited_by, "invite", "workspace_invite", str(invite.id), new_data={"email": email})
 
@@ -164,25 +176,25 @@ async def accept_invite(session: AsyncSession, token: str, user_id: str) -> dict
     invite = await invite_repo.find_by_token(token)
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
-    if invite["accepted_at"]:
+    if invite.accepted_at:
         raise HTTPException(status_code=400, detail="Invite already accepted")
-    if datetime.fromisoformat(invite["expires_at"]) < datetime.now(timezone.utc):
+    if invite.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invite has expired")
 
-    existing = await member_repo.find_by_user_and_workspace(user_id, invite["workspace_id"])
+    existing = await member_repo.find_by_user_and_workspace(user_id, str(invite.workspace_id))
     if existing:
         raise HTTPException(status_code=400, detail="Already a member of this workspace")
 
     await member_repo.create({
-        "workspace_id": invite["workspace_id"],
+        "workspace_id": str(invite.workspace_id),
         "user_id": user_id,
-        "role": invite["role"],
+        "role": invite.role,
     })
 
-    await invite_repo.update(invite["id"], {"accepted_at": datetime.now(timezone.utc).isoformat()})
+    await invite_repo.update(str(invite.id), {"accepted_at": datetime.now(timezone.utc)})
 
-    ws = await workspace_repo.find_by_id(invite["workspace_id"])
-    return {"workspace_id": invite["workspace_id"], "workspace_name": ws.name if ws else ""}
+    ws = await workspace_repo.find_by_id(str(invite.workspace_id))
+    return {"workspace_id": str(invite.workspace_id), "workspace_name": ws.name if ws else ""}
 
 
 async def get_pending_invites(session: AsyncSession, workspace_id: str) -> list[dict]:

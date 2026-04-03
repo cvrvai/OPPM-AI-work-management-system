@@ -49,7 +49,9 @@ async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | 
              "api_key": m.api_key, "base_url": m.base_url, "name": m.name,
              "is_active": m.is_active} for m in models]
 
-SYSTEM_PROMPT = """You are OPPM AI, a project management assistant specialized in the One Page Project Manager (OPPM) methodology.
+SYSTEM_PROMPT = """You are OPPM AI, a project management assistant using the One Page Project Manager (OPPM) methodology.
+
+The OPPM methodology applies to ANY industry — construction, architecture, finance, healthcare, IT, manufacturing, education, or any other field. All projects share universal elements: objectives, tasks, timelines, budgets, and team members.
 
 ## Current Project Context
 {project_context}
@@ -78,6 +80,7 @@ Example:
 3. If the user asks to update something, use an appropriate tool call.
 4. For read-only questions (status, analysis), just respond conversationally.
 5. When suggesting multiple changes, use bulk_set_timeline for efficiency.
+6. Adapt terminology to the project's domain — use industry-appropriate language when relevant.
 """
 
 
@@ -99,10 +102,10 @@ async def _build_project_context(session: AsyncSession, project_id: str, workspa
     # Build timeline lookup
     tl_map: dict[str, dict[str, str]] = {}
     for entry in timeline:
-        oid = entry["objective_id"]
+        oid = str(entry.objective_id)
         if oid not in tl_map:
             tl_map[oid] = {}
-        tl_map[oid][entry["week_start"]] = entry["status"]
+        tl_map[oid][str(entry.week_start)] = entry.status
 
     # Get workspace members
     result = await session.execute(
@@ -161,7 +164,7 @@ def _parse_tool_calls(text: str) -> tuple[str, list[dict]]:
     return clean_text, []
 
 
-def chat(
+async def chat(
     session: AsyncSession,
     project_id: str,
     workspace_id: str,
@@ -173,10 +176,7 @@ def chat(
     Send a chat message to the AI about a project.
     Returns the AI response message + any tool call results.
     """
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _chat_async(session, project_id, workspace_id, user_id, messages, model_id)
-    )
+    return await _chat_async(session, project_id, workspace_id, user_id, messages, model_id)
 
 
 async def _chat_async(
@@ -400,11 +400,11 @@ async def weekly_summary(
     if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
-    context = await _build_project_context(session, project_id, workspace_id)
-
     models = await _get_models(session, workspace_id)
     if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured.")
+
+    context = await _build_project_context(session, project_id, workspace_id)
 
     prompt = f"""Analyze this OPPM project and provide a weekly status summary.
 
@@ -449,6 +449,9 @@ Return ONLY valid JSON:
 # ── Workspace-level chat (no project context, no tools) ──
 
 WORKSPACE_SYSTEM_PROMPT = """You are OPPM AI, a project management assistant for the workspace.
+
+The OPPM methodology applies universally — to architecture, construction, finance, healthcare, IT, manufacturing, research, education, and any other field. Objectives, tasks, timelines, and budgets are universal project concepts.
+
 You can answer questions about projects, tasks, objectives, costs, and team members
 across the entire workspace.
 
@@ -459,6 +462,7 @@ across the entire workspace.
 2. You do NOT have access to tools. You cannot make changes.
 3. For modification requests, tell the user to open the specific project page.
 4. Provide data-driven answers using the retrieved context above.
+5. Adapt to the domain/industry of the projects being discussed.
 """
 
 

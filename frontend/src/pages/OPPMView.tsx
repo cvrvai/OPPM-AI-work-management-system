@@ -35,7 +35,8 @@ const TOTAL_COLS = VISIBLE_WEEKS + 4 // Obj(letter) + Tasks + % + weeks + Owner
 const OBJ_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
-  planned:     { color: '#9CA3AF', bg: 'bg-gray-300',     label: 'Planned' },
+  // planned = outlined blue (scheduled but not started — real OPPM open circle)
+  planned:     { color: '#3B82F6', bg: 'border-[2px] border-blue-400 bg-blue-50',  label: 'Planned' },
   in_progress: { color: '#3B82F6', bg: 'bg-blue-500',     label: 'In Progress' },
   completed:   { color: '#22C55E', bg: 'bg-emerald-500',  label: 'Completed' },
   at_risk:     { color: '#F59E0B', bg: 'bg-amber-400',    label: 'At Risk' },
@@ -91,9 +92,79 @@ function StatusDot({
       className={cn(
         'w-3.5 h-3.5 rounded-full mx-auto transition-all duration-150 shrink-0',
         onClick && 'cursor-pointer hover:scale-125',
-        cfg ? cfg.bg : 'border-[1.5px] border-gray-300 bg-transparent'
+        // empty = faint outline (not scheduled); planned = outlined blue (scheduled)
+        cfg ? cfg.bg : 'border-[1.5px] border-gray-200 bg-transparent'
       )}
     />
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// OwnerSelect — custom dropdown replacing native <select>
+// so the browser's ugly styled list never appears in the table
+// ─────────────────────────────────────────────────────────────
+function OwnerSelect({
+  value,
+  members,
+  onChange,
+}: {
+  value: string
+  members: { id: string; display_name: string | null; email: string }[]
+  onChange: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const selected = members.find((m) => m.id === value)
+  const label = selected ? (selected.display_name || selected.email.split('@')[0]) : '—'
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative w-full">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-center gap-0.5 text-[10px] text-gray-600 hover:text-gray-900 transition-colors"
+        title="Assign owner"
+      >
+        <span className="truncate max-w-[72px]">{label}</span>
+        <svg className="h-2.5 w-2.5 shrink-0 text-gray-400" viewBox="0 0 12 12" fill="none">
+          <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-0.5 z-50 min-w-[130px] rounded-lg border border-gray-200 bg-white shadow-lg py-1 text-left">
+          <button
+            type="button"
+            className="w-full px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-50 text-left"
+            onClick={() => { onChange(''); setOpen(false) }}
+          >
+            — Unassign
+          </button>
+          {members.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={cn(
+                'w-full px-3 py-1.5 text-xs text-left hover:bg-blue-50 hover:text-blue-700 transition-colors',
+                m.id === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'
+              )}
+              onClick={() => { onChange(m.id); setOpen(false) }}
+            >
+              {m.display_name || m.email.split('@')[0]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -451,11 +522,11 @@ function CostRow({
           </div>
         </div>
       </td>
-      {/* Notes */}
+      {/* Description */}
       <td className="border-b border-gray-200 px-2 py-2 align-middle">
         <InlineEdit
-          value={cost.notes}
-          onSave={(v) => onUpdate({ notes: v })}
+          value={cost.description}
+          onSave={(v) => onUpdate({ description: v })}
           placeholder="—"
           className="text-[11px] text-gray-500"
         />
@@ -482,7 +553,7 @@ export function OPPMView() {
   const [weekOffset, setWeekOffset] = useState(0)
   const [newObjTitle, setNewObjTitle] = useState('')
   const [showAddCost, setShowAddCost] = useState(false)
-  const [newCost, setNewCost] = useState({ category: '', planned_amount: 0, actual_amount: 0, notes: '' })
+  const [newCost, setNewCost] = useState({ category: '', planned_amount: 0, actual_amount: 0, description: '' })
 
   const user = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
@@ -493,6 +564,12 @@ export function OPPMView() {
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id, ws?.id],
     queryFn: () => api.get<Project>(`${wsPath}/projects/${id}`),
+    enabled: !!ws,
+  })
+
+  const { data: wsMembers = [] } = useQuery<{ id: string; user_id: string; display_name: string | null; email: string }[]>({
+    queryKey: ['ws-members', ws?.id],
+    queryFn: () => api.get(`${wsPath}/members`),
     enabled: !!ws,
   })
 
@@ -556,12 +633,12 @@ export function OPPMView() {
 
   // Costs
   const createCostMut = useMutation({
-    mutationFn: (data: { category: string; planned_amount: number; actual_amount: number; notes: string }) =>
+    mutationFn: (data: { category: string; planned_amount: number; actual_amount: number; description: string }) =>
       api.post(`${wsPath}/projects/${id}/oppm/costs`, { ...data, project_id: id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['oppm-costs', id] })
       setShowAddCost(false)
-      setNewCost({ category: '', planned_amount: 0, actual_amount: 0, notes: '' })
+      setNewCost({ category: '', planned_amount: 0, actual_amount: 0, description: '' })
     },
   })
 
@@ -647,33 +724,34 @@ export function OPPMView() {
     return map
   }, [timelineEntries])
 
-  // Calculate progress per objective and overall
+  // Calculate progress per objective using ALL timeline entries (not just visible weeks)
   const calcProgress = useCallback(
     (objId: string): number => {
       const objTimeline = timelineMap[objId]
       if (!objTimeline) return 0
-      const weekStatuses = weeks.map((w) => objTimeline[w.isoDate]).filter(Boolean)
-      if (weekStatuses.length === 0) return 0
-      const completed = weekStatuses.filter((s) => s === 'completed').length
-      return Math.round((completed / weeks.length) * 100)
+      const all = Object.values(objTimeline)
+      if (all.length === 0) return 0
+      const completed = all.filter((s) => s === 'completed').length
+      return Math.round((completed / all.length) * 100)
     },
-    [timelineMap, weeks]
+    [timelineMap]
   )
 
   const overallProgress = useMemo(() => {
     const objs = objectives ?? []
     if (objs.length === 0) return 0
-    const total = objs.length * weeks.length
+    let total = 0
     let completedCells = 0
     for (const obj of objs) {
       const objTimeline = timelineMap[obj.id]
       if (!objTimeline) continue
-      for (const week of weeks) {
-        if (objTimeline[week.isoDate] === 'completed') completedCells++
-      }
+      const entries = Object.values(objTimeline)
+      total += entries.length
+      completedCells += entries.filter((s) => s === 'completed').length
     }
+    if (total === 0) return 0
     return Math.round((completedCells / total) * 100)
-  }, [objectives, timelineMap, weeks])
+  }, [objectives, timelineMap])
 
   // Handle clicking a timeline dot
   const handleDotClick = useCallback(
@@ -734,7 +812,9 @@ export function OPPMView() {
   )
 
   // ── Loading / Error states ──────────────────────────────────
-  if (loadingProject || loadingObjectives) {
+  // Only block on project (used in header); objectives use skeleton rows so
+  // the header renders instantly (project is usually cached from ProjectDetail).
+  if (loadingProject) {
     return (
       <div className="flex justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
@@ -947,8 +1027,23 @@ export function OPPMView() {
           ────────────────────────────────────────────────── */}
           <tbody>{/* */}
 
+            {/* ── Skeleton rows while objectives load ── */}
+            {loadingObjectives && Array.from({ length: 4 }).map((_, i) => (
+              <tr key={`skel-${i}`} className="bg-white">{/* */}
+                <td className="border border-gray-300 p-2"><div className="w-3 h-3 rounded-full bg-slate-200 mx-auto animate-pulse" /></td>
+                <td className="border border-gray-300 px-2 py-2"><div className="h-3 rounded bg-slate-200 animate-pulse" style={{ width: `${60 + i * 10}%` }} /></td>
+                <td className="border border-gray-300 p-2"><div className="h-3 w-5 rounded bg-slate-200 mx-auto animate-pulse" /></td>
+                <td className="border border-gray-300 p-2"><div className="h-3 w-5 rounded bg-slate-200 mx-auto animate-pulse" /></td>
+                {Array.from({ length: VISIBLE_WEEKS }).map((__, wi) => (
+                  <td key={wi} className="border border-gray-300 p-1">{/* */}
+                    <div className="w-3.5 h-3.5 rounded-full bg-slate-200 mx-auto animate-pulse" />{/* */}
+                  </td>
+                ))}{/* */}
+              </tr>
+            ))}
+
             {/* ── Empty state ── */}
-            {objs.length === 0 && !newObjTitle && (
+            {!loadingObjectives && objs.length === 0 && !newObjTitle && (
               <tr>{/* */}
                 <td
                   colSpan={TOTAL_COLS}
@@ -1051,15 +1146,14 @@ export function OPPMView() {
                     )
                   })}
 
-                  {/* Owner — inline editable */}
+                  {/* Owner — custom dropdown (value = workspace_members.id FK) */}
                   <td className="border border-gray-300 px-1 py-1 text-center align-middle">
-                    <InlineEdit
-                      value={obj.owner?.display_name || obj.owner?.email || ''}
-                      onSave={(v) =>
-                        updateObjective.mutate({ objId: obj.id, data: { owner_id: v } })
+                    <OwnerSelect
+                      value={obj.owner_id ?? ''}
+                      members={wsMembers}
+                      onChange={(id) =>
+                        updateObjective.mutate({ objId: obj.id, data: { owner_id: id || null } })
                       }
-                      placeholder="—"
-                      className="text-[10px] text-gray-600"
                     />
                   </td>
                 </tr>
@@ -1187,9 +1281,9 @@ export function OPPMView() {
                             </td>
                             <td className="px-2 py-1.5">
                               <input
-                                value={newCost.notes}
-                                onChange={(e) => setNewCost((c) => ({ ...c, notes: e.target.value }))}
-                                placeholder="Notes"
+                                value={newCost.description}
+                                onChange={(e) => setNewCost((c) => ({ ...c, description: e.target.value }))}
+                                placeholder="Description"
                                 className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none"
                               />
                             </td>

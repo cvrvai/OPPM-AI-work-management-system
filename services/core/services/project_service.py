@@ -4,12 +4,33 @@ Project service — business logic for project CRUD + progress.
 
 import asyncio
 import logging
+from datetime import date
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from repositories.project_repo import ProjectRepository, ProjectMemberRepository
 from repositories.notification_repo import AuditRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_dates(data: dict) -> dict:
+    """Convert ISO date strings to datetime.date for asyncpg compatibility."""
+    for field in ("start_date", "deadline"):
+        val = data.get(field)
+        if isinstance(val, str) and val:
+            try:
+                data[field] = date.fromisoformat(val)
+            except ValueError:
+                pass
+    return data
+
+
+def _audit_safe(data: dict) -> dict:
+    """Return a copy of data safe for JSON (converts date objects to ISO strings)."""
+    out = {}
+    for k, v in data.items():
+        out[k] = v.isoformat() if isinstance(v, date) else v
+    return out
 
 
 async def list_projects(session: AsyncSession, workspace_id: str, status: str | None = None, limit: int = 50, offset: int = 0) -> dict:
@@ -33,9 +54,10 @@ async def create_project(session: AsyncSession, workspace_id: str, user_id: str,
     audit_repo = AuditRepository(session)
 
     data["workspace_id"] = workspace_id
+    _parse_dates(data)
     project = await project_repo.create(data)
     await project_member_repo.add_member(str(project.id), member_id, role="lead")
-    await audit_repo.log(workspace_id, user_id, "create", "project", str(project.id), new_data=data)
+    await audit_repo.log(workspace_id, user_id, "create", "project", str(project.id), new_data=_audit_safe(data))
     return project
 
 
@@ -44,10 +66,11 @@ async def update_project(session: AsyncSession, project_id: str, workspace_id: s
     audit_repo = AuditRepository(session)
 
     await get_project(session, project_id, workspace_id)
+    _parse_dates(data)
     result = await project_repo.update(project_id, data)
     if not result:
         raise HTTPException(status_code=404, detail="Project not found")
-    await audit_repo.log(workspace_id, user_id, "update", "project", project_id, new_data=data)
+    await audit_repo.log(workspace_id, user_id, "update", "project", project_id, new_data=_audit_safe(data))
     return result
 
 

@@ -81,32 +81,33 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant GitHub
-    participant Backend API
-    participant Rate Limiter
+    participant Gateway
+    participant Git Service
+    participant AI Service
     participant Database
-    participant AI Provider
 
-    GitHub->>Backend API: POST /api/v1/git/webhook<br/>X-Hub-Signature-256: sha256=...
-    Backend API->>Rate Limiter: Check webhook rate limit<br/>(30 req/min)
-    Rate Limiter-->>Backend API: OK (tokens available)
-    Backend API->>Backend API: Validate HMAC signature<br/>(webhook_secret)
+    GitHub->>Gateway: POST /api/v1/workspaces/:id/git/webhook<br/>X-Hub-Signature-256: sha256=...
+    Gateway->>Git Service: Route to git:8002
+    Git Service->>Git Service: Validate HMAC-SHA256 signature<br/>(webhook_secret from repo_config)
 
     alt Invalid signature
-        Backend API-->>GitHub: 401 Unauthorized
+        Git Service-->>GitHub: 401 Unauthorized
     end
 
-    Backend API->>Database: Find repo_config by repo name
-    Backend API->>Database: INSERT commit_event<br/>(hash, message, author, branch)
+    Git Service->>Database: Find repo_config by workspace + repo name
+    Git Service->>Database: INSERT commit_event<br/>(hash, message, author, branch, stats)
+    Git Service->>Database: INSERT notification (type=commit)
 
-    Backend API->>Database: Query active AI models<br/>for workspace
-    loop For each active AI model
-        Backend API->>AI Provider: Analyze commit<br/>(message, files, diff context)
-        AI Provider-->>Backend API: {quality_score, alignment_score,<br/>progress_delta, summary}
-        Backend API->>Database: INSERT commit_analysis
-    end
+    Note over Git Service,AI Service: Async call to AI service
 
-    Backend API->>Database: INSERT notification<br/>(type=commit, title, message)
-    Backend API-->>GitHub: 200 OK
+    Git Service->>AI Service: POST http://ai:8001/internal/analyze-commit<br/>{commit_id, workspace_id}
+    AI Service->>Database: Load active AI models for workspace
+    AI Service->>Database: Load OPPM objectives for project
+    AI Service->>AI Service: Call configured LLM (Ollama/OpenAI/Anthropic/Kimi)
+    AI Service->>Database: INSERT commit_analysis<br/>(quality_score, alignment_score, summary)
+    AI Service-->>Git Service: 200 OK
+
+    Git Service-->>GitHub: 200 OK
 ```
 
 ## 4. OPPM Dashboard Data Flow
@@ -255,4 +256,91 @@ flowchart TD
     style WS fill:#e3f2fd
     style UW fill:#fff3e0
     style UP fill:#fff3e0
+```
+
+## 8. Workspace Invite Acceptance Flow
+
+```mermaid
+sequenceDiagram
+    actor Owner
+    actor Invitee
+    participant Frontend
+    participant Gateway
+    participant Core Service
+    participant Database
+
+    Owner->>Frontend: Settings → Members → Invite
+    Frontend->>Gateway: POST /api/v1/workspaces/:id/invites<br/>{email, role}
+    Gateway->>Core Service: Route to core:8000
+    Core Service->>Database: INSERT workspace_invites<br/>(token=UUID, expires_at=+7d)
+    Core Service-->>Frontend: 201 {invite_id, token}
+    Frontend-->>Owner: Invite sent ✓
+
+    Note over Invitee: Receives email with link<br/>http://localhost:5173/invite/accept?token=...
+
+    Invitee->>Frontend: Open invite link
+    Frontend->>Gateway: GET /api/v1/invites/preview/:token
+    Gateway->>Core Service: Validate token (not expired, not used)
+    Core Service-->>Frontend: 200 {workspace_name, role, inviter}
+    Frontend-->>Invitee: "You are invited to join <Workspace>"
+
+    Invitee->>Frontend: Click Accept
+    Frontend->>Gateway: POST /api/v1/invites/accept<br/>{token}
+    Gateway->>Core Service: Route to core:8000
+    Core Service->>Database: Validate invite
+    Core Service->>Database: INSERT workspace_members<br/>(user_id, role from invite)
+    Core Service->>Database: UPDATE workspace_invites<br/>(accepted_at = now())
+    Core Service-->>Frontend: 200 {workspace}
+    Frontend-->>Invitee: Redirect to workspace dashboard ✓
+```
+
+## 9. Service-to-Service Communication Map
+
+```mermaid
+flowchart LR
+    Client([Browser / API Client])
+
+    subgraph Gateway["Gateway :8080"]
+        GW[FastAPI reverse proxy]
+    end
+
+    subgraph Core["Core :8000"]
+        CA[Auth / Workspaces<br/>Projects / Tasks<br/>OPPM / Notifications]
+    end
+
+    subgraph AI["AI :8001"]
+        AIA[Chat / RAG<br/>Weekly Summary<br/>LLM Adapters<br/>Embeddings]
+    end
+
+    subgraph Git["Git :8002"]
+        GIA[GitHub Accounts<br/>Repo Configs<br/>Webhooks<br/>Commit Events]
+    end
+
+    subgraph MCP["MCP :8003"]
+        MCPA[Model Context<br/>Protocol endpoints]
+    end
+
+    DB[(PostgreSQL)]
+
+    Client --> GW
+
+    GW -->|/api/v1/workspaces except ai & git| CA
+    GW -->|/api/v1/workspaces/*/ai/*| AIA
+    GW -->|/api/v1/workspaces/*/git/*| GIA
+    GW -->|/api/v1/mcp/*| MCPA
+
+    CA --> DB
+    AIA --> DB
+    GIA --> DB
+    MCPA --> DB
+
+    GIA -->|internal webhook analysis| AIA
+    AIA -->|read project/objective data| CA
+
+    style GW fill:#fff3e0
+    style CA fill:#e3f2fd
+    style AIA fill:#e8f5e9
+    style GIA fill:#fce4ec
+    style MCPA fill:#f3e5f5
+    style DB fill:#e0e0e0
 ```

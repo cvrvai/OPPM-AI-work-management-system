@@ -129,18 +129,14 @@ export function Dashboard() {
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats', ws?.id],
-    queryFn: () =>
-      ws
-        ? api.get<DashboardStats>(`${wsPath}/dashboard/stats`)
-        : api.get<DashboardStats>('/dashboard/stats'),
+    queryFn: () => api.get<DashboardStats>(`${wsPath}/dashboard/stats`),
+    enabled: !!ws,
   })
 
   const { data: recentAnalyses, isLoading: analysesLoading } = useQuery({
     queryKey: ['recent-analyses', ws?.id],
-    queryFn: () =>
-      ws
-        ? api.get<CommitAnalysis[]>(`${wsPath}/git/recent-analyses`)
-        : api.get<CommitAnalysis[]>('/dashboard/recent-analyses'),
+    queryFn: () => api.get<CommitAnalysis[]>(`${wsPath}/git/recent-analyses`),
+    enabled: !!ws,
   })
 
   const s = stats ?? {
@@ -245,8 +241,8 @@ export function Dashboard() {
               <p className="text-xs">Create a project to see its progress here.</p>
             </div>
           ) : (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-56" style={{ minHeight: 0 }}>
+              <ResponsiveContainer width="100%" height="100%" minHeight={0}>
                 <BarChart
                   data={s.project_progress}
                   margin={{ top: 4, right: 8, left: -16, bottom: 4 }}

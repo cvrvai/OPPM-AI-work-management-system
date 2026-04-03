@@ -6,7 +6,7 @@ from typing import Optional
 
 class OPPMObjectiveCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    project_id: str
+    project_id: Optional[str] = None  # injected from URL path if not provided
     owner_id: Optional[str] = None
     sort_order: int = 0
 
@@ -25,15 +25,15 @@ class TimelineEntryUpsert(BaseModel):
 
 
 class CostCreate(BaseModel):
-    project_id: str
+    project_id: Optional[str] = None  # injected from URL path if not provided
     category: str = Field(min_length=1, max_length=100)
     planned_amount: float = 0
     actual_amount: float = 0
-    notes: str = ""
+    description: str = ""
 
 
 class CostUpdate(BaseModel):
     category: Optional[str] = None
     planned_amount: Optional[float] = None
     actual_amount: Optional[float] = None
-    notes: Optional[str] = None
+    description: Optional[str] = None

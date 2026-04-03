@@ -157,6 +157,8 @@ The gateway uses Docker's internal resolver (`127.0.0.11`) so it starts even whe
 | M5 | `redis` service defined in `docker-compose.microservices.yml` but nothing connects to it | Wire up once M3/M4 are addressed, or remove the service definition |
 | M6 | `shared/database.py` startup validation missing | Add lifespan check: raise on startup if `DATABASE_URL` is empty |
 
+> **Phase 12 targets**: M3 (Redis plan cache), M4 (rate limiting wire-up), M5 (remove dead Redis service or connect it) are all scheduled for Phase 12. See [PHASE-TRACKER.md](PHASE-TRACKER.md#phase-12--backlog-planned).
+
 ### Low
 | ID | Issue |
 |----|-------|
@@ -176,9 +178,14 @@ The gateway uses Docker's internal resolver (`127.0.0.11`) so it starts even whe
 | Internal key auth | ✅ `X-Internal-API-Key` header |
 | Webhook HMAC | ✅ Required (post C1 fix) |
 | Service role key in git | ⚠️ Rotate if repo history exposed |
-| Rate limiting | ❌ Not wired in |
+| Rate limiting | ❌ Not wired in (Phase 12 — M4) |
 | RLS | ✅ Defense-in-depth (service layer is primary gate) |
 | Credentials in git | ✅ `.gitignore` added |
+| Public endpoints exposed without rate limit | ⚠️ `GET /invites/preview/:token` is unauthenticated — add rate limit before production |
+
+---
+
+## Known Limitations
 
 ---
 

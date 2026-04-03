@@ -14,11 +14,17 @@ import {
   ArrowRight,
   X,
   Loader2,
+  MoreVertical,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 
 export function Projects() {
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null)
+  const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
@@ -27,20 +33,34 @@ export function Projects() {
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
-      if (ws) {
-        const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
-        return (res as any)?.items ?? []
-      }
-      return api.get<Project[]>('/projects')
+      const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
+      return (res as any)?.items ?? []
     },
+    enabled: !!ws,
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: Partial<Project>) =>
-      ws ? api.post<Project>(`${wsPath}/projects`, data) : api.post<Project>('/projects', data),
+    mutationFn: (data: Partial<Project>) => api.post<Project>(`${wsPath}/projects`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       setShowCreate(false)
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Project> }) =>
+      api.put<Project>(`${wsPath}/projects/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      setEditingProject(null)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`${wsPath}/projects/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      setDeletingProject(null)
     },
   })
 
@@ -93,67 +113,109 @@ export function Projects() {
       ) : (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filtered.map((project) => (
-          <Link
+          <div
             key={project.id}
-            to={`/projects/${project.id}`}
-            className="group rounded-xl border border-border bg-white p-5 shadow-sm hover:shadow-md hover:border-primary/30 transition-all"
+            className="group relative rounded-xl border border-border bg-white shadow-sm hover:shadow-md hover:border-primary/30 transition-all"
           >
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                  <FolderKanban className="h-4.5 w-4.5 text-primary" />
+            <Link to={`/projects/${project.id}`} className="block p-5">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                    <FolderKanban className="h-4.5 w-4.5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-text group-hover:text-primary transition-colors pr-6">
+                      {project.title}
+                    </h3>
+                    <span
+                      className={cn(
+                        'inline-block rounded-full px-2 py-0.5 text-[10px] font-medium mt-0.5',
+                        getStatusColor(project.status)
+                      )}
+                    >
+                      {project.status.replace('_', ' ')}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-text group-hover:text-primary transition-colors">
-                    {project.title}
-                  </h3>
-                  <span
-                    className={cn(
-                      'inline-block rounded-full px-2 py-0.5 text-[10px] font-medium mt-0.5',
-                      getStatusColor(project.status)
-                    )}
-                  >
-                    {project.status.replace('_', ' ')}
-                  </span>
+                <ArrowRight className="h-4 w-4 text-text-secondary opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              </div>
+
+              <p className="text-xs text-text-secondary line-clamp-2 mb-4">
+                {project.description}
+              </p>
+
+              {/* Progress Bar */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-text-secondary">Progress</span>
+                  <span className="text-xs font-semibold text-text">{project.progress}%</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-gray-100">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${project.progress}%` }}
+                  />
                 </div>
               </div>
-              <ArrowRight className="h-4 w-4 text-text-secondary opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
 
-            <p className="text-xs text-text-secondary line-clamp-2 mb-4">
-              {project.description}
-            </p>
-
-            {/* Progress Bar */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-text-secondary">Progress</span>
-                <span className="text-xs font-semibold text-text">{project.progress}%</span>
+              {/* Footer */}
+              <div className="flex items-center gap-3 text-xs text-text-secondary">
+                {project.start_date && (
+                  <div className="flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />
+                    Start: {formatDate(project.start_date)}
+                  </div>
+                )}
+                {project.deadline && (
+                  <div className="flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />
+                    Due: {formatDate(project.deadline)}
+                  </div>
+                )}
               </div>
-              <div className="h-1.5 w-full rounded-full bg-gray-100">
+            </Link>
+
+            {/* Kebab menu */}
+            <div className="absolute top-3 right-3">
+              <button
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setMenuOpen(menuOpen === project.id ? null : project.id)
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-surface-alt hover:text-text transition-colors"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+              {menuOpen === project.id && (
                 <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: `${project.progress}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center gap-3 text-xs text-text-secondary">
-              {project.start_date && (
-                <div className="flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  Start: {formatDate(project.start_date)}
+                  className="absolute right-0 top-8 z-10 w-36 rounded-lg border border-border bg-white py-1 shadow-lg"
+                  onMouseLeave={() => setMenuOpen(null)}
+                >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditingProject(project)
+                      setMenuOpen(null)
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-text hover:bg-surface-alt"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDeletingProject(project)
+                      setMenuOpen(null)
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </button>
                 </div>
               )}
-              {project.deadline && (
-                <div className="flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  Due: {formatDate(project.deadline)}
-                </div>
-              )}
             </div>
-          </Link>
+          </div>
         ))}
       </div>
       )}
@@ -164,6 +226,26 @@ export function Projects() {
           onClose={() => setShowCreate(false)}
           onSubmit={(data) => createMutation.mutate(data)}
           loading={createMutation.isPending}
+        />
+      )}
+
+      {/* Edit Modal */}
+      {editingProject && (
+        <EditProjectModal
+          project={editingProject}
+          onClose={() => setEditingProject(null)}
+          onSubmit={(data) => updateMutation.mutate({ id: editingProject.id, data })}
+          loading={updateMutation.isPending}
+        />
+      )}
+
+      {/* Delete Confirm */}
+      {deletingProject && (
+        <DeleteProjectDialog
+          project={deletingProject}
+          onClose={() => setDeletingProject(null)}
+          onConfirm={() => deleteMutation.mutate(deletingProject.id)}
+          loading={deleteMutation.isPending}
         />
       )}
     </div>
@@ -285,6 +367,187 @@ function CreateProjectModal({
           </button>
         </div>
       </form>
+    </div>
+  )
+}
+
+function EditProjectModal({
+  project,
+  onClose,
+  onSubmit,
+  loading,
+}: {
+  project: Project
+  onClose: () => void
+  onSubmit: (data: Partial<Project>) => void
+  loading: boolean
+}) {
+  const [title, setTitle] = useState(project.title)
+  const [description, setDescription] = useState(project.description ?? '')
+  const [status, setStatus] = useState(project.status)
+  const [priority, setPriority] = useState<Priority>(project.priority)
+  const [startDate, setStartDate] = useState(project.start_date?.slice(0, 10) ?? '')
+  const [deadline, setDeadline] = useState(project.deadline?.slice(0, 10) ?? '')
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onSubmit({
+      title,
+      description,
+      status,
+      priority,
+      start_date: startDate || null,
+      deadline: deadline || null,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-md rounded-xl border border-border bg-white p-6 shadow-lg space-y-4"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Edit Project</h2>
+          <button type="button" onClick={onClose} className="text-text-secondary hover:text-text">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Title</label>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 resize-none"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as Project['status'])}
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+            >
+              <option value="planning">Planning</option>
+              <option value="in_progress">In Progress</option>
+              <option value="on_hold">On Hold</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Priority</label>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Priority)}
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Start Date</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Deadline</label>
+            <input
+              type="date"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface-alt"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={loading || !title}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function DeleteProjectDialog({
+  project,
+  onClose,
+  onConfirm,
+  loading,
+}: {
+  project: Project
+  onClose: () => void
+  onConfirm: () => void
+  loading: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-white p-6 shadow-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-red-600">Delete Project</h2>
+          <button type="button" onClick={onClose} className="text-text-secondary hover:text-text">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <p className="text-sm text-text-secondary">
+          Are you sure you want to delete{' '}
+          <span className="font-semibold text-text">{project.title}</span>? This will permanently
+          remove all objectives, tasks, timeline entries, and costs.
+        </p>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface-alt"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {loading ? 'Deleting...' : 'Delete Project'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

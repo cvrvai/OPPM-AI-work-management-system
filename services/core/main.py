@@ -3,8 +3,10 @@ OPPM Core Service — workspace, project, task, OPPM, notification, dashboard en
 """
 
 import logging
+import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from config import get_settings
 from middleware.logging import RequestLoggingMiddleware
@@ -42,6 +44,12 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(RequestLoggingMiddleware)
+
+    @app.exception_handler(Exception)
+    async def _debug_exception_handler(request: Request, exc: Exception):
+        tb = traceback.format_exc()
+        logging.getLogger("oppm.debug").error("500 on %s: %s\n%s", request.url.path, exc, tb)
+        return JSONResponse({"detail": str(exc), "traceback": tb}, status_code=500)
 
     app.include_router(v1_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")

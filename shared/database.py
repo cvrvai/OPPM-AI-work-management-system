@@ -20,7 +20,36 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
-    pass
+
+    def __iter__(self):
+        """Yield (db_col_name, value) pairs so dict(instance) works.
+        Uses mapper inspection to correctly handle attrs with different Python/DB names
+        (e.g., metadata_ → metadata).
+        """
+        from sqlalchemy import inspect as sa_inspect
+        mapper = sa_inspect(type(self)).mapper
+        for col_attr in mapper.column_attrs:
+            db_col_name = col_attr.columns[0].name
+            yield db_col_name, getattr(self, col_attr.key)
+
+    def __getitem__(self, key: str):
+        """Allow dict-style read access: instance['field'] using DB column name."""
+        from sqlalchemy import inspect as sa_inspect
+        mapper = sa_inspect(type(self)).mapper
+        for col_attr in mapper.column_attrs:
+            if col_attr.columns[0].name == key:
+                return getattr(self, col_attr.key)
+        return getattr(self, key)
+
+    def get(self, key: str, default=None):
+        """Allow dict-style .get() access using DB column name."""
+        try:
+            return self.__getitem__(key)
+        except AttributeError:
+            return default
+
+    def to_dict(self) -> dict:
+        return dict(self)
 
 
 def get_engine() -> AsyncEngine:
@@ -49,10 +78,15 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_session() -> AsyncSession:
-    """FastAPI dependency — yields an AsyncSession per request."""
+    """FastAPI dependency — yields an AsyncSession per request, auto-commits on success."""
     factory = get_session_factory()
     async with factory() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def init_db() -> None:

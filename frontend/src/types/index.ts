@@ -113,7 +113,7 @@ export interface OPPMCost {
   category: string
   planned_amount: number
   actual_amount: number
-  notes: string
+  description: string
   created_at: string
 }
 

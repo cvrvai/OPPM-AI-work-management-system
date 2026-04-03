@@ -1,9 +1,11 @@
 # OPPM AI — API Reference
 
-> Base URL (dev): `http://localhost:8080/api` via Vite proxy → gateway → service
-> Base URL (prod): `http://your-domain/api` via nginx gateway
-> Authentication: Bearer JWT token (obtained from `POST /api/auth/login`)
-> Dev Note: Vite proxy routes all `/api` and `/mcp` to `localhost:8080` (gateway). Do NOT set `VITE_API_URL` in development.
+> **Base URL (dev):** `http://localhost:8080/api` via Vite proxy → gateway → service
+> **Base URL (prod):** `http://your-domain/api` via nginx gateway
+> **Authentication:** `Authorization: Bearer {access_token}` on all `/v1/*` routes
+> **Dev Note:** Vite proxy routes all `/api` calls to `localhost:8080` (gateway). Do NOT set `VITE_API_URL` in development.
+>
+> **OPPM applies to any industry** — construction, architecture, finance, healthcare, IT, manufacturing, education, or any other field. All projects share universal elements: objectives, tasks, timelines, budgets, and team members. The AI adapts its vocabulary to the project domain.
 
 ---
 
@@ -183,6 +185,27 @@ Update a member's role. **Requires admin role.**
 ### `DELETE /v1/workspaces/{workspace_id}/members/{member_id}`
 Remove a member from the workspace. **Requires admin role.** Cannot remove the last owner.
 
+### `GET /v1/workspaces/{workspace_id}/members/lookup?email={email}`
+Look up a workspace member by email address. Useful for invite flows.
+
+**Response** `200`
+```json
+{
+  "user_id": "uuid",
+  "email": "user@example.com",
+  "display_name": "Jane Doe",
+  "role": "member"
+}
+```
+
+### `PATCH /v1/workspaces/{workspace_id}/members/me/display-name`
+Update the current user's display name within the workspace.
+
+**Body**
+```json
+{ "display_name": "Jane Doe" }
+```
+
 ---
 
 ## Workspace Invites
@@ -215,6 +238,38 @@ Accept an invite by token.
 **Body**
 ```json
 { "token": "invite-token-string" }
+```
+
+### `GET /v1/invites/preview/{token}` *(no auth required)*
+Fetch a public preview of the workspace invitation before accepting.
+
+**Response** `200`
+```json
+{
+  "workspace_name": "Acme Corp",
+  "workspace_description": "...",
+  "member_count": 12,
+  "role": "member",
+  "inviter_name": "Alice",
+  "expires_at": "2025-01-08T00:00:00Z",
+  "is_expired": false,
+  "is_used": false
+}
+```
+
+**Errors:** `404` invite not found · `410` invite expired or already used
+
+### `POST /v1/workspaces/{workspace_id}/invites/{invite_id}/resend`
+Regenerate an invite token and resend the invitation email. **Requires admin role.**
+
+**Response** `200`
+```json
+{
+  "id": "uuid",
+  "email": "user@example.com",
+  "token": "new-token-string",
+  "expires_at": "2025-01-15T00:00:00Z"
+}
 ```
 
 ---
@@ -359,26 +414,29 @@ Get all timeline entries for a project's objectives.
 [
   {
     "id": "uuid",
+    "project_id": "uuid",
     "objective_id": "uuid",
-    "year": 2025,
-    "month": 3,
-    "status": "in_progress"
+    "week_start": "2025-03-10",
+    "status": "in_progress",
+    "ai_score": null,
+    "notes": null
   }
 ]
 ```
 
 ### `PUT /v1/workspaces/{ws}/projects/{proj}/oppm/timeline`
-Upsert a timeline entry.
+Upsert a single timeline entry (create or update by project+objective+week).
 
 **Body**
 ```json
 {
   "objective_id": "uuid",
-  "year": 2025,
-  "month": 3,
+  "week_start": "2025-03-10",
   "status": "completed"
 }
 ```
+
+**Status values:** `planned` | `in_progress` | `completed` | `at_risk` | `blocked`
 
 ---
 
@@ -438,6 +496,29 @@ Link a repository to a project.
 ### `GET /v1/workspaces/{workspace_id}/commits`
 List recent commits with AI analyses.
 
+### `GET /v1/workspaces/{workspace_id}/git/repos`
+List repositories configured in this workspace.
+
+### `GET /v1/workspaces/{workspace_id}/git/recent-analyses`
+List the most recent AI commit analyses (last 20 by default).
+
+### `GET /v1/workspaces/{workspace_id}/git/report/{project_id}`
+Get a formatted AI-generated Git activity report for a specific project. Summarises commit frequency, author activity, and alignment with OPPM objectives.
+
+**Response** `200`
+```json
+{
+  "project_id": "uuid",
+  "period_days": 30,
+  "total_commits": 47,
+  "authors": ["alice", "bob"],
+  "avg_quality_score": 82.4,
+  "avg_alignment_score": 71.1,
+  "summary": "The team has been actively working on the Authentication module...",
+  "top_objectives_referenced": ["Login & Registration", "Security Hardening"]
+}
+```
+
 ### `POST /v1/git/webhook`
 GitHub webhook endpoint. Validates HMAC signature. Rate limited (30 req/min).
 
@@ -464,6 +545,11 @@ Add an AI model configuration. **Requires admin role.**
 }
 ```
 
+### `PUT /v1/workspaces/{workspace_id}/ai/models/{model_id}/toggle`
+Toggle a model's `is_active` state. **Requires admin role.**
+
+**Response** `200` — updated model object.
+
 **Provider constraint:** `provider` must be one of `ollama`, `anthropic`, `openai`, `kimi`, `custom`. Invalid values return `400`.
 
 **Ollama cloud models** should use `provider: "ollama"` with `endpoint_url` pointing to the cloud endpoint (e.g., `https://ollama.com/api`). The `model_id` identifies the cloud model.
@@ -472,13 +558,19 @@ Add an AI model configuration. **Requires admin role.**
 
 ## AI Chat
 
-### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat`
-Chat with AI about a project. Uses `call_with_fallback` across all active workspace AI models.
+> All AI chat endpoints require at least one **active** AI model configured for the workspace.
+> Returns `400 No active AI model configured` when no active model is found.
+> Returns `502 All AI models are currently unavailable` when the LLM server is unreachable.
+
+### `POST /v1/workspaces/{workspace_id}/ai/chat`
+Workspace-level chat with AI (no project context).
 
 **Body**
 ```json
 {
-  "message": "What tasks are overdue?",
+  "messages": [
+    { "role": "user", "content": "What projects are in progress?" }
+  ],
   "model_id": "uuid"
 }
 ```
@@ -486,14 +578,46 @@ Chat with AI about a project. Uses `call_with_fallback` across all active worksp
 **Response** `200`
 ```json
 {
-  "message": "There are 3 overdue tasks...",
+  "message": "There are 3 active projects...",
   "tool_calls": [],
+  "updated_entities": []
+}
+```
+
+### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat`
+Chat with AI in the context of a specific project. Automatically injects project state (objectives, timeline, costs, team).
+
+**Body**
+```json
+{
+  "messages": [
+    { "role": "user", "content": "What tasks are overdue?" }
+  ],
+  "model_id": "uuid"
+}
+```
+
+**Response** `200`
+```json
+{
+  "message": "There are 3 overdue tasks: ...",
+  "tool_calls": [
+    { "tool": "update_task", "input": { "task_id": "uuid", "status": "completed" } }
+  ],
+  "applied_tool_calls": true,
   "updated_entities": ["tasks"]
 }
 ```
 
 ### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan`
-Generate an AI-driven OPPM plan preview.
+Generate an AI-driven OPPM plan preview (does NOT apply changes).
+
+**Body**
+```json
+{
+  "description": "A 5-story office tower construction project in downtown"
+}
+```
 
 ### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan/commit`
 Apply a previously generated plan by `commit_token`.
@@ -505,6 +629,29 @@ Apply a previously generated plan by `commit_token`.
 
 ### `GET /v1/workspaces/{workspace_id}/projects/{project_id}/ai/weekly-summary`
 Get an AI-generated weekly status summary for the project.
+
+### `GET /v1/workspaces/{workspace_id}/ai/chat/capabilities`
+Returns available AI features and whether an active LLM model is configured.
+
+**Response** `200`
+```json
+{
+  "chat": true,
+  "weekly_summary": true,
+  "commit_analysis": true,
+  "rag": true,
+  "active_model": "llama3.2",
+  "provider": "ollama"
+}
+```
+
+### `POST /v1/workspaces/{workspace_id}/ai/reindex`
+Trigger a background re-embedding of all workspace data (projects, objectives, tasks, commits) into the vector store. Useful after bulk imports or migrations.
+
+**Response** `202` Accepted
+```json
+{ "message": "Reindex started", "entity_count": 142 }
+```
 
 ---
 
@@ -594,7 +741,7 @@ Execute an MCP tool by name. `workspace_id` is injected automatically.
 ```json
 {
   "tool": "get_project_status",
-  "parameters": { "project_id": "uuid" }
+  "params": { "project_id": "uuid" }
 }
 ```
 
@@ -614,6 +761,11 @@ List notifications for the current user (across all workspaces).
 
 ### `PUT /v1/notifications/{notification_id}/read`
 Mark a notification as read.
+
+### `DELETE /v1/notifications/{notification_id}`
+Delete a single notification permanently.
+
+**Response** `204` No Content
 
 ### `PUT /v1/notifications/read-all`
 Mark all notifications as read.

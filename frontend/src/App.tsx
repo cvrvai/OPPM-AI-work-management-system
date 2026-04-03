@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { Layout } from '@/components/layout/Layout'
 import { Login } from '@/pages/Login'
 import { Dashboard } from '@/pages/Dashboard'
@@ -14,7 +15,13 @@ import { AcceptInvite } from '@/pages/AcceptInvite'
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 30_000, retry: 1 },
+    queries: {
+      staleTime: 30_000,
+      retry: 3,
+      // Exponential backoff: 1s, 2s, 4s — handles transient 503s on service startup
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
+      refetchOnWindowFocus: true,
+    },
   },
 })
 
@@ -32,20 +39,22 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const initialize = useAuthStore((s) => s.initialize)
-  const [ready, setReady] = useState(false)
+  const fetchWorkspaces = useWorkspaceStore((s) => s.fetchWorkspaces)
+  const initRef = useRef(false)
 
   useEffect(() => {
-    initialize().then(() => setReady(true))
-  }, [initialize])
+    // Guard against React StrictMode double-invocation to avoid duplicate API calls
+    if (initRef.current) return
+    initRef.current = true
+    initialize().then(() => {
+      if (useAuthStore.getState().isAuthenticated) {
+        return fetchWorkspaces()
+      }
+    })
+  }, [initialize, fetchWorkspaces])
 
-  if (!ready) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    )
-  }
-
+  // No global loading gate — public routes (login, accept-invite) render immediately.
+  // ProtectedRoute handles the loading spinner only for authenticated areas.
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

@@ -436,3 +436,31 @@ PATCH  /api/auth/profile     → updateUser({data: {full_name}})     → updated
 ```
 Browser → Vite (:5173) → gateway (:8080) → core (:8000) → auth_service.py (local JWT)
 ```
+
+---
+
+> **⚠️ Path Note for Phases 1–6**: These phases were written during the monolith era when all backend code lived in `backend/`. After Phase 7 (Microservices Migration), the code was reorganised into `services/core/`, `services/ai/`, `services/git/`, `services/mcp/`, and `shared/`. File paths in Phases 1–6 that reference `backend/` are historical and no longer reflect the current structure.
+
+---
+
+## Phase 12 — Backlog (Planned)
+
+Items identified for the next development cycle:
+
+| # | Item | Priority | Notes |
+|---|------|----------|-------|
+| 12.1 | Project edit/delete in frontend | ✅ Done | Edit modal + delete dialog with kebab menu added to `Projects.tsx` |
+| 12.2 | Owner picker uses workspace members | ✅ Done | OPPM objective owner dropdown loads `GET /members` |
+| 12.3 | Industry demo seed data | ✅ Done | `seed_demo.ps1` — 5 industries, 10 projects |
+| 12.4 | User-facing testing guide | ✅ Done | `docs/TESTING-GUIDE.md` |
+| 12.5 | Public API endpoint security (rate limiting on all non-webhook public routes) | High | Currently only webhook has rate limiting |
+| 12.6 | Email sending (SMTP / SendGrid) for invites and notifications | High | Currently notifications are stored only; no email delivery |
+| 12.7 | Task drag-and-drop between status columns | Medium | `@dnd-kit/core` or similar |
+| 12.8 | Real-time notifications (WebSocket / SSE) | Medium | Currently polling; add `GET /notifications/stream` SSE endpoint |
+| 12.9 | Alembic migrations for all services | Medium | Currently applied manually; add `alembic upgrade head` to Docker entrypoint |
+| 12.10 | Project member management UI (add/remove from project team) | Medium | Backend endpoints exist; no frontend UI |
+| 12.11 | Commits page — project filter + pagination | Low | Currently shows all commits unfiltered |
+| 12.12 | AI weekly summary scheduled job (cron) | Low | Currently on-demand only |
+| 12.13 | MCP protocol compliance audit | Low | Validate against MCP 1.0 spec |
+| 12.14 | Git service report endpoint UI (`GET /git/report/:project_id`) | Low | Backend route exists; no frontend component |
+

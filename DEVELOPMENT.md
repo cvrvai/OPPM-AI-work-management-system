@@ -170,3 +170,57 @@ docker compose -f docker-compose.microservices.yml stop core
 | git | 8002 | GitHub, webhooks, commits |
 | mcp | 8003 | MCP tool endpoints |
 | frontend | 5173 | Vite dev server |
+
+---
+
+## Database Migrations
+
+Migrations are applied via Alembic inside the `core` service.
+
+### Apply pending migrations (Docker)
+
+```powershell
+docker compose -f docker-compose.microservices.yml exec core alembic upgrade head
+```
+
+### Apply pending migrations (native)
+
+```powershell
+cd services/core
+.\start.ps1   # ensure env vars loaded, then in another terminal:
+alembic upgrade head
+```
+
+### Create a new migration
+
+```powershell
+cd services/core
+alembic revision --autogenerate -m "add column foo to projects"
+# Review the generated file in services/core/alembic/versions/
+alembic upgrade head
+```
+
+### Check migration status
+
+```powershell
+alembic current   # shows which migration is applied
+alembic history   # full migration log
+```
+
+---
+
+## Docker Dev Overlay (`docker-compose.dev.yml`)
+
+The `docker-compose.dev.yml` file is a **development overlay** that mounts local source code into running containers for hot-reload during development. Use it instead of rebuilding on every code change:
+
+```powershell
+# Start all services with hot-reload volume mounts
+docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up -d
+```
+
+What it does:
+- Mounts `services/core/` → `/app/` in the core container (uvicorn `--reload` picks up changes)
+- Same for `services/ai/`, `services/git/`, `services/mcp/`
+- Does **not** mount `shared/` — rebuild required if shared code changes (`--build` all)
+
+Note: The frontend is not included in the Docker overlay; Vite hot-reload operates independently on port 5173.

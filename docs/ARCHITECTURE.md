@@ -719,36 +719,36 @@ volumes:
 
 ### Starting Services
 
-```bash
-# Production
-docker compose up -d
+```powershell
+# Production (microservices)
+docker compose -f docker-compose.microservices.yml up -d
 
-# Development with hot-reload
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Development with hot-reload overlay
+docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up -d
 
 # Run migrations after first start
-docker compose exec core alembic upgrade head
+docker compose -f docker-compose.microservices.yml exec core alembic upgrade head
 ```
 
 ### Native Development (no Docker — services only)
 
-Start PostgreSQL and Redis via Docker, run Python services natively:
+Start PostgreSQL via Docker, run Python services natively:
 
-```bash
+```powershell
 # Infrastructure only
-docker compose up postgres redis -d
+docker compose up postgres -d
 
-# Terminal 1 — gateway
-./services/gateway/start.ps1    # port 8080
+# Terminal 1 — gateway (start first)
+.\services\gateway\start.ps1    # port 8080
 
 # Terminals 2–5
-./services/core/start.ps1       # port 8000
-./services/ai/start.ps1         # port 8001
-./services/git/start.ps1        # port 8002
-./services/mcp/start.ps1        # port 8003
+.\services\core\start.ps1       # port 8000
+.\services\ai\start.ps1         # port 8001
+.\services\git\start.ps1        # port 8002
+.\services\mcp\start.ps1        # port 8003
 
 # Terminal 6
-cd frontend && npm run dev       # port 5173
+cd frontend; npm run dev         # port 5173
 ```
 
 ---

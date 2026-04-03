@@ -8,6 +8,7 @@ from schemas.workspace import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, In
 from shared.schemas.common import SuccessResponse
 from services.workspace_service import (
     create_workspace,
+    get_workspace,
     get_user_workspaces,
     update_workspace,
     delete_workspace,
@@ -37,6 +38,11 @@ async def list_workspaces(user: CurrentUser = Depends(get_current_user), session
 @router.post("/workspaces", status_code=201)
 async def create_workspace_route(data: WorkspaceCreate, user: CurrentUser = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     return await create_workspace(session, user.id, data.name, data.slug, data.description)
+
+
+@router.get("/workspaces/{workspace_id}")
+async def get_workspace_route(workspace_id: str, user: CurrentUser = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    return await get_workspace(session, workspace_id, user.id)
 
 
 @router.put("/workspaces/{workspace_id}")

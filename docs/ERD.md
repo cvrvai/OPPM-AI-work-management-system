@@ -1,5 +1,9 @@
 # OPPM AI — Entity Relationship Diagram
 
+> **Schema version:** microservices architecture (20 tables)  
+> **Auth:** Custom JWT tables (not Supabase Auth)  
+> **Key change from v1:** `oppm_timeline_entries` uses `week_start DATE` (not `year/month INT`)
+
 ## Full Database ERD
 
 ```mermaid
@@ -12,6 +16,35 @@ erDiagram
         uuid created_by FK
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    users {
+        uuid id PK
+        text email UK
+        text password_hash
+        text display_name
+        boolean is_active
+        boolean is_verified
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    refresh_tokens {
+        uuid id PK
+        uuid user_id FK
+        text token_hash UK
+        timestamptz expires_at
+        boolean revoked
+        timestamptz created_at
+    }
+
+    email_verifications {
+        uuid id PK
+        uuid user_id FK
+        text token UK
+        timestamptz expires_at
+        timestamptz used_at
+        timestamptz created_at
     }
 
     workspace_members {
@@ -39,11 +72,11 @@ erDiagram
         uuid workspace_id FK
         text title
         text description
-        text status "planning|active|on_hold|completed|cancelled"
+        text status "planning|in_progress|on_hold|completed|cancelled"
         text priority "low|medium|high|critical"
         integer progress "0-100"
         date start_date
-        date end_date
+        date deadline
         uuid lead_id FK
         jsonb metadata
         timestamptz created_at
@@ -95,9 +128,21 @@ erDiagram
     oppm_timeline_entries {
         uuid id PK
         uuid objective_id FK
-        integer year
-        integer month "1-12"
-        text status "planned|in_progress|completed|delayed"
+        uuid project_id FK
+        date week_start "Monday of the week (YYYY-MM-DD)"
+        text status "planned|in_progress|completed|at_risk|blocked"
+        float ai_score "0.0-1.0 optional"
+        text notes
+        timestamptz created_at
+    }
+
+    document_embeddings {
+        uuid id PK
+        uuid workspace_id FK
+        text entity_type "project|objective|task|commit"
+        uuid entity_id FK
+        text content
+        vector embedding "1536-dim pgvector"
         timestamptz created_at
     }
 
@@ -204,11 +249,17 @@ erDiagram
     workspaces ||--o{ ai_models : "configures"
     workspaces ||--o{ notifications : "generates"
     workspaces ||--o{ audit_log : "tracks"
+    workspaces ||--o{ document_embeddings : "indexes"
+
+    users ||--o{ workspace_members : "belongs to"
+    users ||--o{ refresh_tokens : "holds"
+    users ||--o{ email_verifications : "verifies via"
 
     projects ||--o{ project_members : "has team"
     projects ||--o{ tasks : "contains"
     projects ||--o{ oppm_objectives : "defines"
     projects ||--o{ project_costs : "budgets"
+    projects ||--o{ oppm_timeline_entries : "schedules"
 
     workspace_members ||--o{ project_members : "assigned to"
     workspace_members ||--o{ task_assignees : "assigned"

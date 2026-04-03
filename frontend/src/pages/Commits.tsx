@@ -46,9 +46,8 @@ export function Commits() {
 
   const { data: commits, isLoading } = useQuery({
     queryKey: ['commits', ws?.id],
-    queryFn: () => ws
-      ? api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>(`${wsPath}/commits`)
-      : api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>('/commits'),
+    queryFn: () => api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>(`${wsPath}/commits`),
+    enabled: !!ws,
   })
 
   const list = commits || []

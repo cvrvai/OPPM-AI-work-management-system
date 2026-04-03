@@ -36,43 +36,62 @@ export function Settings() {
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   useChatContext('workspace')
 
+  const navItems = [
+    { id: 'profile'  as const, label: 'Profile',              icon: UserCircle, description: 'Name, email and account info' },
+    ...(ws ? [{ id: 'members' as const, label: 'Members', icon: Users, description: 'Invite and manage workspace members' }] : []),
+    { id: 'github'   as const, label: 'GitHub Integration',   icon: GitFork,    description: 'Connect repos and configure webhooks' },
+    { id: 'ai'       as const, label: 'AI Models',            icon: Cpu,        description: 'LLM providers and API keys' },
+  ]
+
+  const active = navItems.find((n) => n.id === activeTab) ?? navItems[0]
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-text">Settings</h1>
-        <p className="text-sm text-text-secondary mt-0.5">
-          Configure your profile, workspace members, GitHub integration, and AI models
-        </p>
-      </div>
+    <div className="flex gap-8 min-h-[calc(100vh-120px)]">
+      {/* ── Left sidebar nav ── */}
+      <aside className="w-56 shrink-0">
+        <div className="mb-5">
+          <h1 className="text-xl font-bold text-text">Settings</h1>
+          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+            Configure your workspace
+          </p>
+        </div>
+        <nav className="space-y-0.5">
+          {navItems.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={cn(
+                'w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors',
+                activeTab === id
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-text-secondary hover:bg-surface-alt hover:text-text'
+              )}
+            >
+              <Icon className={cn('h-4 w-4 shrink-0', activeTab === id ? 'text-primary' : 'text-text-secondary')} />
+              {label}
+            </button>
+          ))}
+        </nav>
+      </aside>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
-        {([
-          { id: 'profile' as const, label: 'Profile', icon: UserCircle },
-          ...(ws ? [{ id: 'members' as const, label: 'Members', icon: Users }] : []),
-          { id: 'github' as const, label: 'GitHub Integration', icon: GitFork },
-          { id: 'ai' as const, label: 'AI Models', icon: Cpu },
-        ]).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={cn(
-              'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors -mb-px',
-              activeTab === id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-text-secondary hover:text-text'
-            )}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* ── Divider ── */}
+      <div className="w-px bg-border shrink-0" />
 
-      {activeTab === 'profile' && <ProfileSettings />}
-      {activeTab === 'members' && ws && <MembersSettings />}
-      {activeTab === 'github' && <GitHubSettings />}
-      {activeTab === 'ai' && <AIModelSettings />}
+      {/* ── Content panel ── */}
+      <div className="flex-1 min-w-0">
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-text flex items-center gap-2">
+            <active.icon className="h-5 w-5 text-primary" />
+            {active.label}
+          </h2>
+          <p className="text-sm text-text-secondary mt-0.5">{active.description}</p>
+        </div>
+
+        {activeTab === 'profile'  && <ProfileSettings />}
+        {activeTab === 'members'  && ws && <MembersSettings />}
+        {activeTab === 'github'   && <GitHubSettings />}
+        {activeTab === 'ai'       && <AIModelSettings />}
+      </div>
     </div>
   )
 }
@@ -640,28 +659,28 @@ function GitHubSettings() {
 
   const { data: accounts, isLoading: loadingAccounts } = useQuery({
     queryKey: ['github-accounts', ws?.id],
-    queryFn: () => ws ? api.get<GitAccount[]>(`${wsPath}/github-accounts`) : api.get<GitAccount[]>('/github-accounts'),
+    queryFn: () => api.get<GitAccount[]>(`${wsPath}/github-accounts`),
+    enabled: !!ws,
   })
 
   const { data: repos, isLoading: loadingRepos } = useQuery({
     queryKey: ['repo-configs', ws?.id],
-    queryFn: () => ws ? api.get<RepoConfig[]>(`${wsPath}/git/repos`) : api.get<RepoConfig[]>('/git/repo-map'),
+    queryFn: () => api.get<RepoConfig[]>(`${wsPath}/git/repos`),
+    enabled: !!ws,
   })
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
-      if (ws) {
-        const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
-        return (res as any)?.items ?? []
-      }
-      return api.get<Project[]>('/projects')
+      const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
+      return (res as any)?.items ?? []
     },
+    enabled: !!ws,
   })
 
   const createAccount = useMutation({
     mutationFn: (data: { account_name: string; github_username: string; token: string }) =>
-      ws ? api.post(`${wsPath}/github-accounts`, data) : api.post('/github-accounts', data),
+      api.post(`${wsPath}/github-accounts`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['github-accounts'] })
       setShowAddAccount(false)
@@ -672,13 +691,13 @@ function GitHubSettings() {
   })
 
   const deleteAccount = useMutation({
-    mutationFn: (id: string) => ws ? api.delete(`${wsPath}/github-accounts/${id}`) : api.delete(`/github-accounts/${id}`),
+    mutationFn: (id: string) => api.delete(`${wsPath}/github-accounts/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['github-accounts'] }),
   })
 
   const createRepo = useMutation({
     mutationFn: (data: { repo_name: string; project_id: string; github_account_id: string; webhook_secret: string }) =>
-      ws ? api.post(`${wsPath}/git/repos`, data) : api.post('/git/repo-map', data),
+      api.post(`${wsPath}/git/repos`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repo-configs'] })
       setShowAddRepo(false)
@@ -690,7 +709,7 @@ function GitHubSettings() {
   })
 
   const deleteRepo = useMutation({
-    mutationFn: (id: string) => ws ? api.delete(`${wsPath}/git/repos/${id}`) : api.delete(`/git/repo-map/${id}`),
+    mutationFn: (id: string) => api.delete(`${wsPath}/git/repos/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['repo-configs'] }),
   })
 
