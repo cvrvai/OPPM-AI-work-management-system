@@ -2,7 +2,7 @@
 
 > Multi-tenant, workspace-scoped AI-powered project management platform following the **One Page Project Manager (OPPM)** methodology.
 >
-> ⚠️ **Stack**: Self-hosted PostgreSQL · Custom JWT Auth · Redis · Docker — **No Supabase**.
+> ⚠️ **Stack**: Self-hosted PostgreSQL · Custom JWT Auth · Redis · Docker.
 
 ## Table of Contents
 - [System Overview](#system-overview)
@@ -103,7 +103,7 @@ src/
 │   ├── layout/        # Header, Sidebar, Layout
 │   └── workspace/     # Workspace selector
 ├── hooks/             # Shared custom hooks
-├── lib/               # API client, utils (NO Supabase client)
+├── lib/               # API client, token utilities, utils
 ├── pages/             # Route-level page components
 ├── stores/            # Zustand stores (auth, workspace)
 └── types/             # TypeScript interfaces
@@ -114,7 +114,6 @@ src/
 ## Database Design
 
 > All tables live in a single self-hosted PostgreSQL instance.
-> There is **no Supabase client, no RLS via Supabase, and no Supabase Auth**.
 > Row-level security is enforced in the **repository layer** by always including `workspace_id` and verifying membership in the service layer.
 
 ### Users & Auth Tables
@@ -285,7 +284,7 @@ CREATE INDEX idx_document_embeddings_vector ON document_embeddings
 ```
 services/
 ├── shared/                          # Shared package imported by ALL services
-│   ├── auth.py                      # JWT encode/decode, token validation (NO Supabase)
+│   ├── auth.py                      # JWT encode/decode, token validation
 │   ├── database.py                  # SQLAlchemy async engine + session factory
 │   ├── redis_client.py              # Redis connection singleton (aioredis)
 │   ├── config.py                    # SharedSettings(BaseSettings) — DB + Redis + JWT
@@ -429,7 +428,7 @@ PostgreSQL 16 (Docker)
 
 ## Authentication & Authorization
 
-> **No Supabase.** Auth is fully self-implemented using industry-standard JWT + bcrypt + Redis token revocation.
+> Auth is fully self-implemented using industry-standard JWT + bcrypt + Redis token revocation.
 
 ### Auth Flow
 
@@ -592,7 +591,7 @@ Retriever Retriever Retriever
     Top-K Chunks → LLM Context
 ```
 
-Embeddings are stored in `document_embeddings.embedding VECTOR(1536)` and queried via pgvector cosine similarity — previously done via Supabase RPC, now done via direct SQLAlchemy:
+Embeddings are stored in `document_embeddings.embedding VECTOR(1536)` and queried via pgvector cosine similarity using direct SQLAlchemy:
 
 ```python
 # repositories/embedding_repo.py
@@ -765,7 +764,7 @@ DATABASE_URL=postgresql+asyncpg://oppm:password@localhost:5432/oppm
 # ── Redis ───────────────────────────────────────────────
 REDIS_URL=redis://:password@localhost:6379/0
 
-# ── JWT Auth (NO Supabase) ──────────────────────────────
+# ── JWT Auth ───────────────────────────────────────────
 JWT_SECRET_KEY=your-256-bit-secret-here          # generate: openssl rand -hex 32
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=15
@@ -786,43 +785,6 @@ GIT_URLS=http://localhost:8002
 MCP_URLS=http://localhost:8003
 ```
 
-> ⚠️ **Removed variables** (no longer needed anywhere):
-> - `SUPABASE_URL`
-> - `SUPABASE_ANON_KEY`
-> - `SUPABASE_SERVICE_ROLE_KEY`
-> - `NEXT_PUBLIC_SUPABASE_URL`
-> - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-
----
-
-## Migration from Supabase
-
-### What changes
-
-| Before (Supabase) | After (Self-hosted) |
-|---|---|
-| `supabase.auth.get_user(token)` | `jwt.decode(token, SECRET_KEY)` |
-| `supabase.auth.sign_in_with_password()` | `auth_service.login()` |
-| `supabase.auth.refresh_session()` | `auth_service.refresh()` |
-| `SupabaseClient.table("x").select()` | `SQLAlchemy session.execute(select(X))` |
-| Supabase RLS policies | `workspace_id` filter in repositories |
-| `match_documents()` Supabase RPC | Direct pgvector SQL via SQLAlchemy |
-| Supabase hosted PostgreSQL | `pgvector/pgvector:pg16` Docker image |
-| In-memory rate limiter fallback | Redis rate limiter (always available) |
-| Supabase Storage | Local volume / S3-compatible (future) |
-
-### Migration Steps
-
-1. Run `alembic revision --autogenerate` to create initial migration from SQLAlchemy models
-2. Run `alembic upgrade head` to apply schema to PostgreSQL
-3. Replace all `shared/database.py` (Supabase client) with SQLAlchemy engine/session
-4. Replace all `shared/auth.py` (Supabase `get_user()`) with local JWT decode
-5. Replace all repositories (`.table().select()` → SQLAlchemy ORM queries)
-6. Remove `supabase` and `supabase-py` from all `requirements.txt`
-7. Add `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `aioredis`, `bcrypt`, `python-jose` to `requirements.txt`
-8. Remove all Supabase env vars from `.env` files
-9. Update frontend `lib/api.ts` — ensure no Supabase JS client remains
-
 ---
 
 ## AI Agent Configuration
@@ -832,7 +794,7 @@ MCP_URLS=http://localhost:8003
 ├── rules/
 │   ├── api-conventions.md      # API route & naming conventions
 │   ├── code-style.md           # Python & TypeScript style rules
-│   ├── database.md             # SQLAlchemy patterns, NO Supabase
+│   ├── database.md             # SQLAlchemy patterns
 │   ├── auth.md                 # JWT + bcrypt + Redis token rules
 │   ├── error-handling.md       # Error response patterns
 │   ├── project-structure.md    # Layer boundaries
@@ -845,7 +807,6 @@ MCP_URLS=http://localhost:8003
 ```
 
 **Critical rules for AI agents:**
-- Never import or reference `supabase`, `supabase-py`, or `gotrue`
 - Always use `AsyncSession` from SQLAlchemy for database access
 - Always filter queries by `workspace_id`
 - JWT validation is **always local** — never an external HTTP call

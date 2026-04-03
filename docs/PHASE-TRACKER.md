@@ -130,7 +130,7 @@ GET    /v1/workspaces/{ws}/projects/{pid}/ai/weekly-summary     → AI weekly su
 | 4.4 | Update ProfileSettings to also write workspace_members.display_name | ✅ | `frontend/src/pages/Settings.tsx` |
 
 ### Architecture Decisions
-- **Dual write**: Profile save now writes to BOTH Supabase Auth `user_metadata.full_name` AND `workspace_members.display_name` via new PATCH endpoint.
+- **Dual write**: Profile save writes to both `users.full_name` AND `workspace_members.display_name` via PATCH endpoint.
 - **Endpoint design**: `PATCH /workspaces/{ws}/members/me/display-name` — any workspace member can update their own name (no admin check needed).
 - **Backend**: `update_my_display_name()` looks up the member record by `user_id + workspace_id`, then updates `display_name` field.
 
@@ -153,7 +153,7 @@ GET    /v1/workspaces/{ws}/projects/{pid}/ai/weekly-summary     → AI weekly su
 | 5.7 | Add `ALLOWED_PROVIDERS` validation + try/except logging to backend | ✅ | `backend/routers/v1/ai.py` |
 
 ### Bug Fixes Applied
-- **500 on GET `/ai/models`**: Uncaught Supabase exception when DB is empty. Wrapped in try/except with logger warning.
+- **500 on GET `/ai/models`**: Uncaught DB exception when table is empty. Wrapped in try/except with logger warning.
 - **500 on POST `/ai/models` (ollama-cloud)**: Frontend was sending `provider: 'ollama-cloud'` which violated the DB CHECK constraint `('ollama','anthropic','openai','kimi','custom')`. Fixed by using `provider: 'ollama'` for all Ollama-based presets and using unique `id` fields per tab instead.
 - **Duplicate React key**: Both Ollama Local and Ollama Cloud tabs used `provider` as the key — now use unique `id` fields (`'ollama-local'`, `'ollama-cloud'`).
 
@@ -175,7 +175,7 @@ GET    /v1/workspaces/{ws}/projects/{pid}/ai/weekly-summary     → AI weekly su
 |---|------|--------|---------------|
 | 6.1 | LLM fallback chain: `ProviderUnavailableError` + `call_with_fallback()` | ✅ | `backend/infrastructure/llm/base.py`, `ollama.py`, `anthropic.py`, `openai.py`, `kimi.py`, `__init__.py` |
 | 6.2 | Update `ai_chat_service.py` + `ai_analyzer.py` to use fallback | ✅ | `backend/services/ai_chat_service.py`, `backend/services/ai_analyzer.py` |
-| 6.3 | Deploy `match_documents` pgvector RPC to Supabase | ✅ | `supabase/schema.sql`, Supabase migration |
+| 6.3 | Deploy `match_documents` pgvector function to PostgreSQL | ✅ | `supabase/schema.sql`, Alembic migration |
 | 6.4 | Create RAG infrastructure package | ✅ | `backend/infrastructure/rag/` (7 files) |
 | 6.5 | Create MCP tools package | ✅ | `backend/infrastructure/mcp/` (5 files) |
 | 6.6 | Rewrite `rag_service.py` with full 4-stage pipeline | ✅ | `backend/services/rag_service.py` |
@@ -227,7 +227,7 @@ Query → Classify → Retrieve (parallel) → Rerank (RRF) → Return chunks
 
 ### New Database Object
 ```sql
--- Deployed via Supabase migration: recreate_match_documents_rpc
+-- Deployed via Alembic migration: recreate_match_documents_rpc
 CREATE OR REPLACE FUNCTION match_documents(
   query_embedding VECTOR(1536),
   match_count INT,
@@ -298,9 +298,9 @@ Client → nginx:80 (gateway) → core:8000   (workspaces, projects, tasks, OPPM
 
 | # | Task | Status | Files Changed |
 |---|------|--------|---------------|
-| 8.1 | DB migration: `lookup_user_by_email` RPC (SECURITY DEFINER, queries auth.users) | ✅ | Supabase migration `invite_flow_helpers` |
-| 8.2 | DB migration: `get_invite_preview` RPC (public, returns workspace preview) | ✅ | Supabase migration `invite_flow_helpers` |
-| 8.3 | DB migration: add `is_new_user BOOLEAN` + `sent_at TIMESTAMPTZ` to `workspace_invites` | ✅ | Supabase migration `invite_flow_helpers` |
+| 8.1 | DB migration: `lookup_user_by_email` helper (queries users table) | ✅ | Alembic migration `invite_flow_helpers` |
+| 8.2 | DB migration: `get_invite_preview` function (public, returns workspace preview) | ✅ | Alembic migration `invite_flow_helpers` |
+| 8.3 | DB migration: add `is_new_user BOOLEAN` + `sent_at TIMESTAMPTZ` to `workspace_invites` | ✅ | Alembic migration `invite_flow_helpers` |
 | 8.4 | Backend: `lookup_user_by_email` service + endpoint | ✅ | `services/core/services/workspace_service.py`, `routers/v1/workspaces.py` |
 | 8.5 | Backend: `get_invite_preview` service + endpoint (public, no auth) | ✅ | `services/core/services/workspace_service.py`, `routers/v1/workspaces.py` |
 | 8.6 | Backend: `resend_invite` service + endpoint | ✅ | `services/core/services/workspace_service.py`, `routers/v1/workspaces.py` |
@@ -356,7 +356,7 @@ POST /v1/workspaces/{id}/invites/{invite_id}/resend → admin: regenerate token 
 - **OPPM reference JSX**: `task/Oppmeditor · JSX.md` — target UI with StatusDot, InlineEdit, ChatPanel
 - **AI API spec**: `task/Oppm api spec.md` — chat, suggest-plan, weekly-summary endpoints
 - **AI system prompt**: `task/Oppm ai system prompt.md` — (empty, to be written in Phase 2)
-- **DB schema**: `supabase/schema.sql` — all 17 tables
+- **DB schema**: `supabase/schema.sql` — reference DDL (canonical schema applied via Alembic)
 - **Architecture**: `docs/ARCHITECTURE.md`
 - **API reference**: `docs/API-REFERENCE.md`
 
@@ -388,7 +388,7 @@ POST /v1/workspaces/{id}/invites/{invite_id}/resend → admin: regenerate token 
 
 ## Phase 11 — API Gateway, Load Balancing & Auth Redesign ✅ COMPLETE
 
-**Goal:** Replace ad-hoc native dev setup with a proper Python gateway for local development, introduce round-robin load balancing, enforce gateway as the single entry point, and route all frontend auth through the backend (no direct Supabase JS client).
+**Goal:** Replace ad-hoc native dev setup with a proper Python gateway for local development, introduce round-robin load balancing, enforce gateway as the single entry point, and route all frontend auth through the backend REST API.
 
 ### Summary of Changes
 
@@ -401,11 +401,11 @@ POST /v1/workspaces/{id}/invites/{invite_id}/resend → admin: regenerate token 
 | 11.5 | Simplify `vite.config.ts` to proxy all traffic to gateway (:8080) | ✅ | `frontend/vite.config.ts` |
 | 11.6 | Create `services/core/routers/auth.py` — server-side auth endpoints | ✅ | `services/core/routers/auth.py` |
 | 11.7 | Register auth router in `services/core/main.py` | ✅ | `services/core/main.py` |
-| 11.8 | Rewrite `authStore.ts` — remove Supabase JS client, use REST API | ✅ | `frontend/src/stores/authStore.ts` |
+| 11.8 | Rewrite `authStore.ts` — use REST API with Bearer token (localStorage) | ✅ | `frontend/src/stores/authStore.ts` |
 | 11.9 | Update `api.ts` — read `accessToken` from store, auto-retry on 401 | ✅ | `frontend/src/lib/api.ts` |
 | 11.10 | Update `App.tsx`, `AcceptInvite.tsx` — `session` → `accessToken` | ✅ | `frontend/src/App.tsx`, `frontend/src/pages/AcceptInvite.tsx` |
-| 11.11 | Update `Settings.tsx` — replace `supabase.auth.updateUser` with `api.patch('/auth/profile')` | ✅ | `frontend/src/pages/Settings.tsx` |
-| 11.12 | Remove Supabase public keys from `frontend/.env` | ✅ | `frontend/.env` |
+| 11.11 | Update `Settings.tsx` — replace profile update with `api.patch('/auth/profile')` | ✅ | `frontend/src/pages/Settings.tsx` |
+| 11.12 | Remove unused env vars from `frontend/.env` | ✅ | `frontend/.env` |
 | 11.13 | Update `DEVELOPMENT.md` with simplified native run instructions | ✅ | `DEVELOPMENT.md` |
 
 ### Architecture Decisions
@@ -416,7 +416,7 @@ POST /v1/workspaces/{id}/invites/{invite_id}/resend → admin: regenerate token 
 
 - **Per-service `.env`**: Each `services/{name}/.env` contains only that service's credentials. `services/gateway/.env` only has upstream URLs. `pydantic-settings` resolves `.env` relative to CWD (= `$PSScriptRoot`).
 
-- **Auth through gateway**: The frontend `authStore` stores `access_token` and `refresh_token` in `localStorage`. `api.ts` reads `accessToken` from the store for every request. On `401`, it calls `authStore.refreshSession()` then retries once. No Supabase JS client anywhere in the frontend.
+- **Auth through gateway**: The frontend `authStore` stores `access_token` and `refresh_token` in `localStorage`. `api.ts` reads `accessToken` from the store for every request. On `401`, it calls `authStore.refreshSession()` then retries once. All auth is handled server-side via `auth_service.py`.
 
 - **`git/.env` routing**: `AI_SERVICE_URL=http://localhost:8080` — the git service routes AI analysis calls through the gateway, not directly to `ai:8001`.
 
@@ -434,7 +434,5 @@ PATCH  /api/auth/profile     → updateUser({data: {full_name}})     → updated
 ### New Auth Flow
 
 ```
-Browser → Vite (:5173) → gateway (:8080) → core (:8000) → Supabase Auth (server-side)
+Browser → Vite (:5173) → gateway (:8080) → core (:8000) → auth_service.py (local JWT)
 ```
-
-Previously: `Browser → Vite → Supabase JS client (direct)`

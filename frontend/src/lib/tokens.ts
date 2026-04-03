@@ -1,5 +1,5 @@
 /**
- * Token utility — replaces the old Supabase client.
+ * Token utility — localStorage helpers for access/refresh tokens.
  * Tokens are stored in localStorage and managed by authStore.
  */
 

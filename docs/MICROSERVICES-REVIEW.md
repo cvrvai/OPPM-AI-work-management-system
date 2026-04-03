@@ -69,9 +69,9 @@ CORE_URLS=http://localhost:8000,http://localhost:8010
 ## Design Decisions
 
 ### Shared Package (`shared/`)
-- `shared/auth.py` — JWT validation via `supabase.auth.get_user(token)`. Never decode locally.
-- `shared/database.py` — Supabase singleton, uses `service_role_key` (bypasses RLS). Primary auth gate is always the service layer, not RLS.
-- `shared/config.py` — `SharedSettings(BaseSettings)`: Supabase creds + internal_api_key. Each service subclasses this with domain-specific settings.
+- `shared/auth.py` — JWT validation via local HS256 decode (`jwt.decode(token, SECRET_KEY)`). Token is never validated via an external HTTP call.
+- `shared/database.py` — SQLAlchemy async engine + session factory. Service layer is always the primary auth/access gate.
+- `shared/config.py` — `SharedSettings(BaseSettings)`: DB URL, Redis URL, JWT secret + `internal_api_key`. Each service subclasses this with domain-specific settings.
 - Import via `PYTHONPATH=/` (set in each Dockerfile) — `pip install /shared` installs dependencies only.
 
 ### CORS Policy
@@ -88,14 +88,14 @@ A FastAPI reverse proxy that mirrors the nginx routing table for native developm
 - Must be started before any other service when running natively.
 
 ### Auth Through Gateway
-The frontend has no direct Supabase connection. All auth operations go through:
+The frontend has no direct database connection. All auth operations go through:
 ```
-Frontend → Gateway → core/routers/auth.py → Supabase Auth (server-side)
+Frontend → Gateway → core/routers/auth.py → auth_service.py (local JWT + bcrypt)
 ```
 - `POST /api/auth/login|signup|refresh|signout` and `GET /api/auth/me` / `PATCH /api/auth/profile` are in `services/core/routers/auth.py`.
 - Tokens (`access_token`, `refresh_token`) are stored in `localStorage` by `authStore.ts`.
 - On 401, `api.ts` auto-calls `authStore.refreshSession()` then retries the original request once.
-- No Supabase JS client is used in the frontend.
+- Bearer token is sent on every request via `Authorization: Bearer <token>` header.
 
 ### Internal API
 Service-to-service calls use `X-Internal-API-Key` header (validated by `shared/auth.py#verify_internal_key`). Only the AI service exposes an `/internal/` router. The git service calls `ai:8001/internal/analyze-commits` fire-and-forget (`asyncio.create_task`).
@@ -129,7 +129,7 @@ The gateway uses Docker's internal resolver (`127.0.0.11`) so it starts even whe
 | C1 | GitHub webhook HMAC optional — any unauthenticated request was processed | Made signature required; reject 401 if header absent |
 | C2 | `trigger_ai_analysis` awaited with 120s timeout — blocks event loop, causes GitHub timeout retries | Changed to `asyncio.create_task(...)` (fire-and-forget) |
 | C3 | `ai_chat_service` sync functions block async event loop | **Pending** — `_run_llm()` still uses thread pool; full async refactor needed |
-| C4 | Real `SUPABASE_SERVICE_ROLE_KEY` in plaintext file | Added `services/.env` to `.gitignore`; rotate key if repo ever had history |
+| C4 | Service credentials in plaintext file | Added `services/.env` to `.gitignore`; rotate credentials if repo ever had history |
 
 ### High (resolved)
 | ID | Issue | Fix |
@@ -152,10 +152,10 @@ The gateway uses Docker's internal resolver (`127.0.0.11`) so it starts even whe
 |----|-------|---------------|
 | M1 | N+1 queries in `dashboard_service.get_dashboard_stats` (100 DB calls for 50 projects) | Batch: single query with project_id IN (...) |
 | M2 | N+1 in `git_service.list_repos` and `list_commits` | Same — batch project_id lookups |
-| M3 | `_plan_cache` in `ai_chat_service` is in-memory dict — lost on restart, unbounded, not shared between replicas | Replace with Redis or Supabase table; evict after TTL |
+| M3 | `_plan_cache` in `ai_chat_service` is in-memory dict — lost on restart, unbounded, not shared between replicas | Replace with Redis; evict after TTL |
 | M4 | Rate limiting middleware exists (migrated from monolith) but never wired into any service | Add `from middleware.rate_limit import RateLimitMiddleware` to `services/core/main.py` |
 | M5 | `redis` service defined in `docker-compose.microservices.yml` but nothing connects to it | Wire up once M3/M4 are addressed, or remove the service definition |
-| M6 | `shared/database.py` `get_db()` silently falls back to anon key on empty `SUPABASE_SERVICE_ROLE_KEY` | Add startup validation: raise if both keys are empty |
+| M6 | `shared/database.py` startup validation missing | Add lifespan check: raise on startup if `DATABASE_URL` is empty |
 
 ### Low
 | ID | Issue |
@@ -171,7 +171,7 @@ The gateway uses Docker's internal resolver (`127.0.0.11`) so it starts even whe
 
 | Control | Status |
 |---------|--------|
-| JWT validation via Supabase Auth | ✅ All routes |
+| JWT validation (local HS256) | ✅ All routes |
 | Workspace scoping | ✅ All v1 routes (post H1/H2 fix) |
 | Internal key auth | ✅ `X-Internal-API-Key` header |
 | Webhook HMAC | ✅ Required (post C1 fix) |

@@ -24,7 +24,7 @@ Returns server health status.
 
 ## Authentication
 
-All auth endpoints are handled by `core` service via `POST /api/auth/...`. The frontend never contacts Supabase directly.
+All auth endpoints are handled by `core` service via `POST /api/auth/...`. The frontend communicates exclusively through the gateway REST API.
 
 ### `POST /api/auth/login`
 Sign in with email and password.

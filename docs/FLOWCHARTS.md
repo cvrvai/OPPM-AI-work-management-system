@@ -8,25 +8,28 @@ sequenceDiagram
     participant Frontend
     participant Gateway
     participant Core Service
-    participant Supabase Auth
     participant Database
+    participant Redis
 
     User->>Frontend: Enter email + password
     Frontend->>Gateway: POST /api/auth/login<br/>{email, password}
     Gateway->>Core Service: Route to core:8000
-    Core Service->>Supabase Auth: signInWithPassword(email, password)
-    Supabase Auth-->>Core Service: {access_token, refresh_token, user}
+    Core Service->>Database: SELECT user WHERE email = ?
+    Database-->>Core Service: user row (password_hash)
+    Core Service->>Core Service: bcrypt.verify(password, hash)
+    Core Service->>Core Service: jwt.encode({sub: user_id, exp: +15min})
     Core Service-->>Gateway: {access_token, refresh_token, expires_in, user}
     Gateway-->>Frontend: {access_token, refresh_token, expires_in, user}
-    Frontend->>Frontend: Store tokens in localStorage<br/>via authStore (no Supabase JS client)
+    Frontend->>Frontend: Store tokens in localStorage<br/>via authStore
 
-    Note over Frontend,Database: Subsequent API calls
+    Note over Frontend,Redis: Subsequent API calls
 
     Frontend->>Gateway: GET /api/v1/workspaces<br/>Authorization: Bearer {access_token}
     Gateway->>Core Service: Round-robin to core:8000
-    Core Service->>Supabase Auth: get_current_user()<br/>db.auth.get_user(token)
-    Supabase Auth-->>Core Service: User object (id, email, role)
-    Core Service->>Database: Query workspace_members<br/>WHERE user_id = {user.id}
+    Core Service->>Core Service: jwt.decode(token, SECRET_KEY) → user_id
+    Core Service->>Redis: Check token blacklist
+    Redis-->>Core Service: Not blacklisted
+    Core Service->>Database: Query workspace_members<br/>WHERE user_id = {user_id}
     Database-->>Core Service: User's workspaces
     Core Service-->>Frontend: 200 OK [{workspaces}]
 
@@ -34,8 +37,8 @@ sequenceDiagram
 
     Frontend->>Gateway: POST /api/auth/refresh<br/>{refresh_token}
     Gateway->>Core Service: Route to core:8000
-    Core Service->>Supabase Auth: refreshSession(refresh_token)
-    Supabase Auth-->>Core Service: New {access_token, refresh_token}
+    Core Service->>Database: Validate refresh_token (not revoked, not expired)
+    Core Service->>Core Service: Issue new access_token + refresh_token
     Core Service-->>Frontend: New tokens
     Frontend->>Frontend: Update localStorage, retry original request
 ```
@@ -183,7 +186,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[API Request] --> B[Validate token via<br/>supabase.auth.get_user → user_id]
+    A[API Request] --> B[Validate token via<br/>jwt.decode(token, SECRET_KEY) → user_id]
     B --> C[Extract workspace_id from URL path]
     C --> D{Is user a member<br/>of this workspace?}
 
@@ -207,7 +210,7 @@ flowchart TD
     K -->|Yes| L
 
     L --> M[Execute with workspace_id filter]
-    M --> N[RLS policy double-checks<br/>at database level]
+    M --> N[workspace_id filter enforced<br/>at repository layer]
 
     style E fill:#ffcdd2
     style L fill:#c8e6c9
