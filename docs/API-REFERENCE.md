@@ -43,6 +43,7 @@ Role rules:
 - read: `owner`, `admin`, `member`, `viewer`
 - write: `owner`, `admin`, `member`
 - admin-only: `owner`, `admin`
+- owner-only: `owner`
 
 ### Error Shape
 
@@ -121,7 +122,7 @@ Mounted under `/api/v1/`.
 | `POST` | `/api/v1/workspaces` | Yes | Any | Creates a workspace and the creator membership. |
 | `GET` | `/api/v1/workspaces/{workspace_id}` | Yes | Member | Returns one workspace. |
 | `PUT` | `/api/v1/workspaces/{workspace_id}` | Yes | Admin | Updates workspace metadata. |
-| `DELETE` | `/api/v1/workspaces/{workspace_id}` | Yes | Admin | Deletes the workspace. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}` | Yes | Owner | Deletes the workspace. |
 
 ### Members
 
@@ -142,7 +143,7 @@ Mounted under `/api/v1/`.
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/invites/{invite_id}` | Yes | Admin | Revokes an invite. |
 | `POST` | `/api/v1/workspaces/{workspace_id}/invites/{invite_id}/resend` | Yes | Admin | Resends the invite email. |
 | `POST` | `/api/v1/invites/accept` | Yes | Authenticated | Accepts an invite token into the current account. |
-| `GET` | `/api/v1/invites/preview/{token}` | No | Public | Returns invite preview metadata. |
+| `GET` | `/api/v1/invites/preview/{token}` | No | Public | Returns invite preview metadata. The frontend consumes this from both `/invites/:token` and `/invite/accept/:token`. |
 
 ### Member Skills
 

@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/authStore'
 import type { WorkspaceMember, MemberSkill, SkillLevel } from '@/types'
 import { cn } from '@/lib/utils'
 import { Users, Plus, X, Loader2, Star } from 'lucide-react'
+import { WorkspaceMembersPanel } from './Settings'
 
 const LEVEL_STYLES: Record<SkillLevel, string> = {
   beginner: 'bg-slate-100 text-slate-600 border-slate-200',
@@ -191,11 +192,11 @@ export function Team() {
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const currentUserId = useAuthStore((s) => s.user?.id ?? null)
-  const wsRole = ws?.role ?? 'member'
+  const wsRole = ws?.current_user_role ?? ws?.role ?? 'member'
   const isAdmin = wsRole === 'owner' || wsRole === 'admin'
 
   const { data: members = [], isLoading } = useQuery<WorkspaceMember[]>({
-    queryKey: ['members', ws?.id],
+    queryKey: ['workspace-members', ws?.id],
     queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
     enabled: !!ws,
   })
@@ -209,19 +210,27 @@ export function Team() {
       <div>
         <h1 className="text-2xl font-bold text-text">Team</h1>
         <p className="text-sm text-text-secondary mt-0.5">
-          Workspace members and their skills
+          Manage workspace members, invitations, and skills in one place
         </p>
       </div>
 
+      {ws && <WorkspaceMembersPanel />}
+
       {/* Legend */}
-      <div className="flex items-center gap-4 text-xs text-text-secondary">
-        <span className="font-medium">Skill levels:</span>
-        {(['beginner', 'intermediate', 'expert'] as SkillLevel[]).map((level) => (
-          <span key={level} className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-medium capitalize', LEVEL_STYLES[level])}>
-            <span className={cn('h-1.5 w-1.5 rounded-full', LEVEL_DOT[level])} />
-            {level}
-          </span>
-        ))}
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-text">Skill Directory</h2>
+          <p className="text-sm text-text-secondary mt-0.5">Use the member cards below for capability tracking and self-managed skills.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-4 text-xs text-text-secondary">
+          <span className="font-medium">Skill levels:</span>
+          {(['beginner', 'intermediate', 'expert'] as SkillLevel[]).map((level) => (
+            <span key={level} className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-medium capitalize', LEVEL_STYLES[level])}>
+              <span className={cn('h-1.5 w-1.5 rounded-full', LEVEL_DOT[level])} />
+              {level}
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Members grid */}

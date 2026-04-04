@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from shared.auth import CurrentUser, get_current_user, WorkspaceContext, get_workspace_context, require_admin
+from shared.auth import CurrentUser, get_current_user, WorkspaceContext, get_workspace_context, require_admin, require_owner
 from shared.database import get_session
 from schemas.workspace import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept, DisplayNameUpdate, MemberSkillCreate
 from shared.schemas.common import SuccessResponse
@@ -54,7 +54,7 @@ async def update_workspace_route(data: WorkspaceUpdate, ws: WorkspaceContext = D
 
 
 @router.delete("/workspaces/{workspace_id}")
-async def delete_workspace_route(ws: WorkspaceContext = Depends(require_admin), session: AsyncSession = Depends(get_session)) -> SuccessResponse:
+async def delete_workspace_route(ws: WorkspaceContext = Depends(require_owner), session: AsyncSession = Depends(get_session)) -> SuccessResponse:
     await delete_workspace(session, ws.workspace_id, ws.user.id)
     return SuccessResponse()
 

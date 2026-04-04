@@ -5,10 +5,12 @@ Catches missing get_workspace_context dependency.
 """
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
 from core.main import app
+from shared.auth import WorkspaceContext, require_owner
 
 client = TestClient(app)
 
@@ -43,3 +45,29 @@ def test_unauthenticated_request_returns_401():
     """Requests without any authentication should get 401."""
     response = client.get("/api/v1/workspaces/ws-123/projects")
     assert response.status_code == 401
+
+
+def test_require_owner_allows_owner_role():
+    ws = WorkspaceContext(
+        workspace_id="ws-123",
+        user=MagicMock(id="user-1", email="owner@test.com", role="authenticated"),
+        role="owner",
+        member_id="member-1",
+    )
+
+    assert require_owner(ws) is ws
+
+
+def test_require_owner_rejects_admin_role():
+    ws = WorkspaceContext(
+        workspace_id="ws-123",
+        user=MagicMock(id="user-2", email="admin@test.com", role="authenticated"),
+        role="admin",
+        member_id="member-2",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_owner(ws)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Workspace owner role required"

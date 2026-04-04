@@ -30,6 +30,23 @@ const ROLE_CONFIG: Record<WorkspaceRole, { label: string; color: string; icon: t
   viewer: { label: 'Viewer', color: 'bg-gray-100 text-gray-600',    icon: Eye,    description: 'Read-only access' },
 }
 
+function getInviteErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Unable to process this invitation right now.'
+  const normalized = message.toLowerCase()
+
+  if (normalized.includes('expired')) {
+    return 'This invitation has expired. Ask a workspace admin to resend it.'
+  }
+  if (normalized.includes('workspace not found') || normalized.includes('not found')) {
+    return 'This workspace is no longer available. Ask the inviter to send a fresh link.'
+  }
+  if (normalized.includes('already') || normalized.includes('member')) {
+    return 'You already belong to this workspace. You can go straight to your dashboard.'
+  }
+
+  return message
+}
+
 export function AcceptInvite() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
@@ -50,7 +67,7 @@ export function AcceptInvite() {
     }
     api.get<InvitePreview>(`/v1/invites/preview/${token}`)
       .then(setPreview)
-      .catch((err: Error) => setPreviewError(err.message || 'Invite not found'))
+      .catch((err: unknown) => setPreviewError(getInviteErrorMessage(err)))
   }, [token])
 
   const handleAccept = async () => {
@@ -65,7 +82,7 @@ export function AcceptInvite() {
       if (ws) setCurrentWorkspace(ws)
       setTimeout(() => navigate('/', { replace: true }), 1500)
     } catch (err) {
-      setAcceptError(err instanceof Error ? err.message : 'Failed to join workspace')
+      setAcceptError(getInviteErrorMessage(err))
     } finally {
       setAccepting(false)
     }
@@ -90,7 +107,7 @@ export function AcceptInvite() {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 px-4">
         <XCircle className="h-12 w-12 text-danger" />
-        <h2 className="text-xl font-semibold text-text">Invitation Not Found</h2>
+        <h2 className="text-xl font-semibold text-text">Invitation Unavailable</h2>
         <p className="text-text-secondary text-sm">{previewError}</p>
         <button
           onClick={() => navigate(session ? '/' : '/login', { replace: true })}

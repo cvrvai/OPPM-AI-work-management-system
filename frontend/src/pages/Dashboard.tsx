@@ -15,7 +15,7 @@ import {
   BarChart2,
   GitBranch,
 } from 'lucide-react'
-import { cn, getProgressColor, getStatusColor } from '@/lib/utils'
+import { cn, getStatusColor } from '@/lib/utils'
 import {
   BarChart,
   Bar,

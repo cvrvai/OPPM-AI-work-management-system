@@ -5,6 +5,23 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { api } from '@/lib/api'
 import { Target } from 'lucide-react'
 
+function getInviteAcceptErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Unable to join the invited workspace right now.'
+  const normalized = message.toLowerCase()
+
+  if (normalized.includes('expired')) {
+    return 'Your account was created, but the invite has expired. Ask the workspace admin to resend it.'
+  }
+  if (normalized.includes('workspace not found') || normalized.includes('not found')) {
+    return 'Your account was created, but the workspace is no longer available. Ask the inviter for a fresh link.'
+  }
+  if (normalized.includes('already') || normalized.includes('member')) {
+    return 'You already belong to that workspace. Use the invite page or your dashboard to continue.'
+  }
+
+  return message
+}
+
 export function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -29,9 +46,9 @@ export function Login() {
         const ws = useWorkspaceStore.getState().workspaces.find(w => w.id === result.workspace_id)
         if (ws) setCurrentWorkspace(ws)
         navigate('/', { replace: true })
-      } catch {
-        // Invite accept failed (e.g. already a member) — still navigate home
-        navigate('/', { replace: true })
+      } catch (err) {
+        setError(getInviteAcceptErrorMessage(err))
+        navigate(`/invite/accept/${inviteToken}`, { replace: true })
       }
     } else {
       navigate('/', { replace: true })

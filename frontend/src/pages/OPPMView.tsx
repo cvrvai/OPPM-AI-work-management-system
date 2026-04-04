@@ -19,10 +19,10 @@ import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useAuthStore } from '@/stores/authStore'
 import type { Project, OPPMObjective, OPPMTimelineEntry, OPPMCost } from '@/types'
-import { cn, formatDate } from '@/lib/utils'
+import { cn, formatDate, getStatusColor } from '@/lib/utils'
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Loader2, Target,
-  Check, X, Plus, Trash2,
+  Check, Plus, Trash2,
 } from 'lucide-react'
 import { startOfWeek, addWeeks, format, parseISO, isWithinInterval, endOfWeek } from 'date-fns'
 import { useChatContext } from '@/hooks/useChatContext'
@@ -31,8 +31,13 @@ import { useChatContext } from '@/hooks/useChatContext'
 // Constants
 // ─────────────────────────────────────────────────────────────
 const VISIBLE_WEEKS = 8
-const TOTAL_COLS = VISIBLE_WEEKS + 4 // Obj(letter) + Tasks + % + weeks + Owner
 const OBJ_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+const MIN_OBJECTIVE_ROWS = 6
+const SHEET_COLUMNS = Array.from({ length: 14 }, (_, index) => OBJ_LETTERS[index])
+const SHEET_COLUMN_HEADER_CELL = 'sticky top-0 z-20 border border-slate-300 bg-slate-100 px-2 py-1 text-center text-[10px] font-medium text-slate-500'
+const SHEET_ROW_NUMBER_CELL = 'sticky left-0 z-10 border border-slate-300 bg-slate-100 px-1 py-1.5 text-center text-[10px] font-medium text-slate-500 align-top'
+const SHEET_CELL = 'border border-slate-300 bg-white px-2 py-2 align-top'
+const SHEET_LABEL = 'text-[9px] font-semibold uppercase tracking-[0.16em] text-slate-400'
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
   // planned = outlined blue (scheduled but not started — real OPPM open circle)
@@ -387,9 +392,11 @@ function RiskEditor({
 function InlineTextarea({
   value,
   onSave,
+  emptyMessage = 'Click to add notes...',
 }: {
   value: string
   onSave: (value: string) => void
+  emptyMessage?: string
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -429,28 +436,12 @@ function InlineTextarea({
       {value ? (
         <p className="text-xs leading-5 text-gray-700 whitespace-pre-wrap">{value}</p>
       ) : (
-        <p className="text-xs text-gray-300 italic">Click to add forecast narrative...</p>
+        <p className="text-xs text-gray-300 italic">{emptyMessage}</p>
       )}
       <div className="text-[10px] text-transparent group-hover:text-blue-400 mt-0.5 transition-colors">
         ✎ click to edit
       </div>
     </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
-// VerticalLabel — rotated text for bottom section rows
-// ─────────────────────────────────────────────────────────────
-function VerticalLabel({ children }: { children: string }) {
-  return (
-    <td
-      className="border border-gray-300 px-1 py-2 text-center align-middle bg-gray-100"
-      style={{ writingMode: 'vertical-lr', textOrientation: 'mixed', transform: 'rotate(180deg)' }}
-    >
-      <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest whitespace-nowrap">
-        {children}
-      </span>
-    </td>
   )
 }
 
@@ -685,33 +676,29 @@ export function OPPMView() {
     [weekOffset, projectStart]
   )
 
-  const meta: NormalizedMeta = useMemo(() => {
-    const m = (project?.metadata as OPPMMetadata) ?? {}
-    // Normalize risks: handle legacy string[] or new RiskItem[]
-    let risks: RiskItem[]
-    if (m.risks?.length) {
-      risks = (m.risks as (string | RiskItem)[]).map((item) =>
-        typeof item === 'string' ? { text: item, rag: 'green' as const } : item
-      )
-    } else {
-      risks = [{ text: '', rag: 'green' }, { text: '', rag: 'green' }, { text: '', rag: 'green' }, { text: '', rag: 'green' }]
-    }
-    // Normalize forecast: handle legacy string[] or new string
-    let forecast: string
-    if (typeof m.forecast === 'string') {
-      forecast = m.forecast
-    } else if (Array.isArray(m.forecast) && m.forecast.length) {
-      forecast = m.forecast.filter(Boolean).join('\n')
-    } else {
-      forecast = ''
-    }
-    return {
-      deliverable_output:    m.deliverable_output    ?? '',
-      summary_deliverables:  m.summary_deliverables?.length ? m.summary_deliverables : ['', '', '', ''],
-      forecast,
-      risks,
-    }
-  }, [project?.metadata])
+  const rawMeta = (project?.metadata as OPPMMetadata) ?? {}
+  let normalizedRisks: RiskItem[]
+  if (rawMeta.risks?.length) {
+    normalizedRisks = (rawMeta.risks as (string | RiskItem)[]).map((item) =>
+      typeof item === 'string' ? { text: item, rag: 'green' as const } : item
+    )
+  } else {
+    normalizedRisks = [{ text: '', rag: 'green' }, { text: '', rag: 'green' }, { text: '', rag: 'green' }, { text: '', rag: 'green' }]
+  }
+
+  let normalizedForecast = ''
+  if (typeof rawMeta.forecast === 'string') {
+    normalizedForecast = rawMeta.forecast
+  } else if (Array.isArray(rawMeta.forecast) && rawMeta.forecast.length) {
+    normalizedForecast = rawMeta.forecast.filter(Boolean).join('\n')
+  }
+
+  const meta: NormalizedMeta = {
+    deliverable_output: rawMeta.deliverable_output ?? '',
+    summary_deliverables: rawMeta.summary_deliverables?.length ? rawMeta.summary_deliverables : ['', '', '', ''],
+    forecast: normalizedForecast,
+    risks: normalizedRisks,
+  }
 
   // Build a lookup map: objectiveId → weekIsoDate → status
   const timelineMap = useMemo(() => {
@@ -753,27 +740,6 @@ export function OPPMView() {
     return Math.round((completedCells / total) * 100)
   }, [objectives, timelineMap])
 
-  // Handle clicking a timeline dot
-  const handleDotClick = useCallback(
-    (objectiveId: string, weekIsoDate: string) => {
-      const current = timelineMap[objectiveId]?.[weekIsoDate] || 'empty'
-      const next = nextStatus(current)
-      if (next === 'empty') {
-        // Delete the entry by setting status to something the backend handles
-        // Since we don't have a delete endpoint for individual timeline entries,
-        // we'll cycle to planned instead of deleting
-        // Actually, let's upsert with the next valid status or skip empty
-        return // empty means remove — but we don't have a delete endpoint, so skip back to planned
-      }
-      upsertTimeline.mutate({
-        objective_id: objectiveId,
-        week_start: weekIsoDate,
-        status: next,
-      })
-    },
-    [timelineMap, upsertTimeline]
-  )
-
   // Handle clicking a timeline dot — full cycle including removal
   const handleDotClickFull = useCallback(
     (objectiveId: string, weekIsoDate: string) => {
@@ -804,7 +770,24 @@ export function OPPMView() {
     isWithinInterval(today, { start: w.start, end: w.end })
   )
 
-  const leaderName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Project Leader'
+  const leaderName = user?.full_name ?? user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Project Leader'
+  const totalTaskCount = useMemo(
+    () => (objectives ?? []).reduce((sum, objective) => sum + (objective.tasks?.length ?? 0), 0),
+    [objectives]
+  )
+  const atRiskCount = useMemo(
+    () => (timelineEntries ?? []).filter((entry) => entry.status === 'at_risk').length,
+    [timelineEntries]
+  )
+  const blockedCount = useMemo(
+    () => (timelineEntries ?? []).filter((entry) => entry.status === 'blocked').length,
+    [timelineEntries]
+  )
+  const visibleWindowLabel = useMemo(() => {
+    const firstWeek = weeks[0]
+    const lastWeek = weeks[weeks.length - 1]
+    return `${format(firstWeek.start, 'MMM d')} - ${format(lastWeek.end, 'MMM d, yyyy')}`
+  }, [weeks])
 
   const maxCostAmount = useMemo(
     () => Math.max(...(costData?.items ?? []).flatMap((c) => [c.planned_amount, c.actual_amount]), 1),
@@ -829,657 +812,657 @@ export function OPPMView() {
   const p = project
   const objs = objectives ?? []
   const costs = costData?.items ?? []
+  const deliverableCount = meta.summary_deliverables.filter((item) => item.trim()).length
+  const recordedRiskCount = meta.risks.filter((item) => item.text.trim()).length
+  const costVariance = (costData?.total_actual ?? 0) - (costData?.total_planned ?? 0)
+  const visibleObjectiveRows = Math.max(objs.length, MIN_OBJECTIVE_ROWS)
+  const addObjectiveRowNumber = 7 + visibleObjectiveRows
+  const peopleRowNumber = addObjectiveRowNumber + 1
+  const summaryRowNumber = peopleRowNumber + 1
+  const forecastRowNumber = summaryRowNumber + 1
+  const riskRowNumber = summaryRowNumber + 2
+  const costHeaderRowNumber = summaryRowNumber + 3
+  const costBodyRowNumber = summaryRowNumber + 4
 
   // ── Render ────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-
-      {/* ── Navigation bar ── */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
         <Link
           to={`/projects/${id}`}
-          className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:bg-gray-50"
+          className="rounded-lg border border-slate-300 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">OPPM — {p.title}</h1>
-          <p className="text-xs text-gray-500">One Page Project Manager · Gantt + Matrix View</p>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">OPPM Spreadsheet View</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-lg font-semibold text-slate-900">{p.title}</h1>
+            <span className={cn('rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize', getStatusColor(p.status))}>
+              {p.status.replace('_', ' ')}
+            </span>
+          </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={() => setWeekOffset((o) => o - 1)}
-            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"
+            onClick={() => setWeekOffset((offset) => offset - 1)}
+            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            title="Previous window"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="text-sm text-gray-500 px-3 font-medium">
-            W{weekOffset + 1} – W{weekOffset + VISIBLE_WEEKS}
-          </span>
+          <div className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Visible Window</p>
+            <p className="text-xs font-medium text-slate-700">{visibleWindowLabel}</p>
+          </div>
           <button
-            onClick={() => setWeekOffset((o) => o + 1)}
-            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50"
+            onClick={() => setWeekOffset((offset) => offset + 1)}
+            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            title="Next window"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════
-          OPPM SHEET
-      ══════════════════════════════════════════════════════ */}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-        <table
-          className="border-collapse text-sm"
-          style={{
-            minWidth: `${340 + VISIBLE_WEEKS * 68 + 72}px`,
-            tableLayout: 'fixed',
-            width: '100%',
-          }}
-        >
-          {/* Column widths */}
-          <colgroup>{/* */}
-            <col style={{ width: '40px' }} />{/* Obj letter */}
-            <col style={{ width: '210px' }} />{/* Major Tasks */}
-            <col style={{ width: '36px' }} />{/* % */}
-            {Array.from({ length: VISIBLE_WEEKS }).map((_, i) => (
-              <col key={i} style={{ width: '62px' }} />
-            ))}{/* */}
-            <col style={{ width: '70px' }} />{/* Owner / Priority */}
-          </colgroup>
-
-          {/* ──────────────────────────────────────────────────
-              HEADER — 3 rows
-          ────────────────────────────────────────────────── */}
-          <thead>{/* */}
-
-            {/* Row 1: Project Leader | Logo | Project Name | Progress */}
-            <tr>{/* */}
-              <td
-                colSpan={3}
-                className="border border-gray-300 px-3 py-2 bg-gray-50"
-              >
-                <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wider">
-                  Project Leader
-                </div>
-                <div className="text-sm font-bold text-gray-800">{leaderName}</div>
-              </td>{/* */}
-
-              <td
-                colSpan={1}
-                className="border border-gray-300 px-2 py-2 text-center bg-blue-50"
-              >
-                <div className="flex flex-col items-center justify-center gap-0.5">
-                  <Target className="h-4 w-4 text-blue-600" />
-                  <div className="text-[10px] font-bold text-blue-600 leading-none">OPPM</div>
-                </div>
-              </td>{/* */}
-
-              {/* Project Name spans W2–W8 */}
-              <td
-                colSpan={VISIBLE_WEEKS - 1}
-                className="border border-gray-300 px-3 py-2 bg-gray-50"
-              >
-                <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wider">
-                  Project Name
-                </div>
-                <div className="text-sm font-bold text-gray-800">{p.title}</div>
-              </td>{/* */}
-
-              {/* Progress */}
-              <td className="border border-gray-300 px-2 py-2 bg-gray-50 text-center">
-                <div className="text-[9px] text-gray-400">Progress</div>
-                <div className={cn(
-                  'text-base font-black',
-                  overallProgress > 0 ? 'text-blue-600' : 'text-gray-400'
-                )}>
-                  {overallProgress}%
-                </div>
-              </td>{/* */}
-            </tr>
-
-            {/* Row 2: Objective + Output | Dates + Legend */}
-            <tr>{/* */}
-              <td
-                colSpan={4}
-                className="border border-gray-300 px-3 py-2 text-xs"
-              >
-                <div className="space-y-1.5">
-                  <div>
-                    <span className="font-semibold text-gray-500">Project Objective: </span>
-                    <span className="text-gray-700">{p.description || '—'}</span>
+      <div className="overflow-x-auto rounded-xl border border-slate-300 bg-white shadow-sm">
+        <div className="min-w-[1490px] border-b border-slate-300 bg-slate-50 px-3 py-2">
+          <div className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-2">
+            <div className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-500">A1</div>
+            <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[11px] text-slate-500">
+              <span className="font-semibold text-slate-400">fx</span>
+              <span className="truncate">{p.title} OPPM sheet</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex min-w-[1500px] items-start gap-2 bg-slate-50 p-2.5">
+          <table className="w-[1174px] shrink-0 border-collapse table-fixed bg-white text-xs shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
+            <colgroup>
+              <col style={{ width: '40px' }} />
+              <col style={{ width: '78px' }} />
+              <col style={{ width: '120px' }} />
+              <col style={{ width: '120px' }} />
+              <col style={{ width: '120px' }} />
+              <col style={{ width: '120px' }} />
+              {Array.from({ length: VISIBLE_WEEKS }).map((_, index) => (
+                <col key={index} style={{ width: '58px' }} />
+              ))}
+              <col style={{ width: '112px' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className={cn(SHEET_COLUMN_HEADER_CELL, 'left-0 z-30')} />
+                {SHEET_COLUMNS.map((letter) => (
+                  <th key={letter} className={SHEET_COLUMN_HEADER_CELL}>{letter}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>1</td>
+                <td colSpan={6} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Project Leader</p>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{leaderName}</div>
+                </td>
+                <td colSpan={8} className={SHEET_CELL}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className={SHEET_LABEL}>Project Name</p>
+                      <div className="mt-1 truncate text-sm font-semibold text-slate-900">{p.title}</div>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-600">
+                      OPPM Sheet
+                    </div>
                   </div>
-                  <div className="flex items-start gap-1 flex-wrap">
-                    <span className="font-semibold text-gray-500 shrink-0">Deliverable Output:</span>
-                    <InlineEdit
+                </td>
+              </tr>
+
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>2</td>
+                <td colSpan={9} className={SHEET_CELL}>
+                      <p className={SHEET_LABEL}>Project Objective</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700">
+                    {p.description || p.objective_summary || 'Capture the project objective here so the execution sheet stays aligned to the core outcome.'}
+                  </p>
+                </td>
+                <td colSpan={5} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Project Complete By</p>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
+                    {p.deadline ? formatDate(p.deadline) : 'Not set'}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>3</td>
+                <td colSpan={9} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Deliverable Output</p>
+                  <div className="mt-1">
+                    <InlineTextarea
                       value={meta.deliverable_output}
-                      onSave={(v) => updateMeta.mutate({ deliverable_output: v })}
-                      placeholder="Click to add deliverable output…"
-                      className="text-xs text-gray-700"
+                      onSave={(value) => updateMeta.mutate({ deliverable_output: value })}
+                      emptyMessage="Click to add deliverable output..."
                     />
                   </div>
-                </div>
-              </td>{/* */}
+                </td>
+                <td colSpan={5} className={SHEET_CELL}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className={SHEET_LABEL}>Start Date</p>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {p.start_date ? formatDate(p.start_date) : 'Not set'}
+                      </div>
+                    </div>
+                    <div>
+                      <p className={SHEET_LABEL}>Window</p>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">{visibleWindowLabel}</div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
 
-              <td
-                colSpan={VISIBLE_WEEKS}
-                className="border border-gray-300 px-3 py-2"
-              >
-                <div className="flex items-center gap-5 text-xs mb-1.5 flex-wrap">
-                  <div>
-                    <span className="font-semibold text-gray-500">Start Date: </span>
-                    <span className="text-gray-700">{p.start_date ? formatDate(p.start_date) : '—'}</span>
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-500">Deadline: </span>
-                    <span className="text-gray-700">{p.deadline ? formatDate(p.deadline) : '—'}</span>
-                  </div>
-                  <div>
-                    <span className="font-semibold text-gray-500">Status: </span>
-                    <span className="text-gray-700 capitalize">{p.status.replace('_', ' ')}</span>
-                  </div>
-                </div>
-                {/* Legend */}
-                <div className="flex items-center gap-4 flex-wrap">
-                  {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                    <span key={key} className="flex items-center gap-1 text-[10px] text-gray-500">
-                      <span className={cn('h-2 w-2 rounded-full shrink-0', cfg.bg)} />
-                      {cfg.label}
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>4</td>
+                <td colSpan={4} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Overall Progress</p>
+                  <div className="mt-1 flex items-end justify-between gap-4">
+                    <span className={cn(
+                      'text-2xl font-black',
+                      overallProgress >= 80 ? 'text-emerald-600' : overallProgress >= 50 ? 'text-blue-600' : overallProgress > 0 ? 'text-amber-600' : 'text-slate-400'
+                    )}>
+                      {overallProgress}%
                     </span>
-                  ))}
-                </div>
-              </td>{/* */}
-            </tr>
+                    <span className="text-[11px] text-slate-500">Tracked from weekly status dots</span>
+                  </div>
+                </td>
+                <td colSpan={2} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Objectives</p>
+                  <div className="mt-1 text-lg font-bold text-slate-900">{objs.length}</div>
+                </td>
+                <td colSpan={2} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Linked Tasks</p>
+                  <div className="mt-1 text-lg font-bold text-slate-900">{totalTaskCount}</div>
+                </td>
+                <td colSpan={2} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Deliverables</p>
+                  <div className="mt-1 text-lg font-bold text-slate-900">{deliverableCount}</div>
+                </td>
+                <td colSpan={2} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Risks</p>
+                  <div className="mt-1 text-lg font-bold text-slate-900">{recordedRiskCount}</div>
+                </td>
+                <td colSpan={2} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Cost Variance</p>
+                  <div className={cn('mt-1 text-lg font-bold', costVariance > 0 ? 'text-red-600' : costVariance < 0 ? 'text-emerald-600' : 'text-slate-900')}>
+                    {costVariance === 0 ? '0' : `${costVariance > 0 ? '+' : '-'}${Math.abs(costVariance).toLocaleString()}`}
+                  </div>
+                </td>
+              </tr>
 
-            {/* Row 3: Column headers */}
-            <tr className="bg-gray-100">{/* */}
-              <th className="border border-gray-300 px-1 py-2 text-center text-[9px] font-bold text-gray-600 uppercase tracking-wide">
-                Obj
-              </th>
-              <th className="border border-gray-300 px-3 py-2 text-left text-[9px] font-bold text-gray-600 uppercase tracking-wide">
-                Major Tasks (Deadline)
-              </th>
-              <th className="border border-gray-300 px-1 py-2 text-center text-[9px] font-bold text-gray-600 uppercase tracking-wide">
-                %
-              </th>
-              {weeks.map((week, i) => (
-                <th
-                  key={i}
-                  className={cn(
-                    'border border-gray-300 px-1 py-2 text-center text-[9px] font-bold uppercase tracking-wide',
-                    i === currentWeekIdx
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-500'
-                  )}
-                >
-                  <div className="font-black">W{week.weekNum}</div>
-                  <div className="font-normal text-[8px] text-gray-400 mt-0.5">{week.label}</div>
-                </th>
-              ))}{/* */}
-              <th className="border border-gray-300 px-1 py-2 text-center text-[9px] font-bold text-gray-600 uppercase tracking-wide">
-                Owner /<br />Priority
-              </th>{/* */}
-            </tr>
-          </thead>
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>5</td>
+                <td colSpan={14} className="border border-slate-300 bg-slate-100 px-3 py-1.5 align-middle">
+                  <div className="flex items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    <span>Execution Sheet</span>
+                    <span>{p.objective_summary || 'Use the rows below to keep the OPPM visible in one page.'}</span>
+                  </div>
+                </td>
+              </tr>
 
-          {/* ──────────────────────────────────────────────────
-              BODY — Objective rows + Bottom Section
-          ────────────────────────────────────────────────── */}
-          <tbody>{/* */}
-
-            {/* ── Skeleton rows while objectives load ── */}
-            {loadingObjectives && Array.from({ length: 4 }).map((_, i) => (
-              <tr key={`skel-${i}`} className="bg-white">{/* */}
-                <td className="border border-gray-300 p-2"><div className="w-3 h-3 rounded-full bg-slate-200 mx-auto animate-pulse" /></td>
-                <td className="border border-gray-300 px-2 py-2"><div className="h-3 rounded bg-slate-200 animate-pulse" style={{ width: `${60 + i * 10}%` }} /></td>
-                <td className="border border-gray-300 p-2"><div className="h-3 w-5 rounded bg-slate-200 mx-auto animate-pulse" /></td>
-                <td className="border border-gray-300 p-2"><div className="h-3 w-5 rounded bg-slate-200 mx-auto animate-pulse" /></td>
-                {Array.from({ length: VISIBLE_WEEKS }).map((__, wi) => (
-                  <td key={wi} className="border border-gray-300 p-1">{/* */}
-                    <div className="w-3.5 h-3.5 rounded-full bg-slate-200 mx-auto animate-pulse" />{/* */}
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>6</td>
+                <td className="border border-slate-300 bg-slate-100 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sub Objective</td>
+                <td colSpan={4} className="border border-slate-300 bg-slate-100 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Major Tasks (Deadline)</td>
+                {weeks.map((week, index) => (
+                  <td
+                    key={week.isoDate}
+                    className={cn(
+                      'border border-slate-300 px-1 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500',
+                      index === currentWeekIdx ? 'bg-blue-50 text-blue-700' : 'bg-slate-100'
+                    )}
+                  >
+                    <div>W{week.weekNum}</div>
+                    <div className="mt-0.5 text-[9px] font-normal normal-case tracking-normal text-slate-400">{week.label}</div>
                   </td>
-                ))}{/* */}
+                ))}
+                <td className="border border-slate-300 bg-slate-100 px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Owner / Priority</td>
               </tr>
-            ))}
 
-            {/* ── Empty state ── */}
-            {!loadingObjectives && objs.length === 0 && !newObjTitle && (
-              <tr>{/* */}
-                <td
-                  colSpan={TOTAL_COLS}
-                  className="border border-gray-200 py-14 text-center text-sm text-gray-400 italic"
-                >
-                  No objectives yet. Click "+ Add objective" below to start building your OPPM.
-                </td>{/* */}
-              </tr>
-            )}
-
-            {/* ── Objective rows ── */}
-            {objs.map((obj, objIdx) => {
-              const objProgress = calcProgress(obj.id)
-              return (
-                <tr
-                  key={obj.id}
-                  className={cn(
-                    'group',
-                    objIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'
-                  )}
-                >
-                  {/* Objective letter + summary status dot */}
-                  {(() => {
+              {loadingObjectives ? Array.from({ length: 4 }).map((_, index) => (
+                <tr key={`oppm-skeleton-${index}`}>
+                  <td className={SHEET_ROW_NUMBER_CELL}>{7 + index}</td>
+                  <td className={SHEET_CELL}><div className="mx-auto h-4 w-4 rounded-full bg-slate-200 animate-pulse" /></td>
+                  <td colSpan={4} className={SHEET_CELL}><div className="h-4 w-3/4 rounded bg-slate-200 animate-pulse" /></td>
+                  {Array.from({ length: VISIBLE_WEEKS }).map((__, weekIndex) => (
+                    <td key={weekIndex} className={cn(SHEET_CELL, 'px-1 py-3 text-center')}><div className="mx-auto h-4 w-4 rounded-full bg-slate-200 animate-pulse" /></td>
+                  ))}
+                  <td className={SHEET_CELL}><div className="mx-auto h-4 w-16 rounded bg-slate-200 animate-pulse" /></td>
+                </tr>
+              )) : (
+                <>
+                  {objs.map((obj, objIndex) => {
+                    const objProgress = calcProgress(obj.id)
+                    const linkedTasks = obj.tasks ?? []
                     const rowStatuses = Object.values(timelineMap[obj.id] ?? {})
                     const summaryStatus: string | undefined =
                       rowStatuses.length === 0 ? undefined
-                      : rowStatuses.every((s) => s === 'completed') ? 'completed'
+                      : rowStatuses.every((status) => status === 'completed') ? 'completed'
                       : rowStatuses.includes('blocked') ? 'blocked'
                       : rowStatuses.includes('at_risk') ? 'at_risk'
                       : rowStatuses.includes('in_progress') ? 'in_progress'
                       : 'planned'
+
                     return (
-                      <td className="border border-gray-300 text-center align-middle py-1.5 px-0.5">
-                        <StatusDot status={summaryStatus} />
-                        <div className="text-[10px] font-black text-gray-600 mt-0.5 leading-none">
-                          {OBJ_LETTERS[objIdx % 26]}
-                        </div>
-                      </td>
-                    )
-                  })()}
-
-                  {/* Objective title — inline editable with number prefix */}
-                  <td className="border border-gray-300 px-2 py-1.5 align-middle">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-bold text-gray-400 shrink-0 w-5 text-right">
-                        {objIdx + 1}.
-                      </span>
-                      <InlineEdit
-                        value={obj.title}
-                        onSave={(v) =>
-                          updateObjective.mutate({ objId: obj.id, data: { title: v } })
-                        }
-                        className="text-[11px] font-medium text-gray-800 flex-1"
-                      />
-                      <button
-                        onClick={() => {
-                          if (confirm(`Delete objective "${obj.title}"?`)) {
-                            deleteObjective.mutate(obj.id)
-                          }
-                        }}
-                        className="text-transparent group-hover:text-gray-400 hover:!text-red-500 transition-colors"
-                        title="Delete objective"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </td>
-
-                  {/* Progress % */}
-                  <td className="border border-gray-300 text-center align-middle p-1">
-                    <span
-                      className={cn(
-                        'text-[11px] font-bold',
-                        objProgress >= 80 ? 'text-emerald-600' :
-                        objProgress >= 50 ? 'text-blue-600' :
-                        objProgress > 0   ? 'text-amber-600' :
-                                            'text-gray-400'
-                      )}
-                    >
-                      {objProgress > 0 ? `${objProgress}%` : '—'}
-                    </span>
-                  </td>
-
-                  {/* Week status dots — CLICKABLE */}
-                  {weeks.map((week, wi) => {
-                    const status = timelineMap[obj.id]?.[week.isoDate]
-                    return (
-                      <td
-                        key={wi}
-                        className={cn(
-                          'border border-gray-300 text-center p-1 align-middle',
-                          wi === currentWeekIdx && 'bg-blue-50/60'
-                        )}
-                      >
-                        <StatusDot
-                          status={status}
-                          onClick={() => handleDotClickFull(obj.id, week.isoDate)}
-                        />
-                      </td>
+                      <tr key={obj.id}>
+                        <td className={SHEET_ROW_NUMBER_CELL}>{7 + objIndex}</td>
+                        <td className={cn(SHEET_CELL, 'px-1 py-3 text-center')}>
+                          <div className="flex flex-col items-center gap-1.5">
+                            <StatusDot status={summaryStatus} />
+                            <span className="text-[10px] font-black text-slate-500">{OBJ_LETTERS[objIndex % 26]}</span>
+                          </div>
+                        </td>
+                        <td colSpan={4} className={cn(SHEET_CELL, 'px-3 py-3')}>
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-2">
+                              <span className="mt-0.5 text-[11px] font-bold text-slate-400">{objIndex + 1}.</span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start gap-2">
+                                  <InlineEdit
+                                    value={obj.title}
+                                    onSave={(value) => updateObjective.mutate({ objId: obj.id, data: { title: value } })}
+                                    className="text-[13px] font-semibold text-slate-900"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Delete objective "${obj.title}"?`)) {
+                                        deleteObjective.mutate(obj.id)
+                                      }
+                                    }}
+                                    className="text-gray-300 transition-colors hover:text-red-500"
+                                    title="Delete objective"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                                <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                                  <span>{linkedTasks.length > 0 ? `${linkedTasks.length} linked task${linkedTasks.length === 1 ? '' : 's'}` : 'No linked tasks yet'}</span>
+                                  <span className={cn(
+                                    'font-semibold',
+                                    objProgress >= 80 ? 'text-emerald-700' : objProgress >= 50 ? 'text-blue-700' : objProgress > 0 ? 'text-amber-700' : 'text-slate-400'
+                                  )}>
+                                    {objProgress > 0 ? `${objProgress}% complete` : 'Not started'}
+                                  </span>
+                                </div>
+                                {linkedTasks.length > 0 && (
+                                  <div className="mt-1 text-[11px] leading-5 text-slate-500">
+                                    {linkedTasks.slice(0, 3).map((task) => task.title).join(' • ')}
+                                    {linkedTasks.length > 3 ? ` • +${linkedTasks.length - 3} more` : ''}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        {weeks.map((week, weekIndex) => {
+                          const status = timelineMap[obj.id]?.[week.isoDate]
+                          return (
+                            <td
+                              key={week.isoDate}
+                              className={cn(SHEET_CELL, 'px-1 py-3 text-center', weekIndex === currentWeekIdx && 'bg-blue-50/50')}
+                            >
+                              <StatusDot status={status} onClick={() => handleDotClickFull(obj.id, week.isoDate)} />
+                            </td>
+                          )
+                        })}
+                        <td className={cn(SHEET_CELL, 'px-2 py-3 text-center')}>
+                          <OwnerSelect
+                            value={obj.owner_id ?? ''}
+                            members={wsMembers}
+                            onChange={(ownerId) => updateObjective.mutate({ objId: obj.id, data: { owner_id: ownerId || null } })}
+                          />
+                        </td>
+                      </tr>
                     )
                   })}
 
-                  {/* Owner — custom dropdown (value = workspace_members.id FK) */}
-                  <td className="border border-gray-300 px-1 py-1 text-center align-middle">
-                    <OwnerSelect
-                      value={obj.owner_id ?? ''}
-                      members={wsMembers}
-                      onChange={(id) =>
-                        updateObjective.mutate({ objId: obj.id, data: { owner_id: id || null } })
-                      }
-                    />
-                  </td>
-                </tr>
-              )
-            })}
+                  {Array.from({ length: Math.max(MIN_OBJECTIVE_ROWS - objs.length, 0) }).map((_, fillerIndex) => (
+                    <tr key={`oppm-filler-${fillerIndex}`}>
+                      <td className={SHEET_ROW_NUMBER_CELL}>{7 + objs.length + fillerIndex}</td>
+                      <td className={cn(SHEET_CELL, 'px-1 py-3')} />
+                      <td colSpan={4} className={SHEET_CELL}>
+                        {objs.length === 0 && fillerIndex === 0 ? (
+                          <span className="text-[11px] italic text-slate-300">Add the first objective below to begin the sheet.</span>
+                        ) : (
+                          <div className="h-6" />
+                        )}
+                      </td>
+                      {Array.from({ length: VISIBLE_WEEKS }).map((__, weekIndex) => (
+                        <td key={weekIndex} className={cn(SHEET_CELL, 'px-1 py-3 text-center', weekIndex === currentWeekIdx && 'bg-blue-50/50')} />
+                      ))}
+                      <td className={SHEET_CELL} />
+                    </tr>
+                  ))}
+                </>
+              )}
 
-            {/* ── Add objective row ── */}
-            <tr>{/* */}
-              <td className="border border-gray-300 text-center align-middle p-1">
-                <Plus className="h-3 w-3 text-gray-400 mx-auto" />
-              </td>
-              <td colSpan={TOTAL_COLS - 1} className="border border-gray-300 px-3 py-1.5">
-                <div className="flex items-center gap-2">
-                  <input
-                    value={newObjTitle}
-                    onChange={(e) => setNewObjTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newObjTitle.trim()) {
-                        createObjective.mutate(newObjTitle.trim())
-                      }
-                    }}
-                    placeholder="+ Add objective (press Enter)"
-                    className="flex-1 text-sm text-gray-700 bg-transparent outline-none placeholder:text-gray-400 placeholder:italic"
-                  />
-                  {newObjTitle.trim() && (
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>{addObjectiveRowNumber}</td>
+                <td className={cn(SHEET_CELL, 'px-1 py-3 text-center')}>
+                  <Plus className="mx-auto h-4 w-4 text-slate-400" />
+                </td>
+                <td colSpan={13} className={SHEET_CELL}>
+                  <div className="flex items-center gap-3">
+                    <input
+                      value={newObjTitle}
+                      onChange={(e) => setNewObjTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newObjTitle.trim()) {
+                          createObjective.mutate(newObjTitle.trim())
+                        }
+                      }}
+                      placeholder="Add objective to the sheet"
+                      className="flex-1 border-none bg-transparent px-0 py-1 text-sm text-slate-700 outline-none placeholder:text-slate-300"
+                    />
                     <button
                       onClick={() => createObjective.mutate(newObjTitle.trim())}
-                      disabled={createObjective.isPending}
-                      className="text-xs bg-blue-600 text-white rounded px-3 py-1 font-medium hover:bg-blue-700 disabled:opacity-50"
+                      disabled={createObjective.isPending || !newObjTitle.trim()}
+                      className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                     >
-                      {createObjective.isPending ? 'Adding…' : 'Add'}
+                      {createObjective.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add objective'}
                     </button>
-                  )}
-                </div>
-              </td>{/* */}
-            </tr>
+                  </div>
+                </td>
+              </tr>
 
-            {/* ══════════════════════════════════════════════════
-                COST SECTION
-            ══════════════════════════════════════════════════ */}
-            {(costs.length > 0 || showAddCost) && (
-              <>
-                <tr>{/* */}
-                  <td
-                    colSpan={TOTAL_COLS}
-                    className="border border-gray-300 px-3 py-2 bg-gray-100"
-                  >
-                    <span className="text-[9px] font-bold text-gray-600 uppercase tracking-wider">
-                      Cost / Other Metrics
-                    </span>
-                  </td>{/* */}
-                </tr>
-                <tr>{/* */}
-                  <td colSpan={TOTAL_COLS} className="border border-gray-300 p-0">
-                    <table className="w-full text-xs border-collapse">
-                      <thead>{/* */}
-                        <tr className="bg-gray-50">{/* */}
-                          <th className="border-b border-gray-200 px-2 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase w-[22%]">Category</th>
-                          <th className="border-b border-gray-200 px-3 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase" style={{width:'50%'}}>Planned / Actual</th>
-                          <th className="border-b border-gray-200 px-2 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase">Notes</th>
-                          <th className="border-b border-gray-200 px-1 py-1.5 w-7"></th>{/* */}
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>{peopleRowNumber}</td>
+                <td colSpan={14} className="border border-slate-300 bg-slate-100 px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  # People working on the project: {wsMembers.length}
+                </td>
+              </tr>
+
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>{summaryRowNumber}</td>
+                <td colSpan={8} rowSpan={3} className={cn(SHEET_CELL, 'p-0')}>
+                  <div className="relative min-h-[220px] overflow-hidden bg-white">
+                    <svg className="absolute inset-0 h-full w-full pointer-events-none" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                      <line x1="0" y1="0" x2="100%" y2="100%" stroke="#cbd5e1" strokeWidth="1.25" />
+                      <line x1="100%" y1="0" x2="0" y2="100%" stroke="#cbd5e1" strokeWidth="1.25" />
+                    </svg>
+                    <div className="absolute left-6 top-5 text-xs font-semibold text-slate-500">Major Tasks</div>
+                    <div className="absolute right-6 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500">Target Dates</div>
+                    <div className="absolute bottom-10 left-6 text-xs font-semibold text-slate-500">Sub Objectives</div>
+                    <div className="absolute bottom-10 right-6 text-xs font-semibold text-slate-500">Costs</div>
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-xs font-semibold text-slate-500">Summary &amp; Forecast</div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="rounded-lg border border-slate-300 bg-white/95 px-5 py-4 text-center shadow-sm">
+                        <Target className="mx-auto h-5 w-5 text-blue-600" />
+                        <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sheet Snapshot</div>
+                        <div className={cn(
+                          'mt-2 text-3xl font-black',
+                          overallProgress >= 80 ? 'text-emerald-600' : overallProgress >= 50 ? 'text-blue-600' : overallProgress > 0 ? 'text-amber-600' : 'text-slate-400'
+                        )}>
+                          {overallProgress}%
+                        </div>
+                        <div className="mt-2 text-[11px] text-slate-500">{objs.length} objective{objs.length === 1 ? '' : 's'} · {totalTaskCount} linked task{totalTaskCount === 1 ? '' : 's'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td colSpan={6} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Summary Deliverables</p>
+                  <div className="mt-2">
+                    <EditableList
+                      items={meta.summary_deliverables}
+                      onSave={(items) => updateMeta.mutate({ summary_deliverables: items })}
+                    />
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>{forecastRowNumber}</td>
+                <td colSpan={6} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Forecast</p>
+                  <div className="mt-2">
+                    <InlineTextarea
+                      value={meta.forecast}
+                      onSave={(value) => updateMeta.mutate({ forecast: value })}
+                      emptyMessage="Click to add summary and forecast..."
+                    />
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>{riskRowNumber}</td>
+                <td colSpan={6} className={SHEET_CELL}>
+                  <p className={SHEET_LABEL}>Risk</p>
+                  <div className="mt-2">
+                    <RiskEditor
+                      items={meta.risks}
+                      onSave={(items) => updateMeta.mutate({ risks: items })}
+                    />
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>{costHeaderRowNumber}</td>
+                <td colSpan={14} className="border border-slate-300 bg-slate-100 px-3 py-1.5 align-middle">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Cost / Other Metrics</span>
+                    <button
+                      onClick={() => setShowAddCost((value) => !value)}
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {showAddCost ? 'Cancel' : 'Add cost item'}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td className={SHEET_ROW_NUMBER_CELL}>{costBodyRowNumber}</td>
+                <td colSpan={14} className="border border-slate-300 bg-white p-0 align-top">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50">
+                        <th className="border-b border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500" style={{ width: '22%' }}>Category</th>
+                        <th className="border-b border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500" style={{ width: '50%' }}>Planned / Actual</th>
+                        <th className="border-b border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Notes</th>
+                        <th className="border-b border-slate-200 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {costs.length === 0 && !showAddCost && (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-8 text-center text-slate-400">No cost items yet. Add the first row to track planned versus actual values.</td>
                         </tr>
-                      </thead>
-                      <tbody>{/* */}
-                        {costs.map((cost) => (
-                          <CostRow
-                            key={cost.id}
-                            cost={cost}
-                            maxAmount={maxCostAmount}
-                            onUpdate={(data) => updateCostMut.mutate({ costId: cost.id, data })}
-                            onDelete={() => {
-                              if (confirm(`Delete cost "${cost.category}"?`)) {
-                                deleteCostMut.mutate(cost.id)
-                              }
-                            }}
-                          />
-                        ))}
-                        {/* Totals row */}
-                        {costs.length > 0 && (
-                          <tr className="bg-gray-50 font-semibold">{/* */}
-                            <td className="border-t border-gray-300 px-2 py-1.5 text-xs text-gray-600">Total</td>
-                            <td className="border-t border-gray-300 px-3 py-1.5">
-                              <div className="flex gap-6 text-[10px]">
-                                <span className="text-gray-500">Planned: <span className="font-bold text-blue-600">{(costData?.total_planned ?? 0).toLocaleString()}</span></span>
-                                <span className="text-gray-500">Actual: <span className={cn('font-bold', (costData?.total_actual ?? 0) > (costData?.total_planned ?? 0) ? 'text-red-600' : 'text-emerald-600')}>{(costData?.total_actual ?? 0).toLocaleString()}</span></span>
+                      )}
+                      {costs.map((cost) => (
+                        <CostRow
+                          key={cost.id}
+                          cost={cost}
+                          maxAmount={maxCostAmount}
+                          onUpdate={(data) => updateCostMut.mutate({ costId: cost.id, data })}
+                          onDelete={() => {
+                            if (confirm(`Delete cost "${cost.category}"?`)) {
+                              deleteCostMut.mutate(cost.id)
+                            }
+                          }}
+                        />
+                      ))}
+                      {showAddCost && (
+                        <tr>
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              value={newCost.category}
+                              onChange={(e) => setNewCost((cost) => ({ ...cost, category: e.target.value }))}
+                              placeholder="Category"
+                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs outline-none focus:border-blue-500"
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="mb-1 block text-[10px] font-medium text-gray-400">Planned</label>
+                                <input
+                                  type="number"
+                                  value={newCost.planned_amount || ''}
+                                  onChange={(e) => setNewCost((cost) => ({ ...cost, planned_amount: parseFloat(e.target.value) || 0 }))}
+                                  placeholder="0"
+                                  className="w-full rounded border border-gray-300 px-2 py-1 text-right text-xs outline-none focus:border-blue-500"
+                                />
                               </div>
-                            </td>
-                            <td className="border-t border-gray-300" colSpan={2}></td>{/* */}
-                          </tr>
-                        )}
-                        {/* Add cost form */}
-                        {showAddCost && (
-                          <tr>{/* */}
-                            <td className="px-2 py-1.5">
-                              <input
-                                value={newCost.category}
-                                onChange={(e) => setNewCost((c) => ({ ...c, category: e.target.value }))}
-                                placeholder="Category"
-                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none"
-                              />
-                            </td>
-                            <td className="px-3 py-1.5">
-                              <div className="flex gap-2">
-                                <div className="flex-1">
-                                  <label className="text-[9px] text-gray-400 block mb-0.5">Planned</label>
-                                  <input
-                                    type="number"
-                                    value={newCost.planned_amount || ''}
-                                    onChange={(e) => setNewCost((c) => ({ ...c, planned_amount: parseFloat(e.target.value) || 0 }))}
-                                    placeholder="0"
-                                    className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
-                                  />
-                                </div>
-                                <div className="flex-1">
-                                  <label className="text-[9px] text-gray-400 block mb-0.5">Actual</label>
-                                  <input
-                                    type="number"
-                                    value={newCost.actual_amount || ''}
-                                    onChange={(e) => setNewCost((c) => ({ ...c, actual_amount: parseFloat(e.target.value) || 0 }))}
-                                    placeholder="0"
-                                    className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none text-right"
-                                  />
-                                </div>
+                              <div>
+                                <label className="mb-1 block text-[10px] font-medium text-gray-400">Actual</label>
+                                <input
+                                  type="number"
+                                  value={newCost.actual_amount || ''}
+                                  onChange={(e) => setNewCost((cost) => ({ ...cost, actual_amount: parseFloat(e.target.value) || 0 }))}
+                                  placeholder="0"
+                                  className="w-full rounded border border-gray-300 px-2 py-1 text-right text-xs outline-none focus:border-blue-500"
+                                />
                               </div>
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                value={newCost.description}
-                                onChange={(e) => setNewCost((c) => ({ ...c, description: e.target.value }))}
-                                placeholder="Description"
-                                className="w-full text-xs border border-gray-300 rounded px-1.5 py-0.5 outline-none"
-                              />
-                            </td>
-                            <td className="px-1 py-1.5 text-center">
-                              <button
-                                onClick={() => {
-                                  if (newCost.category.trim()) createCostMut.mutate(newCost)
-                                }}
-                                className="text-emerald-600 hover:text-emerald-700"
-                              >
-                                <Check className="h-3.5 w-3.5" />
-                              </button>
-                            </td>{/* */}
-                          </tr>
-                        )}{/* */}
-                      </tbody>
-                    </table>
-                  </td>{/* */}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              value={newCost.description}
+                              onChange={(e) => setNewCost((cost) => ({ ...cost, description: e.target.value }))}
+                              placeholder="Description"
+                              className="w-full rounded border border-gray-300 px-2 py-1 text-xs outline-none focus:border-blue-500"
+                            />
+                          </td>
+                          <td className="px-2 py-2 align-top text-center">
+                            <button
+                              onClick={() => {
+                                if (newCost.category.trim()) {
+                                  createCostMut.mutate(newCost)
+                                }
+                              }}
+                              className="text-emerald-600 transition-colors hover:text-emerald-700"
+                              title="Save cost item"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div className="w-[300px] shrink-0 space-y-4">
+            <table className="w-full border-collapse table-fixed bg-white text-xs shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
+              <colgroup>
+                <col style={{ width: '40px' }} />
+                <col style={{ width: '86px' }} />
+                <col style={{ width: '86px' }} />
+                <col style={{ width: '86px' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className={cn(SHEET_COLUMN_HEADER_CELL, 'left-0 z-30')} />
+                  <th className={SHEET_COLUMN_HEADER_CELL}>A</th>
+                  <th className={SHEET_COLUMN_HEADER_CELL}>B</th>
+                  <th className={SHEET_COLUMN_HEADER_CELL}>C</th>
                 </tr>
-              </>
-            )}
-
-            {/* Add cost button */}
-            <tr>{/* */}
-              <td colSpan={TOTAL_COLS} className="border border-gray-300 px-3 py-1.5">
-                <button
-                  onClick={() => setShowAddCost((v) => !v)}
-                  className="text-xs text-gray-500 hover:text-blue-600 flex items-center gap-1"
-                >
-                  <Plus className="h-3 w-3" />
-                  {showAddCost ? 'Cancel' : 'Add cost item'}
-                </button>
-              </td>{/* */}
-            </tr>
-
-            {/* ══════════════════════════════════════════════════
-                BOTTOM SECTION — Deliverables / Forecast / Risk / Team / Legend
-            ══════════════════════════════════════════════════ */}
-
-            {/* ══════════════════════════════════════════════════
-                BOTTOM SECTION — Classic OPPM X-cross layout
-            ══════════════════════════════════════════════════ */}
-
-            {/* Section divider row */}
-            <tr>{/* */}
-              <td
-                colSpan={TOTAL_COLS}
-                className="border-t-2 border-gray-400 bg-gray-100 px-3 py-0.5"
-              >
-                <span className="text-[8px] font-bold text-gray-500 uppercase tracking-widest">
-                  Summary &amp; Objectives
-                </span>
-              </td>{/* */}
-            </tr>
-
-            {/* Summary Deliverables row */}
-            <tr>{/* */}
-              <VerticalLabel>Summary Deliverables</VerticalLabel>
-              <td
-                colSpan={2}
-                className="border border-gray-300 px-2 py-2 align-top"
-              >
-                <EditableList
-                  items={meta.summary_deliverables}
-                  onSave={(v) => updateMeta.mutate({ summary_deliverables: v })}
-                />
-              </td>
-
-              {/* ── X CROSS — spans all week + owner cols, rowSpan=3 ── */}
-              <td
-                colSpan={VISIBLE_WEEKS + 1}
-                rowSpan={3}
-                className="border border-gray-300 p-0 overflow-hidden"
-              >
-                <div
-                  className="relative w-full h-full bg-white"
-                  style={{ minHeight: '168px' }}
-                >
-                  {/* Diagonal X lines via SVG */}
-                  <svg
-                    className="absolute inset-0 w-full h-full pointer-events-none"
-                    preserveAspectRatio="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <line x1="0" y1="0" x2="100%" y2="100%" stroke="#d1d5db" strokeWidth="1.5" />
-                    <line x1="100%" y1="0" x2="0" y2="100%" stroke="#d1d5db" strokeWidth="1.5" />
-                  </svg>
-
-                  {/* Top-left quadrant: Major Tasks */}
-                  <div className="absolute top-3 left-4 pointer-events-none select-none">
-                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest">
-                      Major Tasks
+              </thead>
+              <tbody>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>1</td>
+                  <td colSpan={3} className={SHEET_CELL}>
+                    <p className={SHEET_LABEL}>Priority</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>2</td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-center text-[11px] font-semibold text-slate-900">A</td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-center text-[11px] font-semibold text-slate-900">B</td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-center text-[11px] font-semibold text-slate-900">C</td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>3</td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-[11px] text-slate-600">Primary / Owner</td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-[11px] text-slate-600">Primary Helper</td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-[11px] text-slate-600">Secondary Helper</td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>4</td>
+                  <td colSpan={3} className={SHEET_CELL}>
+                    <p className={SHEET_LABEL}>Project Identity Symbol</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>5</td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-center">
+                    <StatusDot status="planned" />
+                    <div className="mt-1 text-[11px] text-slate-600">Start</div>
+                  </td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-center">
+                    <StatusDot status="in_progress" />
+                    <div className="mt-1 text-[11px] text-slate-600">In Progress</div>
+                  </td>
+                  <td className="border border-slate-300 bg-white px-2 py-2 text-center">
+                    <StatusDot status="completed" />
+                    <div className="mt-1 text-[11px] text-slate-600">Complete</div>
+                  </td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>6</td>
+                  <td className="border border-slate-300 bg-emerald-500/15 px-2 py-2 text-center text-[11px] font-medium text-emerald-700">Good</td>
+                  <td className="border border-slate-300 bg-amber-400/20 px-2 py-2 text-center text-[11px] font-medium text-amber-700">Average</td>
+                  <td className="border border-slate-300 bg-red-500/15 px-2 py-2 text-center text-[11px] font-medium text-red-700">Bad</td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>7</td>
+                  <td colSpan={3} className={SHEET_CELL}>
+                    <p className={SHEET_LABEL}>Current Sheet Window</p>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">{visibleWindowLabel}</div>
+                  </td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>8</td>
+                  <td colSpan={3} className={SHEET_CELL}>
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                      <span>Timeline attention</span>
+                      <span className="text-right font-semibold text-slate-900">{atRiskCount + blockedCount}</span>
+                      <span>Planned budget</span>
+                      <span className="text-right font-semibold text-slate-900">{(costData?.total_planned ?? 0).toLocaleString()}</span>
+                      <span>Actual budget</span>
+                      <span className="text-right font-semibold text-slate-900">{(costData?.total_actual ?? 0).toLocaleString()}</span>
                     </div>
-                  </div>
-
-                  {/* Top-right quadrant: Target Dates */}
-                  <div className="absolute top-3 right-4 pointer-events-none select-none text-right">
-                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest">
-                      Target Dates
-                    </div>
-                  </div>
-
-                  {/* Center: Summary & Forecast badge */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="bg-white/95 border border-gray-300 rounded-sm px-4 py-2 text-center shadow-md z-10">
-                      <div className="text-[9px] font-black text-gray-600 uppercase tracking-widest leading-snug">
-                        Summary
+                  </td>
+                </tr>
+                <tr>
+                  <td className={SHEET_ROW_NUMBER_CELL}>9</td>
+                  <td colSpan={3} className={SHEET_CELL}>
+                    <p className={SHEET_LABEL}>Active Team</p>
+                    <div className="mt-2 space-y-1 text-[11px] text-slate-600">
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Project Leader</span>
+                        <span className="truncate font-medium text-slate-900">{leaderName}</span>
                       </div>
-                      <div className="text-[9px] font-black text-gray-600 uppercase tracking-widest leading-snug">
-                        &amp; Forecast
-                      </div>
-                      <div className={cn(
-                        'mt-1.5 text-base font-black leading-none',
-                        overallProgress >= 80 ? 'text-emerald-600'
-                        : overallProgress >= 50 ? 'text-blue-600'
-                        : overallProgress > 0  ? 'text-amber-600'
-                        : 'text-gray-400'
-                      )}>
-                        {overallProgress}%
-                      </div>
+                      {wsMembers.slice(0, 4).map((member, index) => (
+                        <div key={member.id} className="flex items-center justify-between gap-3">
+                          <span>Member {index + 1}</span>
+                          <span className="truncate">{member.display_name || member.email.split('@')[0]}</span>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-
-                  {/* Bottom-left quadrant: Objectives */}
-                  <div className="absolute bottom-3 left-4 pointer-events-none select-none">
-                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest">
-                      Objectives
-                    </div>
-                  </div>
-
-                  {/* Bottom-right quadrant: Cost or Other Metrics */}
-                  <div className="absolute bottom-3 right-4 pointer-events-none select-none text-right">
-                    <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest leading-snug">
-                      Cost or<br />Other Metrics
-                    </div>
-                  </div>
-
-                  {/* Status legend — floating bottom-left above Objectives label */}
-                  <div className="absolute space-y-0.5 pointer-events-none select-none"
-                    style={{ bottom: '28px', left: '16px' }}
-                  >
-                    {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                      <div key={key} className="flex items-center gap-1.5">
-                        <span className={cn('h-2 w-4 rounded-sm shrink-0', cfg.bg)} />
-                        <span className="text-[8px] text-gray-500">{cfg.label}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Team — floating top-right below Target Dates label */}
-                  <div className="absolute pointer-events-none select-none"
-                    style={{ top: '28px', right: '16px' }}
-                  >
-                    <div className="text-[8px] font-bold text-gray-400 uppercase tracking-wider mb-1 text-right">
-                      Project Leader
-                    </div>
-                    <div className="text-[10px] font-semibold text-gray-600 text-right">
-                      {leaderName}
-                    </div>
-                  </div>
-                </div>
-              </td>{/* */}
-            </tr>
-
-            {/* Forecast row */}
-            <tr>{/* */}
-              <VerticalLabel>Forecast</VerticalLabel>
-              <td
-                colSpan={2}
-                className="border border-gray-300 px-2 py-2 align-top"
-              >
-                <InlineTextarea
-                  value={meta.forecast}
-                  onSave={(v) => updateMeta.mutate({ forecast: v })}
-                />
-              </td>{/* */}
-            </tr>
-
-            {/* Risk row */}
-            <tr>{/* */}
-              <VerticalLabel>Risk</VerticalLabel>
-              <td
-                colSpan={2}
-                className="border border-gray-300 px-2 py-2 align-top"
-              >
-                <RiskEditor
-                  items={meta.risks}
-                  onSave={(v) => updateMeta.mutate({ risks: v })}
-                />
-              </td>{/* */}
-            </tr>{/* */}
-
-          </tbody>
-        </table>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-
     </div>
   )
 }

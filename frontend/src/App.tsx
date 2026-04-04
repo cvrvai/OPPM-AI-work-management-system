@@ -62,6 +62,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/invites/:token" element={<AcceptInvite />} />
+          <Route path="/invite/accept/:token" element={<AcceptInvite />} />
           <Route
             path="/*"
             element={

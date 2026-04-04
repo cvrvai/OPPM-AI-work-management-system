@@ -7,6 +7,14 @@ interface User {
   email: string
   full_name?: string
   role?: string
+  created_at?: string
+  last_sign_in_at?: string
+  user_metadata?: {
+    full_name?: string
+  }
+  app_metadata?: {
+    provider?: string
+  }
 }
 
 interface AuthState {
@@ -21,7 +29,7 @@ interface AuthState {
   getToken: () => string | null
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   loading: true,
   isAuthenticated: false,

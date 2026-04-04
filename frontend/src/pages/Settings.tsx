@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import type { GitAccount, RepoConfig, AIModel, Project, WorkspaceMember, WorkspaceInvite, WorkspaceRole } from '@/types'
+import type { AIModel, GitAccount, PaginatedResponse, Project, RepoConfig, WorkspaceInvite, WorkspaceMember, WorkspaceRole } from '@/types'
 import {
   GitFork,
   Plus,
@@ -31,14 +32,16 @@ import {
 import { cn, getInitials } from '@/lib/utils'
 import { useChatContext } from '@/hooks/useChatContext'
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export function Settings() {
-  const [activeTab, setActiveTab] = useState<'profile' | 'members' | 'github' | 'ai'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'workspace' | 'github' | 'ai'>('profile')
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   useChatContext('workspace')
 
   const navItems = [
     { id: 'profile'  as const, label: 'Profile',              icon: UserCircle, description: 'Name, email and account info' },
-    ...(ws ? [{ id: 'members' as const, label: 'Members', icon: Users, description: 'Invite and manage workspace members' }] : []),
+    ...(ws ? [{ id: 'workspace' as const, label: 'Workspace', icon: Globe, description: 'Workspace details and owner-only controls' }] : []),
     { id: 'github'   as const, label: 'GitHub Integration',   icon: GitFork,    description: 'Connect repos and configure webhooks' },
     { id: 'ai'       as const, label: 'AI Models',            icon: Cpu,        description: 'LLM providers and API keys' },
   ]
@@ -46,22 +49,22 @@ export function Settings() {
   const active = navItems.find((n) => n.id === activeTab) ?? navItems[0]
 
   return (
-    <div className="flex gap-8 min-h-[calc(100vh-120px)]">
+    <div className="flex min-h-[calc(100vh-120px)] flex-col gap-6 lg:flex-row lg:gap-8">
       {/* ── Left sidebar nav ── */}
-      <aside className="w-56 shrink-0">
+      <aside className="w-full shrink-0 lg:w-56">
         <div className="mb-5">
           <h1 className="text-xl font-bold text-text">Settings</h1>
           <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
             Configure your workspace
           </p>
         </div>
-        <nav className="space-y-0.5">
+        <nav className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-0.5 lg:overflow-visible lg:pb-0">
           {navItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
               className={cn(
-                'w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left transition-colors',
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left whitespace-nowrap transition-colors lg:w-full',
                 activeTab === id
                   ? 'bg-primary/10 text-primary'
                   : 'text-text-secondary hover:bg-surface-alt hover:text-text'
@@ -75,7 +78,7 @@ export function Settings() {
       </aside>
 
       {/* ── Divider ── */}
-      <div className="w-px bg-border shrink-0" />
+      <div className="hidden w-px shrink-0 bg-border lg:block" />
 
       {/* ── Content panel ── */}
       <div className="flex-1 min-w-0">
@@ -88,9 +91,157 @@ export function Settings() {
         </div>
 
         {activeTab === 'profile'  && <ProfileSettings />}
-        {activeTab === 'members'  && ws && <MembersSettings />}
+        {activeTab === 'workspace' && ws && <WorkspaceSettings />}
         {activeTab === 'github'   && <GitHubSettings />}
         {activeTab === 'ai'       && <AIModelSettings />}
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceSettings() {
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const fetchWorkspaces = useWorkspaceStore((s) => s.fetchWorkspaces)
+  const navigate = useNavigate()
+  const currentRole = ws?.current_user_role ?? ws?.role ?? 'viewer'
+  const isOwner = currentRole === 'owner'
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteName, setDeleteName] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+
+  const resetDeleteState = () => {
+    setShowDeleteConfirm(false)
+    setDeleteName('')
+    setDeleteError('')
+  }
+
+  const deleteWorkspaceMutation = useMutation({
+    mutationFn: () => api.delete(`/v1/workspaces/${ws!.id}`),
+    onSuccess: async () => {
+      resetDeleteState()
+      await fetchWorkspaces()
+      navigate('/')
+    },
+    onError: (error: Error) => {
+      setDeleteError(error.message)
+    },
+  })
+
+  if (!ws) {
+    return null
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-border bg-white p-6 shadow-sm">
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-text">Workspace Overview</h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              Review the current workspace identity and the role you hold inside it.
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-600">
+            {currentRole}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Workspace name</p>
+            <p className="mt-2 text-sm font-semibold text-text">{ws.name}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Slug</p>
+            <p className="mt-2 text-sm font-semibold text-text">{ws.slug}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4 md:col-span-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Description</p>
+            <p className="mt-2 text-sm text-text-secondary">
+              {ws.description || 'No workspace description has been added yet.'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Created</p>
+            <p className="mt-2 text-sm text-text-secondary">{new Date(ws.created_at).toLocaleDateString()}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Last updated</p>
+            <p className="mt-2 text-sm text-text-secondary">{new Date(ws.updated_at).toLocaleDateString()}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-danger/25 bg-white p-6 shadow-sm">
+        <div className="mb-5 flex items-start gap-3">
+          <div className="rounded-full bg-danger/10 p-2 text-danger">
+            <AlertTriangle className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-text">Danger Zone</h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              Deleting a workspace removes its projects, tasks, invites, and related planning data permanently.
+            </p>
+          </div>
+        </div>
+
+        {!isOwner ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Only the workspace owner can delete this workspace. Your current role is <strong className="capitalize">{currentRole}</strong>.
+          </div>
+        ) : showDeleteConfirm ? (
+          <div className="space-y-4 rounded-2xl border border-danger/25 bg-danger/5 p-4">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-text">Confirm workspace deletion</p>
+              <p className="text-sm text-text-secondary">
+                Type <strong>{ws.name}</strong> to confirm. This cannot be undone.
+              </p>
+            </div>
+
+            <input
+              value={deleteName}
+              onChange={(e) => setDeleteName(e.target.value)}
+              placeholder={ws.name}
+              className="w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors focus:border-danger focus:ring-4 focus:ring-danger/10"
+            />
+
+            {deleteError && (
+              <p className="text-sm text-danger">{deleteError}</p>
+            )}
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={resetDeleteState}
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-alt"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteWorkspaceMutation.mutate()}
+                disabled={deleteWorkspaceMutation.isPending || deleteName.trim() !== ws.name}
+                className="inline-flex items-center justify-center rounded-xl bg-danger px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteWorkspaceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Workspace'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-alt/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-text">Delete {ws.name}</p>
+              <p className="text-sm text-text-secondary">Make sure you really want to remove the entire workspace before continuing.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="inline-flex items-center justify-center rounded-xl bg-danger px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+            >
+              Delete Workspace
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -100,7 +251,7 @@ function ProfileSettings() {
   const user = useAuthStore((s) => s.user)
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const email = user?.email || ''
-  const name = user?.user_metadata?.full_name || email.split('@')[0]
+  const name = user?.full_name || user?.user_metadata?.full_name || email.split('@')[0]
   const [displayName, setDisplayName] = useState(name)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -208,13 +359,14 @@ const ROLE_CONFIG: Record<WorkspaceRole, { label: string; color: string; icon: t
 
 const ROLE_ORDER: WorkspaceRole[] = ['owner', 'admin', 'member', 'viewer']
 
-function MembersSettings() {
+export function WorkspaceMembersPanel() {
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const user = useAuthStore((s) => s.user)
   const wsPath = `/v1/workspaces/${ws!.id}`
-  const currentRole = (ws as any)?.current_user_role as WorkspaceRole | undefined
+  const currentRole = ws?.current_user_role ?? ws?.role
   const isAdmin = currentRole === 'owner' || currentRole === 'admin'
+  const [inviteReferenceTime] = useState(() => Date.now())
 
   // ── Invite form state ──
   const [inviteEmail, setInviteEmail] = useState('')
@@ -227,15 +379,26 @@ function MembersSettings() {
   const [lookupState, setLookupState] = useState<'idle' | 'loading' | 'found' | 'not-found' | 'member'>('idle')
   const [lookupData, setLookupData] = useState<EmailLookup | null>(null)
 
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    const trimmed = inviteEmail.trim()
-    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+  const handleInviteEmailChange = (value: string) => {
+    setInviteEmail(value)
+
+    const trimmed = value.trim()
+    if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
       setLookupState('idle')
       setLookupData(null)
       return
     }
+
     setLookupState('loading')
+  }
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    const trimmed = inviteEmail.trim()
+    if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
+      return
+    }
+
     debounceRef.current = setTimeout(async () => {
       try {
         const result = await api.get<EmailLookup>(
@@ -343,7 +506,7 @@ function MembersSettings() {
                   type="email"
                   placeholder="colleague@company.com"
                   value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
+                  onChange={(e) => handleInviteEmailChange(e.target.value)}
                   required
                   className={cn(
                     'w-full rounded-lg border px-3 py-2 text-sm pr-10 outline-none focus:ring-2 transition-all',
@@ -575,11 +738,11 @@ function MembersSettings() {
             <div className="divide-y divide-border">
               {invites.map((invite) => {
                 const expiresAt = new Date(invite.expires_at)
-                const isExpired = expiresAt < new Date()
-                const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                const sentAt = (invite as any).sent_at ? new Date((invite as any).sent_at) : null
-                const isNew = (invite as any).is_new_user as boolean | undefined
-                const roleInfo = ROLE_CONFIG[invite.role as WorkspaceRole] || ROLE_CONFIG.member
+                const isExpired = expiresAt.getTime() < inviteReferenceTime
+                const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - inviteReferenceTime) / (1000 * 60 * 60 * 24)))
+                const sentAt = invite.sent_at ? new Date(invite.sent_at) : null
+                const isNew = invite.is_new_user
+                const roleInfo = ROLE_CONFIG[invite.role] || ROLE_CONFIG.member
 
                 return (
                   <div key={invite.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
@@ -672,8 +835,8 @@ function GitHubSettings() {
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
-      const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
-      return (res as any)?.items ?? []
+      const res = await api.get<PaginatedResponse<Project>>(`${wsPath}/projects`)
+      return res.items ?? []
     },
     enabled: !!ws,
   })

@@ -191,6 +191,16 @@ def require_admin(ws: WorkspaceContext = Depends(get_workspace_context)) -> Work
     return ws
 
 
+def require_owner(ws: WorkspaceContext = Depends(get_workspace_context)) -> WorkspaceContext:
+    """Dependency that requires the workspace owner role."""
+    if not ws.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Workspace owner role required",
+        )
+    return ws
+
+
 def require_write(ws: WorkspaceContext = Depends(get_workspace_context)) -> WorkspaceContext:
     """Dependency that requires at least member role (owner, admin, or member — not viewer)."""
     if not ws.can_write:

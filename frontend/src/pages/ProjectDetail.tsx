@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Target,
   CheckCircle2,
+  AlertTriangle,
   Clock,
   LayoutGrid,
   List,
@@ -743,41 +744,70 @@ function TaskForm({
   if (!form.assignee_id) missingPillars.push('Owner')
   if (!form.due_date) missingPillars.push('Due date')
 
+  const isOppmAligned = missingPillars.length === 0
+  const selectedObjective = objectives.find((objective) => objective.id === form.oppm_objective_id)
+  const selectedOwner = members.find((member) => member.user_id === form.assignee_id)
+
+  const fieldLabelClass = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-text-secondary'
+  const inputClass = 'w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10'
+  const selectClass = 'w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors focus:border-primary focus:ring-4 focus:ring-primary/10'
+  const textareaClass = 'w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10 resize-none'
+  const sectionClass = 'rounded-2xl border border-border bg-surface-alt/70 p-4 sm:p-5'
+  const sectionEyebrowClass = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary'
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-lg rounded-2xl border border-border bg-white shadow-2xl"
+        className="flex max-h-[92vh] w-[min(100%-1rem,54rem)] flex-col overflow-hidden rounded-[1.75rem] border border-border bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="border-b border-border px-6 pt-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-base font-semibold text-text">{title}</h3>
+        <div className="border-b border-border px-4 pt-4 sm:px-6 sm:pt-5">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">
+                {initial ? 'Update execution details' : 'Add execution details'}
+              </p>
+              <h3 className="text-lg font-semibold text-text">{title}</h3>
+              <p className="text-sm text-text-secondary">
+                Keep the task brief clear, link it to the right objective, and set ownership without crowding the form.
+              </p>
+            </div>
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              className="rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
             >
-              <X className="h-4 w-4" />
+              <X className="h-4.5 w-4.5" />
             </button>
           </div>
           {initial && (
-            <div className="flex gap-1">
+            <div className="flex gap-1.5 overflow-x-auto pb-3">
               <button
                 type="button"
                 onClick={() => setTab('details')}
-                className={cn('flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors', tab === 'details' ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text')}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors',
+                  tab === 'details'
+                    ? 'bg-primary/10 text-primary ring-1 ring-primary/15'
+                    : 'bg-surface-alt text-text-secondary hover:text-text'
+                )}
               >
                 <Pencil className="h-3.5 w-3.5" /> Details
               </button>
               <button
                 type="button"
                 onClick={() => setTab('reports')}
-                className={cn('flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors', tab === 'reports' ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text')}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors',
+                  tab === 'reports'
+                    ? 'bg-primary/10 text-primary ring-1 ring-primary/15'
+                    : 'bg-surface-alt text-text-secondary hover:text-text'
+                )}
               >
                 <ClipboardList className="h-3.5 w-3.5" /> Daily Reports
                 {reportsQuery.data && reportsQuery.data.length > 0 && (
-                  <span className="ml-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{reportsQuery.data.length}</span>
+                  <span className="ml-1 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200">{reportsQuery.data.length}</span>
                 )}
               </button>
             </div>
@@ -785,44 +815,47 @@ function TaskForm({
         </div>
 
         {tab === 'reports' && initial ? (
-          <div className="px-6 py-5 max-h-[70vh] overflow-y-auto space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-text-secondary">
+          <div className="max-h-[72vh] space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-text-secondary">
                 Total hours logged: <span className="font-semibold text-text">{reportsQuery.data ? reportsQuery.data.reduce((s, r) => s + r.hours, 0).toFixed(1) : '—'}</span>
               </p>
               <button
                 type="button"
                 onClick={() => setShowReportForm(v => !v)}
-                className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark transition-colors"
+                className="inline-flex items-center justify-center gap-1 rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-dark"
               >
                 <Plus className="h-3.5 w-3.5" /> Add Report
               </button>
             </div>
 
             {showReportForm && (
-              <div className="rounded-xl border border-border bg-surface-alt p-4 space-y-3">
-                <p className="text-xs font-semibold text-text">New Daily Report</p>
-                <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-border bg-surface-alt/70 p-4 sm:p-5">
+                <div className="mb-4 space-y-1">
+                  <p className={sectionEyebrowClass}>Report entry</p>
+                  <h4 className="text-sm font-semibold text-text">New daily report</h4>
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
-                    <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-secondary mb-1">Date</label>
-                    <input type="date" value={reportForm.report_date} onChange={e => setReportForm(f => ({ ...f, report_date: e.target.value }))} className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary transition-colors" />
+                    <label className={fieldLabelClass}>Date</label>
+                    <input type="date" value={reportForm.report_date} onChange={e => setReportForm(f => ({ ...f, report_date: e.target.value }))} className={inputClass} />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-secondary mb-1">Hours</label>
-                    <input type="number" min={0.5} max={24} step={0.5} value={reportForm.hours} onChange={e => setReportForm(f => ({ ...f, hours: e.target.value }))} placeholder="e.g. 3.5" className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary transition-colors" />
+                    <label className={fieldLabelClass}>Hours</label>
+                    <input type="number" min={0.5} max={24} step={0.5} value={reportForm.hours} onChange={e => setReportForm(f => ({ ...f, hours: e.target.value }))} placeholder="e.g. 3.5" className={inputClass} />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-text-secondary mb-1">Description</label>
-                  <textarea value={reportForm.description} onChange={e => setReportForm(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="What did you work on?" className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary resize-none transition-colors" />
+                <div className="mt-4">
+                  <label className={fieldLabelClass}>Description</label>
+                  <textarea value={reportForm.description} onChange={e => setReportForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="What did you work on?" className={textareaClass} />
                 </div>
-                <div className="flex justify-end gap-2">
-                  <button type="button" onClick={() => setShowReportForm(false)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-white transition-colors">Cancel</button>
+                <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={() => setShowReportForm(false)} className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-white">Cancel</button>
                   <button
                     type="button"
                     disabled={addReport.isPending || !reportForm.hours || !reportForm.report_date}
                     onClick={() => addReport.mutate({ report_date: reportForm.report_date, hours: parseFloat(reportForm.hours), description: reportForm.description })}
-                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors"
+                    className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-dark disabled:opacity-50"
                   >
                     {addReport.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
                   </button>
@@ -832,15 +865,15 @@ function TaskForm({
 
             {reportsQuery.isLoading && <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-text-secondary" /></div>}
             {reportsQuery.data && reportsQuery.data.length === 0 && (
-              <div className="rounded-xl border border-dashed border-gray-200 py-8 text-center">
+              <div className="rounded-2xl border border-dashed border-gray-200 py-10 text-center">
                 <ClipboardList className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                 <p className="text-sm text-text-secondary">No reports yet</p>
                 <p className="text-xs text-gray-400 mt-0.5">Submit a daily report to track your work</p>
               </div>
             )}
             {reportsQuery.data && reportsQuery.data.map(report => (
-              <div key={report.id} className={cn('rounded-xl border px-4 py-3 space-y-1', report.is_approved ? 'border-emerald-200 bg-emerald-50' : 'border-border bg-white')}>
-                <div className="flex items-center justify-between">
+              <div key={report.id} className={cn('rounded-2xl border px-4 py-3.5 space-y-1.5 shadow-sm', report.is_approved ? 'border-emerald-200 bg-emerald-50' : 'border-border bg-white')}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-text">{report.report_date}</span>
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{report.hours}h</span>
@@ -865,196 +898,216 @@ function TaskForm({
           </div>
         ) : (
         <>
-        <div className="space-y-4 px-6 py-5 max-h-[70vh] overflow-y-auto">
-          {missingPillars.length > 0 && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <p className="text-xs font-semibold text-amber-800">
-                OPPM compliance: {missingPillars.join(', ')} missing
-              </p>
-              <p className="text-[11px] text-amber-600 mt-0.5">
-                Link this task to an objective and assign an owner for full OPPM compliance.
-              </p>
+        <div className="max-h-[72vh] overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
+            <div className="space-y-5 lg:col-span-3">
+              <section className={sectionClass}>
+                <div className="mb-4 space-y-1">
+                  <p className={sectionEyebrowClass}>Task brief</p>
+                  <h4 className="text-sm font-semibold text-text">What needs to get done?</h4>
+                </div>
+
+                <div>
+                  <label className={fieldLabelClass}>Title *</label>
+                  <input
+                    value={form.title}
+                    onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                    required
+                    placeholder="Task title"
+                    className={inputClass}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="mt-4">
+                  <label className={fieldLabelClass}>Description</label>
+                  <textarea
+                    value={form.description}
+                    onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                    rows={4}
+                    placeholder="Add the outcome, key constraints, or handoff notes"
+                    className={textareaClass}
+                  />
+                </div>
+              </section>
+
+              <section className={sectionClass}>
+                <div className="mb-4 space-y-1">
+                  <p className={sectionEyebrowClass}>Delivery setup</p>
+                  <h4 className="text-sm font-semibold text-text">Schedule, progress, and workflow state</h4>
+                </div>
+
+                <div className={cn('grid grid-cols-1 gap-4 md:grid-cols-2', initial && 'xl:grid-cols-3')}>
+                  <div>
+                    <label className={fieldLabelClass}>Priority</label>
+                    <select
+                      value={form.priority}
+                      onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as Priority }))}
+                      className={selectClass}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                  </div>
+
+                  {initial && (
+                    <div>
+                      <label className={fieldLabelClass}>Status</label>
+                      <select
+                        value={form.status}
+                        onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as TaskStatus }))}
+                        className={selectClass}
+                      >
+                        <option value="todo">To Do</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className={fieldLabelClass}>Progress (%)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={form.progress}
+                      onChange={(e) => setForm((f) => ({ ...f, progress: parseInt(e.target.value) || 0 }))}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className={fieldLabelClass}>Start Date</label>
+                    <input
+                      type="date"
+                      value={form.start_date}
+                      onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={fieldLabelClass}>Due Date</label>
+                    <input
+                      type="date"
+                      value={form.due_date}
+                      onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              </section>
             </div>
-          )}
 
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-              Title *
-            </label>
-            <input
-              value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              required
-              placeholder="Task title..."
-              className="w-full rounded-lg border border-border px-3 py-2.5 text-sm text-text placeholder:text-gray-300 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors"
-              autoFocus
-            />
-          </div>
+            <div className="space-y-5 lg:col-span-2">
+              <section className={sectionClass}>
+                <div className="mb-4 space-y-1">
+                  <p className={sectionEyebrowClass}>Ownership and alignment</p>
+                  <h4 className="text-sm font-semibold text-text">Connect the task to the delivery plan</h4>
+                </div>
 
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-              Description
-            </label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              rows={2}
-              placeholder="Optional description..."
-              className="w-full rounded-lg border border-border px-3 py-2.5 text-sm text-text placeholder:text-gray-300 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 resize-none transition-colors"
-            />
-          </div>
+                <div>
+                  <label className={fieldLabelClass}>Linked Objective</label>
+                  {objectives.length > 0 ? (
+                    <>
+                      <select
+                        value={form.oppm_objective_id}
+                        onChange={(e) => setForm((f) => ({ ...f, oppm_objective_id: e.target.value }))}
+                        className={selectClass}
+                      >
+                        <option value="">None (not linked to OPPM)</option>
+                        {objectives.map((obj, i) => (
+                          <option key={obj.id} value={obj.id}>
+                            {String.fromCharCode(65 + i)}. {obj.title}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-xs text-text-secondary">
+                        {selectedObjective ? `Currently linked to ${selectedObjective.title}.` : 'Linking an objective keeps the task visible in the OPPM layer.'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-sm italic text-text-secondary">
+                      No objectives yet. Create objectives in OPPM View first.
+                    </p>
+                  )}
+                </div>
 
-          <div className="border-t border-border" />
+                <div className="mt-4">
+                  <label className={fieldLabelClass}>Owner</label>
+                  {members.length > 0 ? (
+                    <>
+                      <select
+                        value={form.assignee_id}
+                        onChange={(e) => setForm((f) => ({ ...f, assignee_id: e.target.value }))}
+                        className={selectClass}
+                      >
+                        <option value="">Unassigned</option>
+                        {members.map((m) => (
+                          <option key={m.id} value={m.user_id}>
+                            {m.display_name || m.email || m.user_id.slice(0, 8)}
+                            {m.role === 'owner' ? ' (Owner)' : m.role === 'admin' ? ' (Admin)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-xs text-text-secondary">
+                        {selectedOwner ? `Primary owner: ${selectedOwner.display_name || selectedOwner.email || 'Assigned member'}.` : 'Assign an owner to keep accountability clear.'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-sm italic text-text-secondary">
+                      No workspace members found.
+                    </p>
+                  )}
+                </div>
+              </section>
 
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-              <Target className="h-3.5 w-3.5 text-indigo-500" />
-              Linked Objective
-              <span className="text-[10px] font-normal normal-case tracking-normal text-indigo-400">(OPPM Pillar)</span>
-            </label>
-            {objectives.length > 0 ? (
-              <select
-                value={form.oppm_objective_id}
-                onChange={(e) => setForm((f) => ({ ...f, oppm_objective_id: e.target.value }))}
-                className="w-full rounded-lg border border-border px-3 py-2.5 text-sm outline-none focus:border-primary transition-colors"
-              >
-                <option value="">� None (not linked to OPPM) �</option>
-                {objectives.map((obj, i) => (
-                  <option key={obj.id} value={obj.id}>
-                    {String.fromCharCode(65 + i)}. {obj.title}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <p className="text-xs text-text-secondary italic rounded-lg border border-dashed border-gray-200 px-3 py-2.5">
-                No objectives yet. Create objectives in OPPM View first.
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-              <User className="h-3.5 w-3.5 text-slate-500" />
-              Owner
-              <span className="text-[10px] font-normal normal-case tracking-normal text-slate-400">(OPPM Pillar)</span>
-            </label>
-            {members.length > 0 ? (
-              <select
-                value={form.assignee_id}
-                onChange={(e) => setForm((f) => ({ ...f, assignee_id: e.target.value }))}
-                className="w-full rounded-lg border border-border px-3 py-2.5 text-sm outline-none focus:border-primary transition-colors"
-              >
-                <option value="">� Unassigned �</option>
-                {members.map((m) => (
-                  <option key={m.id} value={m.user_id}>
-                    {m.display_name || m.email || m.user_id.slice(0, 8)}
-                    {m.role === 'owner' ? ' (Owner)' : m.role === 'admin' ? ' (Admin)' : ''}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <p className="text-xs text-text-secondary italic rounded-lg border border-dashed border-gray-200 px-3 py-2.5">
-                No workspace members found.
-              </p>
-            )}
-          </div>
-
-          <div className="border-t border-border" />
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-                Priority
-              </label>
-              <select
-                value={form.priority}
-                onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as Priority }))}
-                className="w-full rounded-lg border border-border px-3 py-2.5 text-sm outline-none focus:border-primary transition-colors"
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </div>
-            {initial && (
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-                  Status
-                </label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as TaskStatus }))}
-                  className="w-full rounded-lg border border-border px-3 py-2.5 text-sm outline-none focus:border-primary transition-colors"
-                >
-                  <option value="todo">To Do</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-              Progress (%)
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={form.progress}
-              onChange={(e) => setForm((f) => ({ ...f, progress: parseInt(e.target.value) || 0 }))}
-              className="w-full rounded-lg border border-border px-3 py-2.5 text-sm outline-none focus:border-primary transition-colors"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-                <CalendarDays className="h-3.5 w-3.5 text-text-secondary" /> Start Date
-              </label>
-              <input
-                type="date"
-                value={form.start_date}
-                onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
-                className="w-full rounded-lg border border-border px-3 py-2.5 text-sm outline-none focus:border-primary transition-colors"
-              />
-            </div>
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary mb-1.5">
-                <CalendarDays className="h-3.5 w-3.5 text-primary" /> Due Date
-              </label>
-              <input
-                type="date"
-                value={form.due_date}
-                onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
-                className="w-full rounded-lg border border-border px-3 py-2.5 text-sm outline-none focus:border-primary transition-colors"
-              />
+              <section className={cn(sectionClass, isOppmAligned ? 'border-emerald-200 bg-emerald-50/80' : 'border-amber-200 bg-amber-50/80')}>
+                <div className="flex items-start gap-3">
+                  <div className={cn('mt-0.5 rounded-full p-2', isOppmAligned ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700')}>
+                    {isOppmAligned ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-text">
+                      {isOppmAligned ? 'OPPM aligned' : `${missingPillars.length} OPPM field${missingPillars.length > 1 ? 's' : ''} missing`}
+                    </p>
+                    <p className="text-sm text-text-secondary">
+                      {isOppmAligned
+                        ? 'Objective, owner, and due date are all set. This task will sit cleanly in the delivery plan.'
+                        : `Still missing: ${missingPillars.join(', ')}.`}
+                    </p>
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-border px-6 py-4">
-          {missingPillars.length === 0 ? (
-            <span className="text-xs font-medium text-emerald-600">&#10003; OPPM compliant</span>
-          ) : (
-            <span className="text-xs text-amber-600">
-              {missingPillars.length} OPPM field{missingPillars.length > 1 ? 's' : ''} missing
-            </span>
-          )}
-          <div className="flex gap-2">
+        <div className="flex flex-col gap-3 border-t border-border bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div>
+            <p className={cn('text-sm font-semibold', isOppmAligned ? 'text-emerald-700' : 'text-amber-700')}>
+              {isOppmAligned ? 'Ready to save' : 'Needs a little more alignment'}
+            </p>
+            <p className="text-xs text-text-secondary">
+              {isOppmAligned ? 'This task has the core OPPM fields in place.' : `Add ${missingPillars.join(', ')} when you want full OPPM coverage.`}
+            </p>
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface-alt transition-colors"
+              className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-alt"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isPending || !form.title.trim()}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors"
+              className="inline-flex items-center justify-center rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-dark disabled:opacity-50"
             >
               {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : initial ? 'Save Changes' : 'Create Task'}
             </button>

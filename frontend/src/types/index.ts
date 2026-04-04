@@ -10,6 +10,7 @@ export interface Workspace {
   created_at: string
   updated_at: string
   role?: WorkspaceRole
+  current_user_role?: WorkspaceRole
 }
 
 export interface WorkspaceMember {
@@ -41,6 +42,16 @@ export interface WorkspaceInvite {
   token: string
   expires_at: string
   accepted_at: string | null
+  created_at?: string
+  sent_at?: string | null
+  is_new_user?: boolean
+}
+
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page?: number
+  page_size?: number
 }
 
 // ── Project ──

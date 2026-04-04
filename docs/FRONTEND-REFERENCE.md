@@ -34,6 +34,7 @@ Public routes render immediately:
 
 - `/login`
 - `/invites/:token`
+- `/invite/accept/:token`
 
 Protected routes render inside the main shell:
 
@@ -128,13 +129,13 @@ Current pages:
 - `ProjectDetail.tsx`
   Per-project task board/list, task CRUD, task reports, summary cards.
 - `OPPMView.tsx`
-  OPPM objectives, timeline, costs, and AI-driven project planning flows.
+  OPPM spreadsheet-style sheet view with project metadata rows, objective timeline matrix, summary block, cost tracking, and AI planning flows.
 - `Team.tsx`
-  Workspace members and member skills UI.
+  Workspace members, invite management, and member skills UI.
 - `Commits.tsx`
   Commit feed and analysis views.
 - `Settings.tsx`
-  Profile, members/invites, GitHub integration, and AI model configuration.
+  Profile, workspace settings, GitHub integration, and AI model configuration.
 
 ### `stores/`
 
@@ -167,6 +168,11 @@ This folder is important but not always the exact backend truth. Some contract d
 - `ChatFAB`
 - `ChatPanel`
 
+Important current behavior:
+
+- the sidebar can now fully hide on desktop as well as slide in on mobile
+- desktop sidebar visibility is persisted locally so wide-screen workspace layouts can stay focused on dense pages like OPPM
+
 Sidebar navigation currently exposes:
 
 - Dashboard
@@ -181,13 +187,14 @@ Sidebar navigation currently exposes:
 |---|---|---|
 | `/login` | `pages/Login.tsx` | Auth entry point |
 | `/invites/:token` | `pages/AcceptInvite.tsx` | Invite preview and acceptance |
+| `/invite/accept/:token` | `pages/AcceptInvite.tsx` | Alias route for invite preview and acceptance |
 | `/` | `pages/Dashboard.tsx` | Workspace summary |
 | `/projects` | `pages/Projects.tsx` | Project list and project creation wizard |
 | `/projects/:id` | `pages/ProjectDetail.tsx` | Task management and per-project summary |
-| `/projects/:id/oppm` | `pages/OPPMView.tsx` | Objectives, timeline, costs, AI plan workflows |
-| `/team` | `pages/Team.tsx` | Member list and skill matrix |
+| `/projects/:id/oppm` | `pages/OPPMView.tsx` | Spreadsheet-style OPPM sheet with metadata rows, objective timeline, summary, risks, costs, AI plan workflows |
+| `/team` | `pages/Team.tsx` | Member roles, invites, and skill matrix |
 | `/commits` | `pages/Commits.tsx` | Commit history and analysis UI |
-| `/settings` | `pages/Settings.tsx` | Profile, workspace membership, GitHub, AI model config |
+| `/settings` | `pages/Settings.tsx` | Profile, workspace settings, GitHub, AI model config |
 
 ## State Management Pattern
 
@@ -295,6 +302,7 @@ Important current behavior:
 
 - project creation is a two-step modal
 - the team assignment step stores workspace member ids but posts them in a field named `user_id`
+- create and edit flows now use the same wider modal rhythm as the task editor for denser setup without cramped form spacing
 
 ### OPPM
 
@@ -304,17 +312,25 @@ Start with:
 - `hooks/useChatContext.ts`
 - AI routes referenced from the page mutations
 
+Important current behavior:
+
+- the page now renders as a spreadsheet-style OPPM sheet with visible row and column framing, merged metadata cells, an objective timeline matrix, a lower X-cross summary area, and a ledger-style cost section
+- the objective timeline remains UI-only on the current backend model and reuses linked `tasks` only as context, not as editable sub-rows
+- objective rows still mutate the same objective owner/title and weekly status routes as before
+
 ### Team And Skills
 
 Start with:
 
 - `pages/Team.tsx`
+- `pages/Settings.tsx` for the exported `WorkspaceMembersPanel`
 - skill queries under `/members/{member_id}/skills`
 
 Important current behavior:
 
-- the Team page decides admin behavior from workspace role data
-- because of the `role` vs `current_user_role` mismatch, this area is sensitive to contract drift
+- the Team page is now the home for member role changes, invite management, and skill management
+- the member and invite panel is shared from `Settings.tsx` but rendered on Team
+- admin behavior resolves from `current_user_role` first and falls back to `role` for compatibility
 
 ### Settings
 
@@ -325,11 +341,14 @@ Start with:
 Settings currently groups four areas:
 
 - profile
-- members and invites
+- workspace settings
 - GitHub integration
 - AI model configuration
 
-This page is the main aggregation point for workspace administration flows.
+Important current behavior:
+
+- workspace membership and invites were moved out of Settings and into Team
+- the workspace tab contains the owner-only workspace deletion flow and general workspace summary controls
 
 ### AI Chat
 

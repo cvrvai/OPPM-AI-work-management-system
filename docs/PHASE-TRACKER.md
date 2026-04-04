@@ -20,8 +20,8 @@ It answers one question: what is implemented in the repo right now, what is part
 |---|---|---|---|
 | 1 | Platform foundation | `Completed` | Microservices, shared package, SQLAlchemy async sessions, gateway routing, Redis bootstrap are in place. |
 | 2 | Auth and identity | `Completed` | Local JWT auth, refresh tokens, signup, login, me, profile update, signout route all exist. |
-| 3 | Workspace management | `Completed` | Workspace CRUD, membership checks, role enforcement, invite preview/accept/resend/revoke flows are live. |
-| 4 | Team management | `In Progress` | Team page, member skills, member role changes, and invites exist; role-field contract cleanup is still needed. |
+| 3 | Workspace management | `Completed` | Workspace CRUD, membership checks, owner-only deletion, and invite preview/accept/resend/revoke flows are live. |
+| 4 | Team management | `Completed` | Team now owns member role changes, invite management, and skill management in one surface. |
 | 5 | Project management | `Completed` | Project CRUD, project header fields, project detail view, project membership, and project creation wizard exist. |
 | 6 | Task execution | `Completed` | Task CRUD, board/list display, assignment, progress, and task daily reports are implemented. |
 | 7 | OPPM planning | `Completed` | Objectives, weekly timeline, costs, AI-assisted plan suggestion, and project-level OPPM view are implemented. |
@@ -110,10 +110,22 @@ Recently completed during this phase:
 
 - docs refreshed against source code instead of stale assumptions
 - invite preview schema corrected in `services/core/schemas/workspace.py`
+- frontend lint baseline cleaned in Dashboard, Projects, Settings, and OPPMView
+- workspace role typing normalized so frontend pages can use `current_user_role` without loose casts
+- Projects create and edit dialogs refreshed with wider, calmer planning forms
+- Settings simplified around profile, workspace, GitHub, and AI concerns while Team now owns member and invite management
+- workspace deletion hardened to be owner-only end-to-end
+- `/invite/accept/:token` added as a public alias while `/invites/:token` remains valid
+- OPPMView reorganized into a clearer strategic brief, execution matrix, and separate cost section without changing the backend model
+- OPPMView further realigned into a spreadsheet-style OPPM sheet with row/column framing, merged metadata rows, a lower X-cross summary area, and a side legend block
+- frontend and API reference docs refreshed for the Team/Settings ownership split, invite alias route, and owner-only workspace deletion
+
+Current implementation pass:
+
+- no additional shell or OPPM styling slice is open; the latest pass completed the desktop-collapsible sidebar and tightened the sheet styling toward a more authentic spreadsheet surface
 
 Still worth doing next:
 
-- normalize workspace role response naming
 - clean up project member request naming
 - decide whether to retire or revive `task_assignees`
 - expand end-to-end verification and automated tests
