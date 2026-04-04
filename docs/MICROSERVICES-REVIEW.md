@@ -1,198 +1,203 @@
-# Microservices Architecture Review
-> Reviewed 2026-04-02 — All Critical and High issues resolved. Medium/Low issues documented below.
+# Microservices Review
 
-## Overview
+Last updated: 2026-04-04
 
-The OPPM system has been migrated from a FastAPI monolith (`backend/`) to 4 focused microservices behind an nginx gateway. All services successfully build and run as Docker containers.
+## Executive Summary
 
-```
-Client → nginx:80 (gateway) → core:8000  (workspaces, projects, tasks, OPPM, notifications)
-                             → ai:8001    (LLM chat, commit analysis, RAG, AI models)
-                             → git:8002   (GitHub webhooks, repos, commits)
-                             → mcp:8003   (Model Context Protocol tools)
-```
+The current backend architecture is a workable and coherent microservices split built around a shared PostgreSQL data model and a thin gateway layer.
 
----
+What is solid:
 
-## Deployment
+- service responsibilities are understandable
+- the shared ORM package prevents schema duplication across services
+- the core service owns the main business workflow cleanly
+- AI, GitHub, and MCP capabilities are separated instead of being bolted directly into core
+- the Python gateway mirrors the same routing intent as the nginx gateway
 
-### Quick Start (Production)
-```bash
-docker compose -f docker-compose.microservices.yml up -d
-```
+What still needs attention:
 
-### Development (Hot Reload + Port Exposure)
-```bash
-docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up -d
-```
+- a few public field names do not match the underlying relational identifiers cleanly
+- gateway rules exist in two places and can drift
+- some frontend types still lag behind backend response names
+- the schema carries both current and legacy task assignment patterns
+- automated coverage is still light relative to the feature surface
 
-### Native Development (no Docker)
+Overall assessment:
 
-Each service has a `start.ps1` that automatically sets `PYTHONPATH` to the workspace root and loads its own `.env` file. No manual environment setup needed.
+- architecture direction: good
+- implementation maturity: medium
+- documentation accuracy after this refresh: good
+- remaining hardening work: moderate
 
-```powershell
-# Start gateway first — all services must be reachable through it
-./services/gateway/start.ps1    # Python FastAPI gateway, port 8080
+## What Was Verified In Code
 
-./services/core/start.ps1       # port 8000
-./services/ai/start.ps1         # port 8001
-./services/git/start.ps1        # port 8002
-./services/mcp/start.ps1        # port 8003
+This review is based on the current source, not on older design notes.
 
-cd frontend ; npm run dev       # port 5173
-```
+Confirmed facts:
 
-`vite.config.ts` proxies all `/api` and `/mcp` to `http://localhost:8080` (gateway only).
+- auth uses locally validated HS256 JWTs in `shared/auth.py`
+- workspace authorization resolves through `workspace_members`
+- the core service mounts both `/api/auth/*` and `/api/v1/*`
+- AI, Git, and MCP services expose their own `/api/v1/*` route groups
+- the AI service also exposes `/internal/analyze-commits` protected by `X-Internal-API-Key`
+- `shared/models/` is the active ORM source of truth
+- migrations are owned by `services/core/alembic/`
+- Redis is optional support infrastructure, not the source of truth
 
-**Load balancing (native):** Add comma-separated URLs in `services/gateway/.env`:
-```dotenv
-CORE_URLS=http://localhost:8000,http://localhost:8010
-```
+## Service Topology Assessment
 
-### Service URLs
-| Service | Native Port | Docker Port |
-|---------|-------------|-------------|
-| Gateway | 8080 | 80 |
-| Core | 8000 | 8000 (dev only) |
-| AI | 8001 | 8001 (dev only) |
-| Git | 8002 | 8002 (dev only) |
-| MCP | 8003 | 8003 (dev only) |
+### Core Service
 
-### Environment
-- **Native dev:** each service reads its own `services/{service}/.env` (e.g. `services/core/.env`).
-- **Docker:** copy `services/.env.example` to `services/.env` and populate credentials.
-- `services/.env` and `services/*/.env` are in `.gitignore` — never commit credentials.
-- `OLLAMA_URL` must point to `http://host.docker.internal:11434` when running in Docker.
+Assessment: strong
 
----
+Why:
 
-## Design Decisions
+- most business rules live where they should
+- the route surface is clear
+- repositories and services are separated reasonably well
+- it is the correct place for migrations and workspace authorization-driven CRUD
 
-### Shared Package (`shared/`)
-- `shared/auth.py` — JWT validation via local HS256 decode (`jwt.decode(token, SECRET_KEY)`). Token is never validated via an external HTTP call.
-- `shared/database.py` — SQLAlchemy async engine + session factory. Service layer is always the primary auth/access gate.
-- `shared/config.py` — `SharedSettings(BaseSettings)`: DB URL, Redis URL, JWT secret + `internal_api_key`. Each service subclasses this with domain-specific settings.
-- Import via `PYTHONPATH=/` (set in each Dockerfile) — `pip install /shared` installs dependencies only.
+### AI Service
 
-### CORS Policy
-CORS is handled differently per environment:
-- **Docker:** exclusively by nginx (`gateway/nginx.conf`). Service containers do NOT add `CORSMiddleware`. This prevents duplicate headers which browsers reject.
-- **Native dev:** the Python gateway (`services/gateway/main.py`) adds `CORSMiddleware` with `allow_origin_regex`. Services may also add their own CORS middleware since they are behind the Python gateway (no nginx).
+Assessment: strong but integration-heavy
 
-### Python Gateway (`services/gateway/`)
-A FastAPI reverse proxy that mirrors the nginx routing table for native development:
-- Reads upstream URL lists from env vars (`CORE_URLS`, `AI_URLS`, `GIT_URLS`, `MCP_URLS`) as comma-separated values.
-- Uses `itertools.cycle` for round-robin load balancing across the list.
-- Same path-routing rules as nginx (most-specific-first order).
-- Returns `502` if upstream is unreachable, `504` on timeout.
-- Must be started before any other service when running natively.
+Why:
 
-### Auth Through Gateway
-The frontend has no direct database connection. All auth operations go through:
-```
-Frontend → Gateway → core/routers/auth.py → auth_service.py (local JWT + bcrypt)
-```
-- `POST /api/auth/login|signup|refresh|signout` and `GET /api/auth/me` / `PATCH /api/auth/profile` are in `services/core/routers/auth.py`.
-- Tokens (`access_token`, `refresh_token`) are stored in `localStorage` by `authStore.ts`.
-- On 401, `api.ts` auto-calls `authStore.refreshSession()` then retries the original request once.
-- Bearer token is sent on every request via `Authorization: Bearer <token>` header.
+- AI responsibilities are sensibly isolated
+- chat, plan generation, reindexing, and retrieval belong together
+- the service already contains a real internal-only route for commit analysis
 
-### Internal API
-Service-to-service calls use `X-Internal-API-Key` header (validated by `shared/auth.py#verify_internal_key`). Only the AI service exposes an `/internal/` router. The git service calls `ai:8001/internal/analyze-commits` fire-and-forget (`asyncio.create_task`).
+Risk area:
 
-### Gateway Routing
-nginx routes based on URL path prefix to the correct upstream:
+- this service touches many cross-cutting concepts, so schema or prompt drift can surface here first
 
-| Pattern | Service |
-|---------|---------|
-| `/api/v1/workspaces/.../projects/.../ai/` | ai:8001 |
-| `/api/v1/workspaces/.../rag/` | ai:8001 |
-| `/api/v1/workspaces/.../ai/` | ai:8001 |
-| `/api/v1/workspaces/.../mcp/` | mcp:8003 |
-| `/api/v1/workspaces/.../github-accounts` | git:8002 |
-| `/api/v1/workspaces/.../commits` | git:8002 |
-| `/api/v1/workspaces/.../git/` | git:8002 |
-| `/api/v1/git/webhook` | git:8002 |
-| `/mcp` (SSE) | mcp:8003 |
-| `/api/` (all else) | core:8000 |
-| `/` | frontend:5173 |
+### Git Service
 
-The gateway uses Docker's internal resolver (`127.0.0.11`) so it starts even when `frontend` is not running.
+Assessment: good
 
----
+Why:
 
-## Issues Fixed in This Review
+- GitHub account, repo, webhook, and commit flows are grouped correctly
+- webhook processing is split into fast acknowledge plus background work
+- handoff to AI is explicit instead of hidden in a monolith callback
 
-### Critical (resolved)
-| ID | Issue | Fix |
-|----|-------|-----|
-| C1 | GitHub webhook HMAC optional — any unauthenticated request was processed | Made signature required; reject 401 if header absent |
-| C2 | `trigger_ai_analysis` awaited with 120s timeout — blocks event loop, causes GitHub timeout retries | Changed to `asyncio.create_task(...)` (fire-and-forget) |
-| C3 | `ai_chat_service` sync functions block async event loop | **Pending** — `_run_llm()` still uses thread pool; full async refactor needed |
-| C4 | Service credentials in plaintext file | Added `services/.env` to `.gitignore`; rotate credentials if repo ever had history |
+Risk area:
 
-### High (resolved)
-| ID | Issue | Fix |
-|----|-------|-----|
-| H1 | `list_tasks` returned tasks from all workspaces when `project_id=None` | Added `workspace_id` param; new `find_workspace_tasks` repo method |
-| H2 | `get_task` no workspace-scoping — cross-workspace read possible | Added `workspace_id` param; check `task.workspace_id == workspace_id` |
-| H3 | `delete_notification` no ownership check | Passed `user_id` to service+repository; uses `.eq("user_id", ...)` |
-| H4 | `mark_read` accepted `user_id` but ignored it | Added `mark_read_for_user` repo method scoped by `user_id` |
-| H5 | Commit analysis notifications inserted without `user_id` — silent `NOT NULL` violation | Look up `project_members` table; create per-member notifications |
-| H6 | Double CORS headers (nginx + service middleware) — browser rejects responses | Removed `CORSMiddleware` from ai/git/mcp `main.py`; nginx only |
-| H7 | `config["webhook_secret"].encode()` — `AttributeError` if column is NULL | Added null check; return 500 with clear message |
-| H9 | `toggle_ai_model` returned `{"error": "..."}` with HTTP 200 on 404 | Changed to `raise HTTPException(status_code=404)` |
+- webhook and repo configuration security must stay tight because secrets live here
 
----
+### MCP Service
 
-## Remaining Issues (Medium / Low — Not Fixed)
+Assessment: clean and focused
 
-### Medium
-| ID | Issue | Recommendation |
-|----|-------|---------------|
-| M1 | N+1 queries in `dashboard_service.get_dashboard_stats` (100 DB calls for 50 projects) | Batch: single query with project_id IN (...) |
-| M2 | N+1 in `git_service.list_repos` and `list_commits` | Same — batch project_id lookups |
-| M3 | `_plan_cache` in `ai_chat_service` is in-memory dict — lost on restart, unbounded, not shared between replicas | Replace with Redis; evict after TTL |
-| M4 | Rate limiting middleware exists (migrated from monolith) but never wired into any service | Add `from middleware.rate_limit import RateLimitMiddleware` to `services/core/main.py` |
-| M5 | `redis` service defined in `docker-compose.microservices.yml` but nothing connects to it | Wire up once M3/M4 are addressed, or remove the service definition |
-| M6 | `shared/database.py` startup validation missing | Add lifespan check: raise on startup if `DATABASE_URL` is empty |
+Why:
 
-> **Phase 12 targets**: M3 (Redis plan cache), M4 (rate limiting wire-up), M5 (remove dead Redis service or connect it) are all scheduled for Phase 12. See [PHASE-TRACKER.md](PHASE-TRACKER.md#phase-12--backlog-planned).
+- service boundary is narrow
+- tool registry pattern is straightforward
+- it keeps tool execution separate from the AI service HTTP surface
 
-### Low
-| ID | Issue |
-|----|-------|
-| L1 | `ai/config.py` and `git/config.py` use manual `global _settings` instead of `@lru_cache` — not thread-safe at startup |
-| L2 | `git_service.validate_webhook()` is dead code that diverges from the router's HMAC logic |
-| L3 | `docker-compose.dev.yml` redundantly re-declares `gateway` port `80:80` already in base file |
-| L5 | Dockerfiles install shared package both via `pip install /shared` (for deps) AND via `PYTHONPATH=/` (for import) — comment this clearly to avoid future confusion |
+### Gateway Layer
 
----
+Assessment: acceptable but fragile
 
-## Security Posture
+Why:
 
-| Control | Status |
-|---------|--------|
-| JWT validation (local HS256) | ✅ All routes |
-| Workspace scoping | ✅ All v1 routes (post H1/H2 fix) |
-| Internal key auth | ✅ `X-Internal-API-Key` header |
-| Webhook HMAC | ✅ Required (post C1 fix) |
-| Service role key in git | ⚠️ Rotate if repo history exposed |
-| Rate limiting | ❌ Not wired in (Phase 12 — M4) |
-| RLS | ✅ Defense-in-depth (service layer is primary gate) |
-| Credentials in git | ✅ `.gitignore` added |
-| Public endpoints exposed without rate limit | ⚠️ `GET /invites/preview/:token` is unauthenticated — add rate limit before production |
+- route ownership is clear in code
+- health-aware load balancing in native dev is useful
 
----
+Risk area:
 
-## Known Limitations
+- duplicated route tables in Python and nginx must be maintained manually
 
----
+## Data Architecture Assessment
 
-## Known Limitations
+Assessment: strong foundation with a few naming mismatches
 
-1. **Ollama only**: Both Anthropic and OpenAI API keys are unconfigured. All LLM calls fall through to Ollama at `host.docker.internal:11434`. If Ollama is not running, all AI analysis silently skips (returns no error to webhook caller).
+What is working well:
 
-2. **No horizontal scaling yet**: `_plan_cache` in the AI service (M3 above) prevents multiple AI replicas from working correctly.
+- shared SQLAlchemy models reduce service duplication
+- workspace-scoped modeling is consistent across the main domains
+- project, task, OPPM, Git, and AI tables fit together sensibly
+- audit and retrieval are cross-cutting but still sit in understandable places
 
-3. **Frontend container not tested**: `frontend/Dockerfile` was created but not validated in this session. The gateway properly degrades when frontend is absent.
+What needs cleanup:
+
+- `project_members.member_id` is correct relationally, but the public add-member payload still calls the field `user_id`
+- workspace role data is exposed as `current_user_role` in backend responses, while parts of the frontend still type it as `role`
+- both `tasks.assignee_id` and `task_assignees` exist, but the main product flow uses the single-assignee path
+
+## Auth And Security Assessment
+
+Assessment: adequate for current architecture, with a few follow-up items
+
+Strengths:
+
+- local JWT validation is explicit and understandable
+- workspace RBAC is centralized in `shared/auth.py`
+- internal service routes use a separate API key mechanism
+- GitHub webhook validation uses HMAC SHA-256
+
+Follow-up items:
+
+- keep token logging redacted only
+- verify signout blacklisting path end-to-end under real traffic
+- keep sensitive GitHub and AI credentials out of all API responses
+
+## Frontend/Backend Contract Review
+
+This is the main area where polish is still needed.
+
+Observed contract issues:
+
+1. Workspace role naming drift.
+   The backend returns `current_user_role`, but some frontend types and role checks still expect `role`.
+
+2. Project member identifier naming drift.
+   The project member add route accepts a field named `user_id`, but the working value is a workspace member id.
+
+3. Task assignment model duplication.
+   The database still includes `task_assignees`, but the current UI and route model use `tasks.assignee_id`.
+
+These are not architecture-breaking problems, but they are exactly the kind of small inconsistencies that create bugs during feature work.
+
+## Code Health Review
+
+What looks healthy:
+
+- service ownership is easy to trace from router to service to repository
+- the shared package gives the codebase a real center of gravity
+- the main route groups are not deeply tangled together
+- the docs can now be aligned to source without inventing missing layers
+
+What still increases maintenance cost:
+
+- duplicated gateway routing logic
+- partial type drift between frontend and backend
+- legacy artifacts remaining in schema and contracts
+- limited automated tests for the total feature surface
+
+## Recent Corrections During This Review
+
+One real schema contract issue was corrected while preparing this documentation refresh:
+
+- `services/core/schemas/workspace.py` was fixed so `InvitePreviewResponse` now carries `accepted_at`, `member_count`, `is_expired`, and `is_accepted`
+- those fields were removed from `MemberSkillCreate`, where they had been attached incorrectly
+
+That fix matters because the invite preview route and the Team/skills feature now have the correct schema separation.
+
+## Recommended Next Actions
+
+Priority order:
+
+1. normalize workspace role response naming between backend and frontend
+2. rename or wrap the project member add payload so the public field matches the real identifier type
+3. decide whether `task_assignees` is still strategic or should be retired from the live path
+4. add automated tests around invites, project membership, task reports, and webhook-to-analysis flow
+5. keep Python gateway and nginx gateway routing rules synchronized whenever routes change
+
+## Overall Conclusion
+
+The system is in better shape than the stale docs suggested.
+
+This is not a fake microservices split. It is a real service decomposition with a sensible shared data layer and clear domain boundaries.
+
+The remaining issues are mostly contract cleanup and hardening work, not foundational architecture failure. That is a good place to be.

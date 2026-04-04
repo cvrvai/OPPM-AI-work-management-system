@@ -9,7 +9,7 @@ AI-powered **One Page Project Manager (OPPM)** — a multi-tenant, workspace-sco
 | Frontend | React 19 + Vite + TypeScript + Tailwind CSS v4 + TanStack Query v5 + Zustand v5 |
 | Backend | Python FastAPI (microservices: core, ai, git, mcp) |
 | Database | PostgreSQL via Supabase (connection string only — self-hosted DB) |
-| Auth | JWT via `supabase.auth.get_user()` — no Supabase Auth server required in dev |
+| Auth | Local HS256 JWT validation in `shared/auth.py` with refresh-token persistence |
 | AI | Multi-model: Ollama, Kimi K2.5, Claude (Anthropic), OpenAI — plug-in adapters |
 | API Gateway | FastAPI gateway service (port 8080) or Nginx in production |
 | Deployment | Docker Compose (monolith or microservices) |
@@ -58,7 +58,7 @@ The Vite dev proxy forwards `/api` → `http://localhost:8080`.
 ### 4. Verify
 
 ```powershell
-Invoke-RestMethod http://localhost:8080/health   # { status: "healthy" }
+Invoke-RestMethod http://localhost:8080/health   # { status: "ok", service: "gateway" }
 .\test_api.ps1                                   # 48 PASS / 0 FAIL / 4 SKIP
 ```
 
@@ -84,17 +84,20 @@ Creates 5 demo accounts across Architecture, Finance, Healthcare, Manufacturing,
 Browser → Frontend (React/Vite :5173)
              ↓ /api (Vite proxy in dev)
           Gateway (:8080)
-           ├── /api/v1/workspaces        → Core service (:8000)
-           ├── /api/v1/workspaces/*/ai   → AI service   (:8001)
-           ├── /api/v1/workspaces/*/git  → Git service  (:8002)
-           └── /api/v1/mcp              → MCP service  (:8003)
+           ├── /api/auth/*                         → Core service (:8000)
+           ├── /api/v1/workspaces/*/ai/*          → AI service   (:8001)
+           ├── /api/v1/workspaces/*/rag/*         → AI service   (:8001)
+           ├── /api/v1/workspaces/*/github-*      → Git service  (:8002)
+           ├── /api/v1/workspaces/*/git/*         → Git service  (:8002)
+           ├── /api/v1/workspaces/*/commits*      → Git service  (:8002)
+           └── /api/v1/workspaces/*/mcp/*         → MCP service  (:8003)
                     ↓
               PostgreSQL (Supabase)
 ```
 
 **GitHub Commit Pipeline:**
 1. Developer pushes code to GitHub
-2. GitHub fires webhook to Git service (`POST /v1/workspaces/:id/git/webhook`)
+2. GitHub fires webhook to Git service (`POST /api/v1/git/webhook`)
 3. HMAC-SHA256 signature validated
 4. Commit diff + metadata extracted and stored
 5. AI service analyses commit against OPPM objectives (if model is configured)
@@ -108,7 +111,7 @@ Browser → Frontend (React/Vite :5173)
 │   └── src/
 │       ├── pages/               Dashboard, Projects, OPPMView, Commits, Settings, etc.
 │       ├── components/          ChatFAB, ChatPanel, workspace selector, layout
-│       ├── lib/                 api.ts (axios wrapper), supabase.ts, utils.ts
+│       ├── lib/                 api.ts (fetch wrapper), tokens.ts, utils.ts
 │       ├── stores/              authStore, workspaceStore, chatStore (Zustand)
 │       └── types/               TypeScript interfaces for all API types
 ├── services/
@@ -142,10 +145,14 @@ Browser → Frontend (React/Vite :5173)
 | File | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, service map, data flow |
-| [docs/API-REFERENCE.md](docs/API-REFERENCE.md) | All 63 endpoints with request/response schemas |
-| [docs/ERD.md](docs/ERD.md) | Entity-relationship diagram (20 tables) |
-| [docs/FLOWCHARTS.md](docs/FLOWCHARTS.md) | Auth, OPPM, GitHub webhook, invite, service-to-service flows |
-| [docs/TESTING-GUIDE.md](docs/TESTING-GUIDE.md) | Step-by-step user self-audit guide for every feature |
-| [docs/PHASE-TRACKER.md](docs/PHASE-TRACKER.md) | Development history, phases 1–12 |
+| [docs/API-REFERENCE.md](docs/API-REFERENCE.md) | Current public route reference and contract notes |
+| [docs/FRONTEND-REFERENCE.md](docs/FRONTEND-REFERENCE.md) | Frontend folder map, route ownership, state flow, and feature entry points |
+| [docs/MICROSERVICES-REFERENCE.md](docs/MICROSERVICES-REFERENCE.md) | Service ownership, shared package map, gateway routing, and backend feature entry points |
+| [docs/ERD.md](docs/ERD.md) | Current relational model and relationship notes |
+| [docs/FLOWCHARTS.md](docs/FLOWCHARTS.md) | Runtime flows for auth, invites, projects, AI, GitHub, and routing |
+| [docs/TESTING-GUIDE.md](docs/TESTING-GUIDE.md) | Automated checks, smoke scripts, and manual test matrix |
+| [docs/PHASE-TRACKER.md](docs/PHASE-TRACKER.md) | Outcome-based capability status and hardening priorities |
+| [docs/MICROSERVICES-REVIEW.md](docs/MICROSERVICES-REVIEW.md) | Architecture assessment, risks, and cleanup priorities |
+| [docs/SRS.md](docs/SRS.md) | Product-level software requirements specification |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local development setup and conventions |
 

@@ -1,346 +1,145 @@
-# OPPM AI — System Flowcharts
+# Flowcharts
 
-## 1. Authentication Flow
+Last updated: 2026-04-04
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Frontend
-    participant Gateway
-    participant Core Service
-    participant Database
-    participant Redis
+## Purpose
 
-    User->>Frontend: Enter email + password
-    Frontend->>Gateway: POST /api/auth/login<br/>{email, password}
-    Gateway->>Core Service: Route to core:8000
-    Core Service->>Database: SELECT user WHERE email = ?
-    Database-->>Core Service: user row (password_hash)
-    Core Service->>Core Service: bcrypt.verify(password, hash)
-    Core Service->>Core Service: jwt.encode({sub: user_id, exp: +15min})
-    Core Service-->>Gateway: {access_token, refresh_token, expires_in, user}
-    Gateway-->>Frontend: {access_token, refresh_token, expires_in, user}
-    Frontend->>Frontend: Store tokens in localStorage<br/>via authStore
+These flowcharts describe the major runtime paths in the current implementation.
 
-    Note over Frontend,Redis: Subsequent API calls
+They are intentionally based on the code paths that exist now, not on older architecture plans.
 
-    Frontend->>Gateway: GET /api/v1/workspaces<br/>Authorization: Bearer {access_token}
-    Gateway->>Core Service: Round-robin to core:8000
-    Core Service->>Core Service: jwt.decode(token, SECRET_KEY) → user_id
-    Core Service->>Redis: Check token blacklist
-    Redis-->>Core Service: Not blacklisted
-    Core Service->>Database: Query workspace_members<br/>WHERE user_id = {user_id}
-    Database-->>Core Service: User's workspaces
-    Core Service-->>Frontend: 200 OK [{workspaces}]
-
-    Note over Frontend: On 401 response
-
-    Frontend->>Gateway: POST /api/auth/refresh<br/>{refresh_token}
-    Gateway->>Core Service: Route to core:8000
-    Core Service->>Database: Validate refresh_token (not revoked, not expired)
-    Core Service->>Core Service: Issue new access_token + refresh_token
-    Core Service-->>Frontend: New tokens
-    Frontend->>Frontend: Update localStorage, retry original request
-```
-
-## 2. Workspace Creation & Invite Flow
-
-```mermaid
-sequenceDiagram
-    actor Owner
-    actor Invitee
-    participant Frontend
-    participant Backend API
-    participant Database
-    participant Email
-
-    Owner->>Frontend: Create workspace "My Team"
-    Frontend->>Backend API: POST /api/v1/workspaces<br/>{name, slug, description}
-    Backend API->>Database: INSERT workspace
-    Backend API->>Database: INSERT workspace_member<br/>(user_id, role=owner)
-    Backend API-->>Frontend: 201 Created {workspace}
-
-    Owner->>Frontend: Invite teammate
-    Frontend->>Backend API: POST /api/v1/workspaces/:ws/invites<br/>{email, role: "member"}
-    Backend API->>Database: INSERT workspace_invite<br/>(token, expires_at=+7 days)
-    Backend API->>Email: Send invite link
-    Backend API-->>Frontend: 201 Created {invite}
-
-    Note over Invitee: Receives email with invite token
-
-    Invitee->>Frontend: Click invite link
-    Frontend->>Backend API: POST /api/v1/invites/accept<br/>{token}
-    Backend API->>Database: Validate token (not expired, not used)
-    Backend API->>Database: INSERT workspace_member<br/>(user_id, role from invite)
-    Backend API->>Database: UPDATE invite (accepted_at)
-    Backend API-->>Frontend: 200 OK {workspace}
-```
-
-## 3. GitHub Webhook Flow
-
-```mermaid
-sequenceDiagram
-    participant GitHub
-    participant Gateway
-    participant Git Service
-    participant AI Service
-    participant Database
-
-    GitHub->>Gateway: POST /api/v1/workspaces/:id/git/webhook<br/>X-Hub-Signature-256: sha256=...
-    Gateway->>Git Service: Route to git:8002
-    Git Service->>Git Service: Validate HMAC-SHA256 signature<br/>(webhook_secret from repo_config)
-
-    alt Invalid signature
-        Git Service-->>GitHub: 401 Unauthorized
-    end
-
-    Git Service->>Database: Find repo_config by workspace + repo name
-    Git Service->>Database: INSERT commit_event<br/>(hash, message, author, branch, stats)
-    Git Service->>Database: INSERT notification (type=commit)
-
-    Note over Git Service,AI Service: Async call to AI service
-
-    Git Service->>AI Service: POST http://ai:8001/internal/analyze-commit<br/>{commit_id, workspace_id}
-    AI Service->>Database: Load active AI models for workspace
-    AI Service->>Database: Load OPPM objectives for project
-    AI Service->>AI Service: Call configured LLM (Ollama/OpenAI/Anthropic/Kimi)
-    AI Service->>Database: INSERT commit_analysis<br/>(quality_score, alignment_score, summary)
-    AI Service-->>Git Service: 200 OK
-
-    Git Service-->>GitHub: 200 OK
-```
-
-## 4. OPPM Dashboard Data Flow
+## 1. App Bootstrap And Auth Refresh
 
 ```mermaid
 flowchart TD
-    A[User opens OPPM View] --> B[Frontend queries workspace-scoped data]
+    A[Browser loads React app] --> B[App.tsx initialize]
+    B --> C{Has local access token?}
+    C -- No --> D[Render public routes]
+    C -- Yes --> E[fetchWorkspaces after auth init]
+    D --> F[User goes to login or invite page]
+    E --> G[Protected routes render]
 
-    B --> C[GET /projects/:id]
-    B --> D[GET /projects/:id/oppm/objectives]
-    B --> E[GET /projects/:id/oppm/timeline]
-    B --> F[GET /projects/:id/oppm/costs]
-    B --> G[GET /projects/:id/members]
-
-    C --> H{Compose OPPM Grid}
-    D --> H
-    E --> H
-    F --> H
-    G --> H
-
-    H --> I[Header Row: Project meta + timeline months]
-    H --> J[Objectives Column: Goals with owners]
-    H --> K[Timeline Grid: Month × Objective status cells]
-    H --> L[Team Section: Members with roles]
-    H --> M[Cost Section: Budget vs Actual]
-
-    I --> N[Render OPPM One-Page View]
-    J --> N
-    K --> N
-    L --> N
-    M --> N
-
-    style H fill:#e3f2fd
-    style N fill:#c8e6c9
+    G --> H[User makes API request]
+    H --> I{API returns 401?}
+    I -- No --> J[Use response]
+    I -- Yes --> K[POST /api/auth/refresh]
+    K --> L{Refresh succeeds?}
+    L -- Yes --> M[Store new tokens]
+    M --> N[Retry original request once]
+    L -- No --> O[Clear tokens]
+    O --> P[ProtectedRoute redirects to /login]
 ```
 
-## 5. AI Commit Analysis Flow
+## 2. Workspace Invite Acceptance
 
 ```mermaid
 flowchart TD
-    A[Webhook receives push event] --> B[Extract commits from payload]
-    B --> C{For each commit}
-    C --> D[Store commit_event in DB]
-    D --> E[Load active AI models for workspace]
-    E --> F{For each AI model}
-
-    F --> G{Provider type?}
-    G -->|Ollama| H[OllamaAdapter.call_json]
-    G -->|OpenAI| I[OpenAIAdapter.call_json]
-    G -->|Anthropic| J[AnthropicAdapter.call_json]
-    G -->|Kimi| K[KimiAdapter.call_json]
-
-    H --> L[Parse JSON response]
-    I --> L
-    J --> L
-    K --> L
-
-    L --> M{Valid response?}
-    M -->|Yes| N[Store commit_analysis]
-    M -->|No| O[Log error, skip]
-
-    N --> P[Calculate progress_delta]
-    P --> Q{progress_delta > 0?}
-    Q -->|Yes| R[Update task progress]
-    R --> S[Recalculate project progress]
-    Q -->|No| T[No progress update]
-
-    S --> U[Create notification]
-    T --> U
-
-    style A fill:#fff3e0
-    style N fill:#c8e6c9
-    style O fill:#ffcdd2
+    A[User opens /invites/:token] --> B[Frontend calls GET /api/v1/invites/preview/:token]
+    B --> C{Preview valid?}
+    C -- No --> D[Show invalid or expired state]
+    C -- Yes --> E[Show workspace name, role, member count]
+    E --> F{User authenticated?}
+    F -- No --> G[User logs in or signs up]
+    G --> H[POST /api/v1/invites/accept]
+    F -- Yes --> H[POST /api/v1/invites/accept]
+    H --> I[Core service validates token and membership rules]
+    I --> J[workspace_members row created]
+    J --> K[Invite marked accepted]
+    K --> L[Frontend refreshes workspace list]
 ```
 
-## 6. Multi-Tenant Data Isolation
+## 3. Project Creation Wizard
 
 ```mermaid
 flowchart TD
-    A[API Request] --> B[Validate token via<br/>jwt.decode(token, SECRET_KEY) → user_id]
-    B --> C[Extract workspace_id from URL path]
-    C --> D{Is user a member<br/>of this workspace?}
-
-    D -->|No| E[403 Forbidden]
-    D -->|Yes| F[Determine user role in workspace]
-
-    F --> G{Required permission?}
-
-    G -->|Read| H[Allow - all members can read]
-    G -->|Write| I{Role >= member?}
-    G -->|Admin| J{Role >= admin?}
-    G -->|Owner| K{Role == owner?}
-
-    I -->|No| E
-    I -->|Yes| L[Allow operation]
-
-    J -->|No| E
-    J -->|Yes| L
-
-    K -->|No| E
-    K -->|Yes| L
-
-    L --> M[Execute with workspace_id filter]
-    M --> N[workspace_id filter enforced<br/>at repository layer]
-
-    style E fill:#ffcdd2
-    style L fill:#c8e6c9
-    style N fill:#e3f2fd
+    A[User opens New Project modal] --> B[Step 1 project info]
+    B --> C[Title, code, objective summary, schedule, budget, lead]
+    C --> D[Step 2 team assignment]
+    D --> E[Select workspace members and project roles]
+    E --> F[POST /api/v1/workspaces/:ws/projects]
+    F --> G[Core creates project]
+    G --> H[Creator workspace membership added as project lead]
+    H --> I{Additional team members selected?}
+    I -- No --> J[Invalidate project queries]
+    I -- Yes --> K[Frontend loops POST /projects/:project_id/members]
+    K --> L[Backend stores project_members rows]
+    L --> J[Invalidate project queries]
 ```
 
-## 7. Frontend State Management
+## 4. Task Report Approval Flow
 
 ```mermaid
 flowchart TD
-    subgraph Zustand Stores
-        AS[authStore<br/>user, accessToken, refreshToken, loading]
-        WS[workspaceStore<br/>workspaces, currentWorkspace]
-    end
-
-    subgraph React Query
-        RQ1[useQuery: projects]
-        RQ2[useQuery: tasks]
-        RQ3[useQuery: objectives]
-        RQ4[useQuery: notifications]
-    end
-
-    subgraph Custom Hooks
-        UW[useWorkspaceId<br/>→ workspace UUID]
-        UP[useWsPath<br/>→ /v1/workspaces/:ws]
-    end
-
-    AS --> UW
-    WS --> UW
-    UW --> UP
-    UP --> RQ1
-    UP --> RQ2
-    UP --> RQ3
-    UP --> RQ4
-
-    RQ1 --> Pages
-    RQ2 --> Pages
-    RQ3 --> Pages
-    RQ4 --> Pages
-
-    style AS fill:#e3f2fd
-    style WS fill:#e3f2fd
-    style UW fill:#fff3e0
-    style UP fill:#fff3e0
+    A[Member opens project detail page] --> B[Create task report]
+    B --> C[POST /api/v1/workspaces/:ws/tasks/:task_id/reports]
+    C --> D[task_reports row created]
+    D --> E[Write-enabled user reviews report]
+    E --> F[PATCH /reports/:report_id/approve]
+    F --> G[Core updates is_approved and approved_by]
+    G --> H[UI refreshes task reports]
 ```
 
-## 8. Workspace Invite Acceptance Flow
+## 5. GitHub Webhook To Commit Analysis
 
 ```mermaid
-sequenceDiagram
-    actor Owner
-    actor Invitee
-    participant Frontend
-    participant Gateway
-    participant Core Service
-    participant Database
-
-    Owner->>Frontend: Settings → Members → Invite
-    Frontend->>Gateway: POST /api/v1/workspaces/:id/invites<br/>{email, role}
-    Gateway->>Core Service: Route to core:8000
-    Core Service->>Database: INSERT workspace_invites<br/>(token=UUID, expires_at=+7d)
-    Core Service-->>Frontend: 201 {invite_id, token}
-    Frontend-->>Owner: Invite sent ✓
-
-    Note over Invitee: Receives email with link<br/>http://localhost:5173/invite/accept?token=...
-
-    Invitee->>Frontend: Open invite link
-    Frontend->>Gateway: GET /api/v1/invites/preview/:token
-    Gateway->>Core Service: Validate token (not expired, not used)
-    Core Service-->>Frontend: 200 {workspace_name, role, inviter}
-    Frontend-->>Invitee: "You are invited to join <Workspace>"
-
-    Invitee->>Frontend: Click Accept
-    Frontend->>Gateway: POST /api/v1/invites/accept<br/>{token}
-    Gateway->>Core Service: Route to core:8000
-    Core Service->>Database: Validate invite
-    Core Service->>Database: INSERT workspace_members<br/>(user_id, role from invite)
-    Core Service->>Database: UPDATE workspace_invites<br/>(accepted_at = now())
-    Core Service-->>Frontend: 200 {workspace}
-    Frontend-->>Invitee: Redirect to workspace dashboard ✓
+flowchart TD
+    A[Developer pushes to GitHub] --> B[GitHub sends POST /api/v1/git/webhook]
+    B --> C[Git service locates repo_config by repository full name]
+    C --> D[Validate X-Hub-Signature-256 with webhook secret]
+    D --> E{Signature valid and push event?}
+    E -- No --> F[Reject or ignore request]
+    E -- Yes --> G[Return accepted response quickly]
+    G --> H[Background task stores commit_events]
+    H --> I[Git service calls AI /internal/analyze-commits]
+    I --> J[AI service analyzes commits against project context]
+    J --> K[commit_analyses rows stored]
+    K --> L[Frontend can fetch recent analyses and reports]
 ```
 
-## 9. Service-to-Service Communication Map
+## 6. AI Chat And RAG Retrieval
 
 ```mermaid
-flowchart LR
-    Client([Browser / API Client])
-
-    subgraph Gateway["Gateway :8080"]
-        GW[FastAPI reverse proxy]
-    end
-
-    subgraph Core["Core :8000"]
-        CA[Auth / Workspaces<br/>Projects / Tasks<br/>OPPM / Notifications]
-    end
-
-    subgraph AI["AI :8001"]
-        AIA[Chat / RAG<br/>Weekly Summary<br/>LLM Adapters<br/>Embeddings]
-    end
-
-    subgraph Git["Git :8002"]
-        GIA[GitHub Accounts<br/>Repo Configs<br/>Webhooks<br/>Commit Events]
-    end
-
-    subgraph MCP["MCP :8003"]
-        MCPA[Model Context<br/>Protocol endpoints]
-    end
-
-    DB[(PostgreSQL)]
-
-    Client --> GW
-
-    GW -->|/api/v1/workspaces except ai & git| CA
-    GW -->|/api/v1/workspaces/*/ai/*| AIA
-    GW -->|/api/v1/workspaces/*/git/*| GIA
-    GW -->|/api/v1/mcp/*| MCPA
-
-    CA --> DB
-    AIA --> DB
-    GIA --> DB
-    MCPA --> DB
-
-    GIA -->|internal webhook analysis| AIA
-    AIA -->|read project/objective data| CA
-
-    style GW fill:#fff3e0
-    style CA fill:#e3f2fd
-    style AIA fill:#e8f5e9
-    style GIA fill:#fce4ec
-    style MCPA fill:#f3e5f5
-    style DB fill:#e0e0e0
+flowchart TD
+    A[User sends AI message] --> B{Workspace chat or project chat?}
+    B -- Workspace --> C[POST /api/v1/workspaces/:ws/ai/chat]
+    B -- Project --> D[POST /api/v1/workspaces/:ws/projects/:project_id/ai/chat]
+    C --> E[AI service loads workspace context]
+    D --> F[AI service loads project context]
+    E --> G[Optional retrieval pipeline]
+    F --> G[Optional retrieval pipeline]
+    G --> H[Structured queries + embeddings + audit memory]
+    H --> I[LLM selection from active ai_models]
+    I --> J[Response returned to frontend]
 ```
+
+## 7. Workspace Reindex Flow
+
+```mermaid
+flowchart TD
+    A[Admin triggers reindex] --> B[POST /api/v1/workspaces/:ws/ai/reindex]
+    B --> C[AI document indexer walks workspace data]
+    C --> D[Projects, tasks, objectives, costs, members, commits gathered]
+    D --> E[Embeddings generated]
+    E --> F[document_embeddings upserted]
+    F --> G[Capabilities endpoint reflects updated index count]
+```
+
+## 8. Gateway Routing Decision
+
+```mermaid
+flowchart TD
+    A[Incoming /api request] --> B{Path matches AI pattern?}
+    B -- Yes --> C[Forward to AI service]
+    B -- No --> D{Path matches Git pattern?}
+    D -- Yes --> E[Forward to Git service]
+    D -- No --> F{Path matches MCP pattern?}
+    F -- Yes --> G[Forward to MCP service]
+    F -- No --> H[Forward to Core service]
+```
+
+## Notes
+
+- Native development uses the Python gateway in `services/gateway/`.
+- Docker deployments use nginx rules in `gateway/nginx.conf`.
+- Those routing rules must stay aligned.
+- The internal AI analysis route is not part of the public frontend API surface.

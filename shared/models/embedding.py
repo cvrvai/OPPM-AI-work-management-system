@@ -26,3 +26,4 @@ class DocumentEmbedding(Base):
     __table_args__ = (
         UniqueConstraint("entity_type", "entity_id", name="uq_doc_embeddings_entity"),
     )
+    

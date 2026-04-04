@@ -1,814 +1,387 @@
-# OPPM AI — API Reference
+# API Reference
 
-> **Base URL (dev):** `http://localhost:8080/api` via Vite proxy → gateway → service
-> **Base URL (prod):** `http://your-domain/api` via nginx gateway
-> **Authentication:** `Authorization: Bearer {access_token}` on all `/v1/*` routes
-> **Dev Note:** Vite proxy routes all `/api` calls to `localhost:8080` (gateway). Do NOT set `VITE_API_URL` in development.
->
-> **OPPM applies to any industry** — construction, architecture, finance, healthcare, IT, manufacturing, education, or any other field. All projects share universal elements: objectives, tasks, timelines, budgets, and team members. The AI adapts its vocabulary to the project domain.
+Last updated: 2026-04-04
 
----
+## Purpose
 
-## Health Check
+This file is the practical reference for the public HTTP API currently mounted through `/api`.
 
-### `GET /health`
-Returns server health status.
+It documents the routes that are present in code today, grouped by owning service. It also calls out a few current contract quirks where field naming has not yet been fully normalized.
 
-**Response** `200`
+## Conventions
+
+### Base Path
+
+All frontend requests go through the gateway using `/api`.
+
+Examples:
+
+- `/api/auth/login`
+- `/api/v1/workspaces/{workspace_id}/projects`
+- `/api/v1/git/webhook`
+
+### Authentication
+
+Most routes require:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+Token behavior:
+
+- access tokens are validated locally by the backend using `JWT_SECRET`
+- the frontend retries once on `401` by calling `POST /api/auth/refresh`
+- invite preview and GitHub webhook routes do not use bearer auth
+
+### Authorization
+
+Workspace-scoped routes load `WorkspaceContext` from `workspace_members`.
+
+Role rules:
+
+- read: `owner`, `admin`, `member`, `viewer`
+- write: `owner`, `admin`, `member`
+- admin-only: `owner`, `admin`
+
+### Error Shape
+
+Most error responses use:
+
+```json
+{ "detail": "message" }
+```
+
+### Success Shape
+
+Delete and simple mutation endpoints often return:
+
+```json
+{ "ok": true }
+```
+
+### Pagination
+
+The current API is not fully uniform yet.
+
+Current patterns in code:
+
+- projects and tasks accept `page` and `page_size`, but return `{ "items": [...], "total": number }`
+- notifications return arrays instead of a paginated wrapper
+- several list endpoints accept `limit`
+
+Document against the route behavior that exists today, not the older design target.
+
+## Auth Routes (Core Service)
+
+Mounted under `/api/auth/*`.
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| `POST` | `/api/auth/login` | No | Email/password login. Returns access token, refresh token, and user payload. |
+| `POST` | `/api/auth/signup` | No | Registers a user. Returns token pair and user payload. |
+| `POST` | `/api/auth/refresh` | No | Exchanges refresh token for a new token pair. |
+| `POST` | `/api/auth/signout` | Yes | Signs out current user. Refresh tokens are invalidated; access token blacklist behavior depends on backend signout implementation. |
+| `GET` | `/api/auth/me` | Yes | Returns current JWT user info. |
+| `PATCH` | `/api/auth/profile` | Yes | Updates `full_name` and/or `password`. |
+| `GET` | `/api/v1/auth/me` | Yes | Legacy alias that returns the same current-user payload. |
+
+### Example: Login Request
+
 ```json
 {
-  "status": "healthy",
-  "version": "2.0.0"
+  "email": "admin@example.com",
+  "password": "Secret123!"
 }
 ```
 
----
+### Example: Login Response
 
-## Authentication
-
-All auth endpoints are handled by `core` service via `POST /api/auth/...`. The frontend communicates exclusively through the gateway REST API.
-
-### `POST /api/auth/login`
-Sign in with email and password.
-
-**Body**
-```json
-{ "email": "user@example.com", "password": "secret" }
-```
-
-**Response** `200`
 ```json
 {
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "expires_in": 3600,
-  "user": { "id": "uuid", "email": "user@example.com" }
-}
-```
-
-### `POST /api/auth/signup`
-Register a new account.
-
-**Body**
-```json
-{ "email": "user@example.com", "password": "secret", "full_name": "Jane Doe" }
-```
-
-**Response** `201` — same shape as login response.
-
-### `POST /api/auth/refresh`
-Exchange a refresh token for a new access token.
-
-**Body**
-```json
-{ "refresh_token": "eyJ..." }
-```
-
-**Response** `200`
-```json
-{
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "expires_in": 3600
-}
-```
-
-### `POST /api/auth/signout`
-Invalidate the current session.
-
-**Headers:** `Authorization: Bearer {access_token}`
-
-**Response** `200` `{ "message": "Signed out" }`
-
-### `GET /api/auth/me`
-Get the current authenticated user.
-
-**Headers:** `Authorization: Bearer {access_token}`
-
-**Response** `200`
-```json
-{
-  "id": "uuid",
-  "email": "user@example.com",
-  "full_name": "Jane Doe",
-  "role": "authenticated"
-}
-```
-
-### `PATCH /api/auth/profile`
-Update display name or user metadata.
-
-**Headers:** `Authorization: Bearer {access_token}`
-
-**Body**
-```json
-{ "full_name": "New Name" }
-```
-
-**Response** `200` — updated user object.
-
-### `GET /v1/auth/me`
-Legacy alias for `GET /api/auth/me`. Kept for backward compatibility.
-
----
-
-## Workspaces
-
-### `GET /v1/workspaces`
-List all workspaces the current user belongs to.
-
-**Response** `200`
-```json
-[
-  {
+  "access_token": "...",
+  "refresh_token": "...",
+  "user": {
     "id": "uuid",
-    "name": "My Team",
-    "slug": "my-team",
-    "description": "Team workspace",
-    "created_by": "uuid",
-    "created_at": "2025-01-01T00:00:00Z"
+    "email": "admin@example.com",
+    "full_name": "Admin User"
   }
-]
-```
-
-### `POST /v1/workspaces`
-Create a new workspace. The creator becomes the owner.
-
-**Body**
-```json
-{
-  "name": "New Workspace",
-  "slug": "new-workspace",
-  "description": "Optional description"
 }
 ```
 
-**Response** `201`
-```json
-{ "id": "uuid", "name": "New Workspace", "slug": "new-workspace", ... }
-```
+## Workspace Routes (Core Service)
 
-### `PUT /v1/workspaces/{workspace_id}`
-Update workspace details. **Requires admin role.**
+Mounted under `/api/v1/`.
 
-### `DELETE /v1/workspaces/{workspace_id}`
-Delete a workspace and all its data. **Requires admin role.**
+### Workspace CRUD
 
----
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces` | Yes | Any | Returns workspaces for current user. Current backend response includes `current_user_role`. |
+| `POST` | `/api/v1/workspaces` | Yes | Any | Creates a workspace and the creator membership. |
+| `GET` | `/api/v1/workspaces/{workspace_id}` | Yes | Member | Returns one workspace. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}` | Yes | Admin | Updates workspace metadata. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}` | Yes | Admin | Deletes the workspace. |
 
-## Workspace Members
+### Members
 
-### `GET /v1/workspaces/{workspace_id}/members`
-List all members of a workspace.
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/members` | Yes | Member | Lists workspace members. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/members/{member_id}` | Yes | Admin | Updates member role. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/members/{member_id}` | Yes | Admin | Removes a member. |
+| `PATCH` | `/api/v1/workspaces/{workspace_id}/members/me/display-name` | Yes | Member | Updates the caller's display name for this workspace only. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/members/lookup?email=...` | Yes | Admin | Looks up a user by email for invite and membership flows. |
 
-**Response** `200`
-```json
-[
-  {
-    "id": "uuid",
-    "workspace_id": "uuid",
-    "user_id": "uuid",
-    "role": "owner",
-    "joined_at": "2025-01-01T00:00:00Z"
-  }
-]
-```
+### Invites
 
-### `PUT /v1/workspaces/{workspace_id}/members/{member_id}`
-Update a member's role. **Requires admin role.**
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/invites` | Yes | Admin | Lists pending invites. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/invites` | Yes | Admin | Creates an invite. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/invites/{invite_id}` | Yes | Admin | Revokes an invite. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/invites/{invite_id}/resend` | Yes | Admin | Resends the invite email. |
+| `POST` | `/api/v1/invites/accept` | Yes | Authenticated | Accepts an invite token into the current account. |
+| `GET` | `/api/v1/invites/preview/{token}` | No | Public | Returns invite preview metadata. |
 
-**Body**
-```json
-{ "role": "admin" }
-```
+### Member Skills
 
-### `DELETE /v1/workspaces/{workspace_id}/members/{member_id}`
-Remove a member from the workspace. **Requires admin role.** Cannot remove the last owner.
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/members/{member_id}/skills` | Yes | Member | Lists skills for a workspace member. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/members/{member_id}/skills` | Yes | Member | Adds a skill. Members can manage their own skills; admins can manage any member. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/members/{member_id}/skills/{skill_id}` | Yes | Member | Deletes a skill with the same ownership rule as create. |
 
-### `GET /v1/workspaces/{workspace_id}/members/lookup?email={email}`
-Look up a workspace member by email address. Useful for invite flows.
+### Example: Invite Preview Response
 
-**Response** `200`
-```json
-{
-  "user_id": "uuid",
-  "email": "user@example.com",
-  "display_name": "Jane Doe",
-  "role": "member"
-}
-```
+The response contract now includes these fields:
 
-### `PATCH /v1/workspaces/{workspace_id}/members/me/display-name`
-Update the current user's display name within the workspace.
-
-**Body**
-```json
-{ "display_name": "Jane Doe" }
-```
-
----
-
-## Workspace Invites
-
-### `POST /v1/workspaces/{workspace_id}/invites`
-Create an invite link. **Requires admin role.** Token expires in 7 days.
-
-**Body**
 ```json
 {
-  "email": "newuser@example.com",
-  "role": "member"
-}
-```
-
-**Response** `201`
-```json
-{
-  "id": "uuid",
-  "email": "newuser@example.com",
+  "workspace_name": "Acme Workspace",
+  "email": "invitee@example.com",
   "role": "member",
-  "token": "invite-token-string",
-  "expires_at": "2025-01-08T00:00:00Z"
-}
-```
-
-### `POST /v1/invites/accept`
-Accept an invite by token.
-
-**Body**
-```json
-{ "token": "invite-token-string" }
-```
-
-### `GET /v1/invites/preview/{token}` *(no auth required)*
-Fetch a public preview of the workspace invitation before accepting.
-
-**Response** `200`
-```json
-{
-  "workspace_name": "Acme Corp",
-  "workspace_description": "...",
-  "member_count": 12,
-  "role": "member",
-  "inviter_name": "Alice",
-  "expires_at": "2025-01-08T00:00:00Z",
+  "expires_at": "2026-04-10T12:00:00Z",
+  "accepted_at": null,
+  "member_count": 7,
   "is_expired": false,
-  "is_used": false
+  "is_accepted": false
 }
 ```
 
-**Errors:** `404` invite not found · `410` invite expired or already used
-
-### `POST /v1/workspaces/{workspace_id}/invites/{invite_id}/resend`
-Regenerate an invite token and resend the invitation email. **Requires admin role.**
-
-**Response** `200`
-```json
-{
-  "id": "uuid",
-  "email": "user@example.com",
-  "token": "new-token-string",
-  "expires_at": "2025-01-15T00:00:00Z"
-}
-```
-
----
-
-## Projects
-
-### `GET /v1/workspaces/{workspace_id}/projects`
-List workspace projects. Supports pagination.
-
-**Query Parameters**
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `page` | int | 1 | Page number |
-| `page_size` | int | 50 | Items per page |
-| `status` | string | — | Filter by status |
-
-**Response** `200`
-```json
-{
-  "items": [...],
-  "total": 42,
-  "page": 1,
-  "page_size": 50
-}
-```
-
-### `POST /v1/workspaces/{workspace_id}/projects`
-Create a project. **Requires write access.**
-
-**Body**
-```json
-{
-  "title": "Project Alpha",
-  "description": "Description",
-  "status": "planning",
-  "priority": "high",
-  "start_date": "2025-01-01",
-  "end_date": "2025-06-30"
-}
-```
-
-### `GET /v1/workspaces/{workspace_id}/projects/{project_id}`
-Get project details.
-
-### `PUT /v1/workspaces/{workspace_id}/projects/{project_id}`
-Update project. **Requires write access.**
-
-### `DELETE /v1/workspaces/{workspace_id}/projects/{project_id}`
-Delete project. **Requires write access.**
-
----
-
-## Project Members
-
-### `GET /v1/workspaces/{workspace_id}/projects/{project_id}/members`
-List project team members.
-
-### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/members`
-Add a workspace member to a project. **Requires write access.**
-
-**Body**
-```json
-{
-  "workspace_member_id": "uuid",
-  "role": "member"
-}
-```
-
----
-
-## Tasks
-
-### `GET /v1/workspaces/{workspace_id}/tasks`
-List tasks. Supports filtering by project.
-
-**Query Parameters**
-| Param | Type | Description |
-|-------|------|-------------|
-| `project_id` | uuid | Filter by project |
-| `status` | string | Filter by status |
-| `assignee_id` | uuid | Filter by assignee |
-
-### `POST /v1/workspaces/{workspace_id}/tasks`
-Create a task. **Requires write access.** Automatically recalculates project progress.
-
-**Body**
-```json
-{
-  "project_id": "uuid",
-  "title": "Implement feature X",
-  "description": "Details...",
-  "status": "todo",
-  "priority": "high",
-  "weight": 5,
-  "assignee_id": "uuid",
-  "oppm_objective_id": "uuid",
-  "due_date": "2025-03-15"
-}
-```
-
-### `PUT /v1/workspaces/{workspace_id}/tasks/{task_id}`
-Update task. Triggers project progress recalculation.
-
-### `DELETE /v1/workspaces/{workspace_id}/tasks/{task_id}`
-Delete task. Triggers project progress recalculation.
-
----
-
-## OPPM Objectives
-
-### `GET /v1/workspaces/{workspace_id}/projects/{project_id}/oppm/objectives`
-List OPPM objectives for a project, ordered by `sort_order`.
-
-### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/oppm/objectives`
-Create an objective. **Requires write access.**
-
-**Body**
-```json
-{
-  "title": "Launch MVP",
-  "description": "Release minimum viable product",
-  "owner_id": "uuid",
-  "sort_order": 1
-}
-```
-
-### `PUT /v1/workspaces/{ws}/projects/{proj}/oppm/objectives/{obj_id}`
-Update an objective.
-
-### `DELETE /v1/workspaces/{ws}/projects/{proj}/oppm/objectives/{obj_id}`
-Delete an objective.
-
----
-
-## OPPM Timeline
-
-### `GET /v1/workspaces/{ws}/projects/{proj}/oppm/timeline`
-Get all timeline entries for a project's objectives.
-
-**Response** `200`
-```json
-[
-  {
-    "id": "uuid",
-    "project_id": "uuid",
-    "objective_id": "uuid",
-    "week_start": "2025-03-10",
-    "status": "in_progress",
-    "ai_score": null,
-    "notes": null
-  }
-]
-```
-
-### `PUT /v1/workspaces/{ws}/projects/{proj}/oppm/timeline`
-Upsert a single timeline entry (create or update by project+objective+week).
-
-**Body**
-```json
-{
-  "objective_id": "uuid",
-  "week_start": "2025-03-10",
-  "status": "completed"
-}
-```
-
-**Status values:** `planned` | `in_progress` | `completed` | `at_risk` | `blocked`
-
----
-
-## OPPM Costs
-
-### `GET /v1/workspaces/{ws}/projects/{proj}/oppm/costs`
-Get project cost entries.
-
-### `POST /v1/workspaces/{ws}/projects/{proj}/oppm/costs`
-Add a cost entry. **Requires write access.**
-
-**Body**
-```json
-{
-  "category": "Development",
-  "description": "Frontend contractor",
-  "planned_amount": 5000,
-  "actual_amount": 4800,
-  "currency": "USD"
-}
-```
-
----
-
-## Git Integration
-
-### `GET /v1/workspaces/{workspace_id}/github-accounts`
-List GitHub accounts connected to the workspace.
-
-### `POST /v1/workspaces/{workspace_id}/github-accounts`
-Connect a GitHub account. **Requires admin role.**
-
-**Body**
-```json
-{
-  "account_name": "my-org",
-  "github_username": "octocat",
-  "token": "ghp_xxx..."
-}
-```
-
-### `GET /v1/workspaces/{workspace_id}/repo-configs`
-List repository configurations.
-
-### `POST /v1/workspaces/{workspace_id}/repo-configs`
-Link a repository to a project.
-
-**Body**
-```json
-{
-  "repo_name": "owner/repo",
-  "project_id": "uuid",
-  "github_account_id": "uuid"
-}
-```
-
-### `GET /v1/workspaces/{workspace_id}/commits`
-List recent commits with AI analyses.
-
-### `GET /v1/workspaces/{workspace_id}/git/repos`
-List repositories configured in this workspace.
-
-### `GET /v1/workspaces/{workspace_id}/git/recent-analyses`
-List the most recent AI commit analyses (last 20 by default).
-
-### `GET /v1/workspaces/{workspace_id}/git/report/{project_id}`
-Get a formatted AI-generated Git activity report for a specific project. Summarises commit frequency, author activity, and alignment with OPPM objectives.
-
-**Response** `200`
-```json
-{
-  "project_id": "uuid",
-  "period_days": 30,
-  "total_commits": 47,
-  "authors": ["alice", "bob"],
-  "avg_quality_score": 82.4,
-  "avg_alignment_score": 71.1,
-  "summary": "The team has been actively working on the Authentication module...",
-  "top_objectives_referenced": ["Login & Registration", "Security Hardening"]
-}
-```
-
-### `POST /v1/git/webhook`
-GitHub webhook endpoint. Validates HMAC signature. Rate limited (30 req/min).
-
-**Headers:** `X-Hub-Signature-256: sha256=...`, `X-GitHub-Event: push`
-
----
-
-## AI Models
-
-### `GET /v1/workspaces/{workspace_id}/ai/models`
-List configured AI models for the workspace.
-
-### `POST /v1/workspaces/{workspace_id}/ai/models`
-Add an AI model configuration. **Requires admin role.**
-
-**Body**
-```json
-{
-  "name": "Local Ollama",
-  "provider": "ollama",
-  "model_id": "llama3.2",
-  "endpoint_url": "http://localhost:11434",
-  "is_active": true
-}
-```
-
-### `PUT /v1/workspaces/{workspace_id}/ai/models/{model_id}/toggle`
-Toggle a model's `is_active` state. **Requires admin role.**
-
-**Response** `200` — updated model object.
-
-**Provider constraint:** `provider` must be one of `ollama`, `anthropic`, `openai`, `kimi`, `custom`. Invalid values return `400`.
-
-**Ollama cloud models** should use `provider: "ollama"` with `endpoint_url` pointing to the cloud endpoint (e.g., `https://ollama.com/api`). The `model_id` identifies the cloud model.
-
----
-
-## AI Chat
-
-> All AI chat endpoints require at least one **active** AI model configured for the workspace.
-> Returns `400 No active AI model configured` when no active model is found.
-> Returns `502 All AI models are currently unavailable` when the LLM server is unreachable.
-
-### `POST /v1/workspaces/{workspace_id}/ai/chat`
-Workspace-level chat with AI (no project context).
-
-**Body**
-```json
-{
-  "messages": [
-    { "role": "user", "content": "What projects are in progress?" }
-  ],
-  "model_id": "uuid"
-}
-```
-
-**Response** `200`
-```json
-{
-  "message": "There are 3 active projects...",
-  "tool_calls": [],
-  "updated_entities": []
-}
-```
-
-### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat`
-Chat with AI in the context of a specific project. Automatically injects project state (objectives, timeline, costs, team).
-
-**Body**
-```json
-{
-  "messages": [
-    { "role": "user", "content": "What tasks are overdue?" }
-  ],
-  "model_id": "uuid"
-}
-```
-
-**Response** `200`
-```json
-{
-  "message": "There are 3 overdue tasks: ...",
-  "tool_calls": [
-    { "tool": "update_task", "input": { "task_id": "uuid", "status": "completed" } }
-  ],
-  "applied_tool_calls": true,
-  "updated_entities": ["tasks"]
-}
-```
-
-### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan`
-Generate an AI-driven OPPM plan preview (does NOT apply changes).
-
-**Body**
-```json
-{
-  "description": "A 5-story office tower construction project in downtown"
-}
-```
-
-### `POST /v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan/commit`
-Apply a previously generated plan by `commit_token`.
-
-**Body**
-```json
-{ "commit_token": "uuid" }
-```
-
-### `GET /v1/workspaces/{workspace_id}/projects/{project_id}/ai/weekly-summary`
-Get an AI-generated weekly status summary for the project.
-
-### `GET /v1/workspaces/{workspace_id}/ai/chat/capabilities`
-Returns available AI features and whether an active LLM model is configured.
-
-**Response** `200`
-```json
-{
-  "chat": true,
-  "weekly_summary": true,
-  "commit_analysis": true,
-  "rag": true,
-  "active_model": "llama3.2",
-  "provider": "ollama"
-}
-```
-
-### `POST /v1/workspaces/{workspace_id}/ai/reindex`
-Trigger a background re-embedding of all workspace data (projects, objectives, tasks, commits) into the vector store. Useful after bulk imports or migrations.
-
-**Response** `202` Accepted
-```json
-{ "message": "Reindex started", "entity_count": 142 }
-```
-
----
-
-## RAG
-
-### `POST /v1/workspaces/{workspace_id}/rag/query`
-Run the RAG retrieval pipeline for a query.  Returns ranked context chunks and conversation memory.
-
-**Body**
-```json
-{
-  "query": "Which objectives are at risk?",
-  "project_id": "uuid",
-  "top_k": 10
-}
-```
-
-**Response** `200`
-```json
-{
-  "chunks": [
-    {
-      "entity_type": "objective",
-      "entity_id": "uuid",
-      "content": "Launch MVP — status: at_risk",
-      "score": 0.87,
-      "source": "vector",
-      "metadata": {}
-    }
-  ],
-  "memory": [
-    { "role": "user", "content": "What tasks are overdue?" },
-    { "role": "assistant", "content": "There are 3 overdue tasks..." }
-  ],
-  "retriever_used": ["vector", "keyword"]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `query` | string | Natural language question |
-| `project_id` | uuid? | Optional project scope filter |
-| `top_k` | int | Max chunks to return (default: 10) |
-
----
-
-## MCP Tools
-
-### `GET /v1/workspaces/{workspace_id}/mcp/tools`
-List all available MCP tools for the workspace.
-
-**Response** `200`
-```json
-[
-  {
-    "name": "get_project_status",
-    "description": "Get status and task counts for a project",
-    "parameters": { "project_id": "uuid" }
-  },
-  {
-    "name": "list_projects",
-    "description": "List all workspace projects",
-    "parameters": {}
-  },
-  {
-    "name": "list_at_risk_objectives",
-    "description": "List objectives with at_risk or blocked timeline entries",
-    "parameters": {}
-  },
-  {
-    "name": "get_task_summary",
-    "description": "Get task counts grouped by status",
-    "parameters": {}
-  },
-  {
-    "name": "summarize_recent_commits",
-    "description": "Summarize commits from the last N days",
-    "parameters": { "project_id": "uuid?", "days": 7 }
-  }
-]
-```
-
-### `POST /v1/workspaces/{workspace_id}/mcp/call`
-Execute an MCP tool by name. `workspace_id` is injected automatically.
-
-**Body**
-```json
-{
-  "tool": "get_project_status",
-  "params": { "project_id": "uuid" }
-}
-```
-
-**Response** `200` — tool-specific JSON result.
-
----
-
-## Notifications
-
-### `GET /v1/notifications`
-List notifications for the current user (across all workspaces).
-
-**Query Parameters**
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `unread_only` | bool | false | Only unread |
-
-### `PUT /v1/notifications/{notification_id}/read`
-Mark a notification as read.
-
-### `DELETE /v1/notifications/{notification_id}`
-Delete a single notification permanently.
-
-**Response** `204` No Content
-
-### `PUT /v1/notifications/read-all`
-Mark all notifications as read.
-
----
-
-## Dashboard
-
-### `GET /v1/workspaces/{workspace_id}/dashboard/stats`
-Get aggregated dashboard statistics for a workspace.
-
-**Response** `200`
-```json
-{
-  "total_projects": 12,
-  "active_projects": 8,
-  "total_tasks": 156,
-  "completed_tasks": 89,
-  "total_commits": 342,
-  "recent_commits": [...],
-  "project_progress": [
-    { "project_id": "uuid", "title": "Alpha", "progress": 75 }
-  ]
-}
-```
-
----
-
-## Error Responses
-
-All errors follow a consistent format:
+## Project Routes (Core Service)
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects` | Yes | Member | Query params: `page`, `page_size`, optional `status`. Returns `{ items, total }`. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}` | Yes | Member | Returns one project. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects` | Yes | Write | Creates a project and automatically adds the creator's workspace membership as project `lead`. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}` | Yes | Write | Updates project metadata. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}` | Yes | Write | Deletes the project. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/members` | Yes | Member | Lists project members joined with workspace member info. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/members` | Yes | Write | Adds a project member. See contract note below. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/members/{member_id}` | Yes | Write | Removes a project member. Path parameter is the stored `project_members.member_id` value. |
+
+### Project Fields Used In The Current Product
+
+Important fields on create and update:
+
+- `title`
+- `description`
+- `project_code`
+- `objective_summary`
+- `priority`
+- `status`
+- `budget`
+- `planning_hours`
+- `start_date`
+- `deadline`
+- `end_date`
+- `lead_id`
+
+### Contract Note: Project Member Add Payload
+
+Current public request schema:
 
 ```json
 {
-  "detail": "Human-readable error message"
+  "user_id": "...",
+  "role": "contributor"
 }
 ```
 
-| Status | Meaning |
-|--------|---------|
-| `400` | Bad request / validation error |
-| `401` | Missing or invalid JWT |
-| `403` | Insufficient permissions (wrong workspace role) |
-| `404` | Resource not found |
-| `429` | Rate limit exceeded |
-| `500` | Internal server error |
+Current implementation detail:
+
+- the field is named `user_id`
+- the frontend project wizard actually uses `workspace_member.id`
+- the backend forwards that value into `project_members.member_id`
+
+Treat this field as a workspace member identifier, even though the public field name says `user_id`.
+
+## Task Routes (Core Service)
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/tasks` | Yes | Member | Query params: `project_id`, `status`, `page`, `page_size`. Returns `{ items, total }`. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}` | Yes | Member | Returns one task. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/tasks` | Yes | Write | Creates a task. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}` | Yes | Write | Updates a task. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}` | Yes | Write | Deletes a task. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports` | Yes | Member | Lists daily reports for a task. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports` | Yes | Member | Creates a daily report entry. |
+| `PATCH` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}/approve` | Yes | Write | Approves or rejects a report. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}` | Yes | Member | Deletes a report. |
+
+### Current Task Model Notes
+
+- active task statuses are `todo`, `in_progress`, `completed`
+- the live product uses `tasks.assignee_id` for single-owner assignment
+- the database still contains `task_assignees`, but the current frontend and task routes do not use the many-to-many path
+
+## OPPM Routes (Core Service)
+
+### Objectives
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/objectives` | Yes | Member |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/objectives` | Yes | Write |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/oppm/objectives/{objective_id}` | Yes | Write |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/oppm/objectives/{objective_id}` | Yes | Write |
+
+### Timeline
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/timeline` | Yes | Member | Returns weekly timeline entries. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/timeline` | Yes | Write | Upserts one timeline entry payload. |
+
+### Costs
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/costs` | Yes | Member |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/costs` | Yes | Write |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/oppm/costs/{cost_id}` | Yes | Write |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/oppm/costs/{cost_id}` | Yes | Write |
+
+### OPPM Data Notes
+
+- timeline rows are keyed by `week_start` date, not separate year and month fields
+- objective/task linkage is handled through `tasks.oppm_objective_id`
+- costs are project-scoped and tracked independently from tasks
+
+## Notification Routes (Core Service)
+
+User-scoped, not workspace-scoped.
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| `GET` | `/api/v1/notifications` | Yes | Query params: `limit`, `unread_only`. |
+| `GET` | `/api/v1/notifications/unread-count` | Yes | Returns `{ count }`. |
+| `PUT` | `/api/v1/notifications/{notification_id}/read` | Yes | Marks one notification read. |
+| `PUT` | `/api/v1/notifications/read-all` | Yes | Marks all notifications read. |
+| `DELETE` | `/api/v1/notifications/{notification_id}` | Yes | Deletes one notification. |
+
+## Dashboard Route (Core Service)
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/dashboard/stats` | Yes | Member |
+
+## AI Routes (AI Service)
+
+### AI Model Configuration
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/ai/models` | Yes | Member | Lists configured models. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/ai/models` | Yes | Admin | Adds a model. Allowed providers: `ollama`, `anthropic`, `openai`, `kimi`, `custom`. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/ai/models/{model_id}/toggle` | Yes | Admin | Toggles `is_active`. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/ai/models/{model_id}` | Yes | Admin | Deletes a model config. |
+
+### Chat And Planning
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `POST` | `/api/v1/workspaces/{workspace_id}/ai/chat` | Yes | Member | Workspace-level chat. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/ai/chat/capabilities` | Yes | Member | Returns indexed-document count and chat capability flags. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/ai/reindex` | Yes | Admin | Reindexes workspace data for RAG. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat` | Yes | Write | Project-scoped assistant chat. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan` | Yes | Write | Generates a suggested OPPM plan. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan/commit` | Yes | Write | Commits a previously suggested plan. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/weekly-summary` | Yes | Member | Generates a project weekly summary. |
+
+### RAG
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `POST` | `/api/v1/workspaces/{workspace_id}/rag/query` | Yes | Member |
+
+### Internal AI Route
+
+This route exists for service-to-service use and is not meant for frontend traffic:
+
+| Method | Path | Auth |
+|---|---|---|
+| `POST` | `/internal/analyze-commits` | `X-Internal-API-Key` |
+
+## Git Routes (Git Service)
+
+### GitHub Accounts
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/github-accounts` | Yes | Member |
+| `POST` | `/api/v1/workspaces/{workspace_id}/github-accounts` | Yes | Admin |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/github-accounts/{account_id}` | Yes | Admin |
+
+### Repo Configs
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/git/repos` | Yes | Member |
+| `POST` | `/api/v1/workspaces/{workspace_id}/git/repos` | Yes | Write |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/git/repos/{config_id}` | Yes | Write |
+
+### Commit Data
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/commits` | Yes | Member | Query params: `project_id`, `limit`. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/git/report/{project_id}` | Yes | Member | Query param: `days`. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/git/recent-analyses` | Yes | Member | Returns recent commit analyses across the workspace. |
+| `POST` | `/api/v1/git/webhook` | No bearer auth | HMAC required | GitHub push webhook endpoint. |
+
+### Webhook Security
+
+`POST /api/v1/git/webhook` requires:
+
+- `X-Hub-Signature-256`
+- a configured webhook secret on the matched repo config
+- GitHub event type `push`
+
+If validation passes, the route accepts quickly and continues processing in a background task.
+
+## MCP Routes (MCP Service)
+
+| Method | Path | Auth | Role |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/mcp/tools` | Yes | Member |
+| `POST` | `/api/v1/workspaces/{workspace_id}/mcp/call` | Yes | Member |
+
+## Endpoint Ownership Summary
+
+- Core: auth, workspaces, members, invites, projects, tasks, OPPM, notifications, dashboard
+- AI: model config, chat, planning, reindex, RAG, internal analysis
+- Git: GitHub accounts, repo configs, commits, reports, webhook
+- MCP: workspace tool discovery and execution
+
+## Contract Notes Worth Remembering
+
+These are the main places where the current API contract deserves extra care:
+
+- workspace list/get responses use `current_user_role` on the backend, while some frontend types still describe `role`
+- project member add uses a field named `user_id`, but the working value is a workspace member id
+- task APIs currently use single assignee fields even though a `task_assignees` table still exists in the schema
+- list endpoints are not yet uniformly paginated
