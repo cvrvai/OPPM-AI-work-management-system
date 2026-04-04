@@ -15,6 +15,7 @@ from repositories.workspace_repo import (
     WorkspaceRepository,
     WorkspaceMemberRepository,
     WorkspaceInviteRepository,
+    MemberSkillRepository,
 )
 from repositories.notification_repo import AuditRepository
 from infrastructure.email import send_invite_email
@@ -313,3 +314,60 @@ async def resend_invite(session: AsyncSession, workspace_id: str, invite_id: str
 
     await audit_repo.log(workspace_id, actor_id, "resend_invite", "workspace_invite", invite_id)
     return updated
+
+
+# ── Member Skills ──
+
+async def list_member_skills(session: AsyncSession, workspace_id: str, workspace_member_id: str) -> list[dict]:
+    """Return all skills for a workspace member."""
+    skill_repo = MemberSkillRepository(session)
+    member_repo = WorkspaceMemberRepository(session)
+
+    member = await member_repo.find_by_id(workspace_member_id)
+    if not member or str(member.workspace_id) != workspace_id:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return await skill_repo.find_by_member(workspace_member_id)
+
+
+async def add_member_skill(session: AsyncSession, workspace_id: str, workspace_member_id: str, skill_name: str, skill_level: str, actor_id: str, is_admin: bool) -> dict:
+    """Add a skill to a workspace member. Members can only add to their own; admins can add to any."""
+    skill_repo = MemberSkillRepository(session)
+    member_repo = WorkspaceMemberRepository(session)
+
+    member = await member_repo.find_by_id(workspace_member_id)
+    if not member or str(member.workspace_id) != workspace_id:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    actor_member = await member_repo.find_by_user_and_workspace(actor_id, workspace_id)
+    if not actor_member:
+        raise HTTPException(status_code=403, detail="Not a workspace member")
+    if not is_admin and str(actor_member["id"]) != workspace_member_id:
+        raise HTTPException(status_code=403, detail="Cannot add skills to another member")
+
+    skill = await skill_repo.create({
+        "workspace_member_id": workspace_member_id,
+        "skill_name": skill_name,
+        "skill_level": skill_level,
+    })
+    return dict(skill)
+
+
+async def delete_member_skill(session: AsyncSession, workspace_id: str, workspace_member_id: str, skill_id: str, actor_id: str, is_admin: bool) -> bool:
+    """Delete a skill. Members can only delete their own; admins can delete any."""
+    skill_repo = MemberSkillRepository(session)
+    member_repo = WorkspaceMemberRepository(session)
+
+    member = await member_repo.find_by_id(workspace_member_id)
+    if not member or str(member.workspace_id) != workspace_id:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    actor_member = await member_repo.find_by_user_and_workspace(actor_id, workspace_id)
+    if not actor_member:
+        raise HTTPException(status_code=403, detail="Not a workspace member")
+    if not is_admin and str(actor_member["id"]) != workspace_member_id:
+        raise HTTPException(status_code=403, detail="Cannot delete skills of another member")
+
+    skill = await skill_repo.find_by_id(skill_id)
+    if not skill or str(skill.workspace_member_id) != workspace_member_id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return await skill_repo.delete(skill_id)

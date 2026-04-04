@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import WorkspaceContext, get_workspace_context, require_write
 from shared.database import get_session
-from schemas.task import TaskCreate, TaskUpdate
+from schemas.task import TaskCreate, TaskUpdate, TaskReportCreate, TaskReportApprove
 from shared.schemas.common import SuccessResponse
 from services.task_service import (
     list_tasks,
@@ -13,6 +13,10 @@ from services.task_service import (
     create_task,
     update_task,
     delete_task,
+    list_task_reports,
+    create_task_report,
+    approve_task_report,
+    delete_task_report,
 )
 
 router = APIRouter()
@@ -66,4 +70,57 @@ async def delete_task_route(
     session: AsyncSession = Depends(get_session),
 ) -> SuccessResponse:
     await delete_task(session, task_id=task_id, workspace_id=ws.workspace_id, user_id=ws.user.id)
+    return SuccessResponse()
+
+
+# --- Task Daily Reports ---
+
+@router.get("/workspaces/{workspace_id}/tasks/{task_id}/reports")
+async def list_task_reports_route(
+    task_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await list_task_reports(session, task_id=task_id, workspace_id=ws.workspace_id)
+
+
+@router.post("/workspaces/{workspace_id}/tasks/{task_id}/reports", status_code=201)
+async def create_task_report_route(
+    task_id: str,
+    data: TaskReportCreate,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await create_task_report(
+        session, task_id=task_id, data=data.model_dump(),
+        workspace_id=ws.workspace_id, user_id=ws.user.id,
+    )
+
+
+@router.patch("/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}/approve")
+async def approve_task_report_route(
+    task_id: str,
+    report_id: str,
+    data: TaskReportApprove,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    return await approve_task_report(
+        session, task_id=task_id, report_id=report_id,
+        is_approved=data.is_approved,
+        workspace_id=ws.workspace_id, user_id=ws.user.id,
+    )
+
+
+@router.delete("/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}")
+async def delete_task_report_route(
+    task_id: str,
+    report_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    await delete_task_report(
+        session, task_id=task_id, report_id=report_id,
+        workspace_id=ws.workspace_id, user_id=ws.user.id,
+    )
     return SuccessResponse()

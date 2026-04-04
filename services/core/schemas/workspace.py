@@ -1,7 +1,7 @@
 """Workspace schemas."""
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Literal
 from shared.schemas.common import WorkspaceRole
 
 
@@ -58,6 +58,11 @@ class InvitePreviewResponse(BaseModel):
     inviter_name: str
     role: str
     expires_at: str
+
+
+class MemberSkillCreate(BaseModel):
+    skill_name: str = Field(min_length=1, max_length=100)
+    skill_level: Literal['beginner', 'intermediate', 'expert']
     accepted_at: Optional[str] = None
     member_count: int
     is_expired: bool

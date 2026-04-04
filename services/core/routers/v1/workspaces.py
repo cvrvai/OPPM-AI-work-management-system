@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import CurrentUser, get_current_user, WorkspaceContext, get_workspace_context, require_admin
 from shared.database import get_session
-from schemas.workspace import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept, DisplayNameUpdate
+from schemas.workspace import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept, DisplayNameUpdate, MemberSkillCreate
 from shared.schemas.common import SuccessResponse
 from services.workspace_service import (
     create_workspace,
@@ -23,6 +23,9 @@ from services.workspace_service import (
     lookup_user_by_email,
     get_invite_preview,
     resend_invite,
+    list_member_skills,
+    add_member_skill,
+    delete_member_skill,
 )
 
 router = APIRouter()
@@ -125,3 +128,23 @@ async def accept_invite_route(data: InviteAccept, user: CurrentUser = Depends(ge
 async def invite_preview_route(token: str, session: AsyncSession = Depends(get_session)):
     """Public — no auth required. Returns workspace preview for the invite."""
     return await get_invite_preview(session, token)
+
+
+# ── Member Skills ──
+
+@router.get("/workspaces/{workspace_id}/members/{member_id}/skills")
+async def list_skills_route(member_id: str, ws: WorkspaceContext = Depends(get_workspace_context), session: AsyncSession = Depends(get_session)):
+    return await list_member_skills(session, ws.workspace_id, member_id)
+
+
+@router.post("/workspaces/{workspace_id}/members/{member_id}/skills", status_code=201)
+async def add_skill_route(member_id: str, data: MemberSkillCreate, ws: WorkspaceContext = Depends(get_workspace_context), session: AsyncSession = Depends(get_session)):
+    is_admin = ws.role in ("owner", "admin")
+    return await add_member_skill(session, ws.workspace_id, member_id, data.skill_name, data.skill_level, ws.user.id, is_admin)
+
+
+@router.delete("/workspaces/{workspace_id}/members/{member_id}/skills/{skill_id}")
+async def delete_skill_route(member_id: str, skill_id: str, ws: WorkspaceContext = Depends(get_workspace_context), session: AsyncSession = Depends(get_session)) -> SuccessResponse:
+    is_admin = ws.role in ("owner", "admin")
+    await delete_member_skill(session, ws.workspace_id, member_id, skill_id, ws.user.id, is_admin)
+    return SuccessResponse()

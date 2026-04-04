@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.base import BaseRepository
-from shared.models.task import Task
+from shared.models.task import Task, TaskReport
 from shared.models.project import Project
 
 
@@ -62,3 +62,21 @@ class TaskRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return [{"progress": r.progress, "project_contribution": r.project_contribution} for r in result.all()]
+
+
+class TaskReportRepository(BaseRepository):
+    model = TaskReport
+
+    async def find_by_task(self, task_id: str) -> list[TaskReport]:
+        stmt = (
+            select(TaskReport)
+            .where(TaskReport.task_id == task_id)
+            .order_by(TaskReport.report_date.desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_total_hours(self, task_id: str) -> float:
+        stmt = select(TaskReport.hours).where(TaskReport.task_id == task_id)
+        result = await self.session.execute(stmt)
+        return sum(r.hours for r in result.all())

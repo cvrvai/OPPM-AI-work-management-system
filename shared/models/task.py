@@ -22,6 +22,7 @@ class Task(Base):
     priority: Mapped[str] = mapped_column(String(10), default="medium", nullable=False)
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     project_contribution: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    start_date: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -47,3 +48,18 @@ class TaskAssignee(Base):
     __table_args__ = (
         UniqueConstraint("task_id", "member_id", name="uq_task_assignees"),
     )
+
+
+class TaskReport(Base):
+    __tablename__ = "task_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    reporter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    report_date: Mapped[date] = mapped_column(Date, nullable=False)
+    hours: Mapped[float] = mapped_column(nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    is_approved: Mapped[bool] = mapped_column(default=False, nullable=False)
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def _parse_dates(data: dict) -> dict:
     """Convert ISO date strings to datetime.date for asyncpg compatibility."""
-    for field in ("start_date", "deadline"):
+    for field in ("start_date", "deadline", "end_date"):
         val = data.get(field)
         if isinstance(val, str) and val:
             try:

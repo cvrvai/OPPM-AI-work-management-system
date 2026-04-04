@@ -4,7 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.base import BaseRepository
-from shared.models.workspace import Workspace, WorkspaceMember, WorkspaceInvite
+from shared.models.workspace import Workspace, WorkspaceMember, WorkspaceInvite, MemberSkill
+from shared.models.user import User
 
 
 class WorkspaceRepository(BaseRepository):
@@ -46,8 +47,23 @@ class WorkspaceMemberRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def find_members(self, workspace_id: str) -> list[WorkspaceMember]:
-        return await self.find_all(filters={"workspace_id": workspace_id}, order_by="joined_at", desc=False)
+    async def find_members(self, workspace_id: str) -> list[dict]:
+        stmt = (
+            select(WorkspaceMember, User.email, User.full_name)
+            .join(User, User.id == WorkspaceMember.user_id)
+            .where(WorkspaceMember.workspace_id == workspace_id)
+            .order_by(WorkspaceMember.joined_at.asc())
+        )
+        result = await self.session.execute(stmt)
+        rows = []
+        for member, email, full_name in result.all():
+            d = dict(member)
+            # Populate display_name from user's full_name if not set in workspace
+            if not d.get("display_name"):
+                d["display_name"] = full_name
+            d["email"] = email
+            rows.append(d)
+        return rows
 
 
 class WorkspaceInviteRepository(BaseRepository):
@@ -69,3 +85,16 @@ class WorkspaceInviteRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+
+class MemberSkillRepository(BaseRepository):
+    model = MemberSkill
+
+    async def find_by_member(self, workspace_member_id: str) -> list[dict]:
+        stmt = (
+            select(MemberSkill)
+            .where(MemberSkill.workspace_member_id == workspace_member_id)
+            .order_by(MemberSkill.created_at.asc())
+        )
+        result = await self.session.execute(stmt)
+        return [dict(s) for s in result.scalars().all()]

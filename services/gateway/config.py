@@ -11,10 +11,10 @@ from pydantic_settings import BaseSettings
 
 class GatewaySettings(BaseSettings):
     # Backend service instance URLs (comma-separated for load balancing)
-    core_urls: str = "http://localhost:8000"
-    ai_urls:   str = "http://localhost:8001"
-    git_urls:  str = "http://localhost:8002"
-    mcp_urls:  str = "http://localhost:8003"
+    core_urls: str = "http://127.0.0.1:8000"
+    ai_urls:   str = "http://127.0.0.1:8001"
+    git_urls:  str = "http://127.0.0.1:8002"
+    mcp_urls:  str = "http://127.0.0.1:8003"
 
     # Gateway port
     port: int = 8080

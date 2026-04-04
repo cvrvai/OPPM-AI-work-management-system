@@ -22,6 +22,16 @@ export interface WorkspaceMember {
   display_name?: string
 }
 
+export type SkillLevel = 'beginner' | 'intermediate' | 'expert'
+
+export interface MemberSkill {
+  id: string
+  workspace_member_id: string
+  skill_name: string
+  skill_level: SkillLevel
+  created_at: string
+}
+
 export interface WorkspaceInvite {
   id: string
   workspace_id: string
@@ -42,11 +52,16 @@ export interface Project {
   workspace_id: string
   title: string
   description: string
+  project_code: string | null
+  objective_summary: string | null
   status: ProjectStatus
   priority: Priority
   progress: number
+  budget: number
+  planning_hours: number
   start_date: string | null
   deadline: string | null
+  end_date: string | null
   metadata?: Record<string, unknown>
   lead_id: string | null
   lead?: WorkspaceMember
@@ -76,6 +91,7 @@ export interface Task {
   priority: Priority
   progress: number
   project_contribution: number
+  start_date: string | null
   due_date: string | null
   assignee_id: string | null
   created_by: string | null
@@ -83,6 +99,19 @@ export interface Task {
   created_at: string
   updated_at: string
   oppm_objective_id?: string | null
+}
+
+export interface TaskReport {
+  id: string
+  task_id: string
+  reporter_id: string
+  report_date: string
+  hours: number
+  description: string
+  is_approved: boolean
+  approved_by: string | null
+  approved_at: string | null
+  created_at: string
 }
 
 // ── OPPM ──

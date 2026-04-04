@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/projects', icon: FolderKanban, label: 'Projects' },
+  { to: '/team', icon: Users, label: 'Team' },
   { to: '/commits', icon: GitCommitHorizontal, label: 'Commits' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]

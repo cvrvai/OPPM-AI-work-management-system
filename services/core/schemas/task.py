@@ -11,6 +11,7 @@ class TaskCreate(BaseModel):
     project_id: str
     priority: Priority = Priority.medium
     project_contribution: int = Field(0, ge=0, le=100)
+    start_date: Optional[str] = None
     due_date: Optional[str] = None
     oppm_objective_id: Optional[str] = None
     assignee_id: Optional[str] = None
@@ -22,6 +23,17 @@ class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None
     priority: Optional[Priority] = None
     progress: Optional[int] = Field(None, ge=0, le=100)
+    start_date: Optional[str] = None
     due_date: Optional[str] = None
     oppm_objective_id: Optional[str] = None
     assignee_id: Optional[str] = None
+
+
+class TaskReportCreate(BaseModel):
+    report_date: str  # ISO date string: YYYY-MM-DD
+    hours: float = Field(gt=0, le=24)
+    description: str = Field(default="", max_length=2000)
+
+
+class TaskReportApprove(BaseModel):
+    is_approved: bool

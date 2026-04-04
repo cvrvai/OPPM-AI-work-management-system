@@ -8,11 +8,10 @@ import logging
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repositories.task_repo import TaskRepository
+from repositories.task_repo import TaskRepository, TaskReportRepository
 from repositories.project_repo import ProjectRepository
 from repositories.notification_repo import AuditRepository
 from services.document_indexer import index_task, remove_entity
-
 logger = logging.getLogger(__name__)
 
 
@@ -95,4 +94,68 @@ async def delete_task(session: AsyncSession, task_id: str, workspace_id: str, us
     asyncio.create_task(remove_entity("task", task_id))
     await task_repo.delete(task_id)
     await _recalculate_project_progress(session, project_id)
+    return True
+
+
+# --- Task Daily Reports ---
+
+async def list_task_reports(session: AsyncSession, task_id: str, workspace_id: str) -> list:
+    await get_task(session, task_id, workspace_id)  # validates ownership
+    report_repo = TaskReportRepository(session)
+    return await report_repo.find_by_task(task_id)
+
+
+async def create_task_report(
+    session: AsyncSession,
+    task_id: str,
+    data: dict,
+    workspace_id: str,
+    user_id: str,
+) -> dict:
+    await get_task(session, task_id, workspace_id)
+    report_repo = TaskReportRepository(session)
+    data["task_id"] = task_id
+    data["reporter_id"] = user_id
+    data["is_approved"] = False
+    return await report_repo.create(data)
+
+
+async def approve_task_report(
+    session: AsyncSession,
+    task_id: str,
+    report_id: str,
+    is_approved: bool,
+    workspace_id: str,
+    user_id: str,
+) -> dict:
+    from datetime import datetime, timezone
+    await get_task(session, task_id, workspace_id)
+    report_repo = TaskReportRepository(session)
+    report = await report_repo.find_by_id(report_id)
+    if not report or str(report.task_id) != task_id:
+        raise HTTPException(status_code=404, detail="Report not found")
+    update_data: dict = {"is_approved": is_approved}
+    if is_approved:
+        update_data["approved_by"] = user_id
+        update_data["approved_at"] = datetime.now(timezone.utc)
+    else:
+        update_data["approved_by"] = None
+        update_data["approved_at"] = None
+    result = await report_repo.update(report_id, update_data)
+    return result
+
+
+async def delete_task_report(
+    session: AsyncSession,
+    task_id: str,
+    report_id: str,
+    workspace_id: str,
+    user_id: str,
+) -> bool:
+    await get_task(session, task_id, workspace_id)
+    report_repo = TaskReportRepository(session)
+    report = await report_repo.find_by_id(report_id)
+    if not report or str(report.task_id) != task_id:
+        raise HTTPException(status_code=404, detail="Report not found")
+    await report_repo.delete(report_id)
     return True
