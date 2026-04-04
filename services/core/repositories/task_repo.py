@@ -1,10 +1,10 @@
 """Task repository."""
 
-from sqlalchemy import select
+from sqlalchemy import select, delete, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.base import BaseRepository
-from shared.models.task import Task, TaskReport
+from shared.models.task import Task, TaskReport, TaskDependency
 from shared.models.project import Project
 
 
@@ -62,6 +62,35 @@ class TaskRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return [{"progress": r.progress, "project_contribution": r.project_contribution} for r in result.all()]
+
+    async def get_dependencies(self, task_id: str) -> list[str]:
+        """Return list of task_ids that `task_id` depends on."""
+        stmt = select(TaskDependency.depends_on_task_id).where(TaskDependency.task_id == task_id)
+        result = await self.session.execute(stmt)
+        return [str(row[0]) for row in result.all()]
+
+    async def get_dependencies_for_tasks(self, task_ids: list[str]) -> dict[str, list[str]]:
+        """Return {task_id: [depends_on_task_id, ...]} for multiple tasks at once."""
+        if not task_ids:
+            return {}
+        stmt = select(TaskDependency.task_id, TaskDependency.depends_on_task_id).where(
+            TaskDependency.task_id.in_(task_ids)
+        )
+        result = await self.session.execute(stmt)
+        out: dict[str, list[str]] = {tid: [] for tid in task_ids}
+        for task_id, dep_id in result.all():
+            out[str(task_id)].append(str(dep_id))
+        return out
+
+    async def set_dependencies(self, task_id: str, depends_on: list[str]) -> None:
+        """Replace all dependencies for a task."""
+        await self.session.execute(
+            delete(TaskDependency).where(TaskDependency.task_id == task_id)
+        )
+        if depends_on:
+            rows = [{"task_id": task_id, "depends_on_task_id": dep_id} for dep_id in depends_on]
+            await self.session.execute(insert(TaskDependency), rows)
+        await self.session.flush()
 
 
 class TaskReportRepository(BaseRepository):

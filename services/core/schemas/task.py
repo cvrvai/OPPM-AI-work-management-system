@@ -1,7 +1,7 @@
 """Task schemas."""
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from shared.schemas.common import Priority, TaskStatus
 
 
@@ -15,6 +15,7 @@ class TaskCreate(BaseModel):
     due_date: Optional[str] = None
     oppm_objective_id: Optional[str] = None
     assignee_id: Optional[str] = None
+    depends_on: Optional[List[str]] = Field(default_factory=list)
 
 
 class TaskUpdate(BaseModel):
@@ -27,6 +28,7 @@ class TaskUpdate(BaseModel):
     due_date: Optional[str] = None
     oppm_objective_id: Optional[str] = None
     assignee_id: Optional[str] = None
+    depends_on: Optional[List[str]] = None
 
 
 class TaskReportCreate(BaseModel):

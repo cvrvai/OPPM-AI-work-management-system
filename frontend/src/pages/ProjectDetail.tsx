@@ -7,6 +7,7 @@ import { useChatContext } from '@/hooks/useChatContext'
 import type { Project, Task, TaskReport, Priority, TaskStatus, OPPMObjective, WorkspaceMember } from '@/types'
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
 import { Skeleton } from '@/components/Skeleton'
+import { GanttChart } from '@/components/GanttChart'
 import {
   ArrowLeft,
   Target,
@@ -28,6 +29,7 @@ import {
   XCircle,
   DollarSign,
   Hash,
+  GitBranch,
 } from 'lucide-react'
 
 const PRIORITY_COLORS: Record<Priority, string> = {
@@ -84,7 +86,7 @@ export function ProjectDetail() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
-  const [viewMode, setViewMode] = useState<'board' | 'list'>('board')
+  const [viewMode, setViewMode] = useState<'board' | 'list' | 'timeline'>('board')
 
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id, ws?.id],
@@ -329,6 +331,15 @@ export function ProjectDetail() {
             >
               <List className="h-3.5 w-3.5" /> List
             </button>
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+                viewMode === 'timeline' ? 'bg-primary text-white shadow-sm' : 'text-text-secondary hover:text-text'
+              )}
+            >
+              <GitBranch className="h-3.5 w-3.5" /> Timeline
+            </button>
           </div>
           <button
             onClick={() => setShowCreate(true)}
@@ -345,6 +356,7 @@ export function ProjectDetail() {
           title="Create Task"
           objectives={objectives ?? []}
           members={members ?? []}
+          allTasks={taskList}
           onSubmit={(data) => createTask.mutate(data)}
           onCancel={() => setShowCreate(false)}
           isPending={createTask.isPending}
@@ -357,6 +369,7 @@ export function ProjectDetail() {
           initial={editingTask}
           objectives={objectives ?? []}
           members={members ?? []}
+          allTasks={taskList.filter((t) => t.id !== editingTask.id)}
           onSubmit={(data) => updateTask.mutate({ taskId: editingTask.id, data })}
           onCancel={() => setEditingTask(null)}
           isPending={updateTask.isPending}
@@ -410,7 +423,7 @@ export function ProjectDetail() {
             )
           })}
         </div>
-      ) : (
+      ) : viewMode === 'list' ? (
         <TableView
           tasks={taskList}
           objectiveMap={objectiveMap}
@@ -418,6 +431,11 @@ export function ProjectDetail() {
           onEdit={(task) => setEditingTask(task)}
           onStatusChange={handleStatusChange}
           onDelete={handleDelete}
+        />
+      ) : (
+        <GanttChart
+          tasks={taskList}
+          onTaskClick={(task) => setEditingTask(task)}
         />
       )}
     </div>
@@ -672,6 +690,7 @@ function TaskForm({
   initial,
   objectives,
   members,
+  allTasks = [],
   onSubmit,
   onCancel,
   isPending,
@@ -681,6 +700,7 @@ function TaskForm({
   initial?: Task
   objectives: OPPMObjective[]
   members: WorkspaceMember[]
+  allTasks?: Task[]
   onSubmit: (data: Record<string, unknown>) => void
   onCancel: () => void
   isPending: boolean
@@ -723,11 +743,18 @@ function TaskForm({
     oppm_objective_id: initial?.oppm_objective_id || '',
     assignee_id: initial?.assignee_id || '',
   })
+  const [dependsOn, setDependsOn] = useState<string[]>(initial?.depends_on ?? [])
+
+  const toggleDependency = (taskId: string) => {
+    setDependsOn((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    )
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim()) return
-    const data: Record<string, unknown> = { ...form }
+    const data: Record<string, unknown> = { ...form, depends_on: dependsOn }
     if (!data.start_date) delete data.start_date
     if (!data.due_date) delete data.due_date
     if (!data.oppm_objective_id) delete data.oppm_objective_id
@@ -1065,6 +1092,48 @@ function TaskForm({
                   )}
                 </div>
               </section>
+
+              {allTasks.length > 0 && (
+                <section className={sectionClass}>
+                  <div className="mb-3 space-y-1">
+                    <p className={sectionEyebrowClass}>Dependencies</p>
+                    <h4 className="text-sm font-semibold text-text">This task depends on</h4>
+                    <p className="text-xs text-text-secondary">Select tasks that must be completed before this one can start.</p>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto space-y-1.5">
+                    {allTasks.map((t) => (
+                      <label
+                        key={t.id}
+                        className={cn(
+                          'flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition-colors',
+                          dependsOn.includes(t.id)
+                            ? 'border-primary/40 bg-primary/5 text-primary'
+                            : 'border-border bg-white text-text hover:bg-surface-alt'
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={dependsOn.includes(t.id)}
+                          onChange={() => toggleDependency(t.id)}
+                          className="h-3.5 w-3.5 accent-primary"
+                        />
+                        <span className="flex-1 truncate font-medium">{t.title}</span>
+                        <span className={cn(
+                          'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                          STATUS_BADGE[t.status]
+                        )}>
+                          {STATUS_LABEL[t.status]}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {dependsOn.length > 0 && (
+                    <p className="mt-2 text-xs text-primary font-medium">
+                      {dependsOn.length} dependenc{dependsOn.length === 1 ? 'y' : 'ies'} set
+                    </p>
+                  )}
+                </section>
+              )}
 
               <section className={cn(sectionClass, isOppmAligned ? 'border-emerald-200 bg-emerald-50/80' : 'border-amber-200 bg-amber-50/80')}>
                 <div className="flex items-start gap-3">

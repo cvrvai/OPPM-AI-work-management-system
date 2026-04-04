@@ -110,6 +110,7 @@ export interface Task {
   created_at: string
   updated_at: string
   oppm_objective_id?: string | null
+  depends_on: string[]
 }
 
 export interface TaskReport {

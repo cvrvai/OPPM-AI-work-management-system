@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   description TEXT DEFAULT '',
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   oppm_objective_id UUID REFERENCES oppm_objectives(id) ON DELETE SET NULL,
-  assignee_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'todo'
     CHECK (status IN ('todo', 'in_progress', 'completed')),
   priority VARCHAR(10) NOT NULL DEFAULT 'medium'

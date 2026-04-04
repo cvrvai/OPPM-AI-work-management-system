@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import date, datetime
-from sqlalchemy import String, Text, Integer, Date, DateTime, ForeignKey, UniqueConstraint, CheckConstraint, func
+from sqlalchemy import String, Text, Integer, Date, DateTime, ForeignKey, UniqueConstraint, CheckConstraint, func, PrimaryKeyConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,7 +17,7 @@ class Task(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     oppm_objective_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_objectives.id", ondelete="SET NULL"), index=True)
-    assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspace_members.id", ondelete="SET NULL"), index=True)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="todo", nullable=False)
     priority: Mapped[str] = mapped_column(String(10), default="medium", nullable=False)
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -63,3 +63,14 @@ class TaskReport(Base):
     approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class TaskDependency(Base):
+    __tablename__ = "task_dependencies"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    depends_on_task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("task_id", "depends_on_task_id", name="pk_task_dependencies"),
+    )
