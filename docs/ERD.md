@@ -1,6 +1,6 @@
 # ERD
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Purpose
 
@@ -45,6 +45,7 @@ erDiagram
     projects ||--o{ project_costs : budgets
 
     tasks ||--o{ task_reports : reports
+    tasks ||--o{ task_dependencies : depends_on
     tasks ||--o{ task_assignees : legacy_multi_assign
     workspace_members ||--o{ task_assignees : legacy_multi_assign
 
@@ -99,9 +100,10 @@ Role and plan constraints:
 |---|---|---|
 | `projects` | Top-level project record | `workspace_id`, `title`, `status`, `priority`, `progress`, `project_code`, `objective_summary`, `budget`, `planning_hours`, `lead_id` |
 | `project_members` | Members assigned to a project | `project_id`, `member_id`, `role`, `joined_at` |
-| `tasks` | Actionable work inside a project | `project_id`, `oppm_objective_id`, `assignee_id`, `status`, `priority`, `progress`, `project_contribution`, `due_date` |
-| `task_reports` | Daily or periodic work log entries | `task_id`, `reporter_id`, `report_date`, `hours`, `is_approved`, `approved_by` |
-| `task_assignees` | Historical multi-assignee table | `task_id`, `member_id` |
+| `tasks` | Actionable work inside a project | `project_id`, `oppm_objective_id`, `assignee_id`, `status`, `priority`, `progress`, `project_contribution`, `start_date`, `due_date` |
+| `task_reports` | Daily or periodic work log entries with approval workflow | `task_id`, `reporter_id`, `report_date`, `hours`, `is_approved`, `approved_by`, `approved_at` |
+| `task_assignees` | Historical multi-assignee table (not used by active UI) | `task_id`, `member_id` |
+| `task_dependencies` | Task dependency graph | `task_id`, `depends_on_task_id` (composite PK) |
 
 Project constraints:
 
@@ -120,7 +122,7 @@ Important live-model note:
 
 | Table | Purpose | Key Fields |
 |---|---|---|
-| `oppm_objectives` | One Page Project Manager objectives | `project_id`, `title`, `owner_id`, `sort_order` |
+| `oppm_objectives` | One Page Project Manager objectives | `project_id`, `title`, `owner_id`, `priority` (A/B/C), `sort_order` |
 | `oppm_timeline_entries` | Weekly timeline cells for objectives | `project_id`, `objective_id`, `week_start`, `status`, `ai_score`, `notes` |
 | `project_costs` | Project budget tracking lines | `project_id`, `category`, `planned_amount`, `actual_amount`, `period` |
 
@@ -231,4 +233,8 @@ When adding new tables:
 - prefer `workspace_members.id` over `users.id` when the feature is role-sensitive inside a workspace
 - add explicit check constraints for enum-like strings
 - keep migrations in the core service migration chain
-- update [API-REFERENCE.md](API-REFERENCE.md) and [TESTING-GUIDE.md](TESTING-GUIDE.md) with every schema-affecting change
+- update [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md), [API-REFERENCE.md](API-REFERENCE.md), and [TESTING-GUIDE.md](TESTING-GUIDE.md) with every schema-affecting change
+
+## Detailed Column Reference
+
+For complete column-level documentation including types, constraints, indexes, and security notes, see [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md).

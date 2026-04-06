@@ -3,8 +3,9 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useAuthStore } from '@/stores/authStore'
 import { useChatContext } from '@/hooks/useChatContext'
-import type { Project, Task, TaskReport, Priority, TaskStatus, OPPMObjective, WorkspaceMember } from '@/types'
+import type { Project, Task, TaskReport, Priority, TaskStatus, OPPMObjective, OPPMSubObjective, WorkspaceMember } from '@/types'
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
 import { Skeleton } from '@/components/Skeleton'
 import { GanttChart } from '@/components/GanttChart'
@@ -81,6 +82,7 @@ const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
 export function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const currentUserId = useAuthStore((s) => s.user?.id)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const queryClient = useQueryClient()
 
@@ -106,6 +108,12 @@ export function ProjectDetail() {
     enabled: !!ws,
   })
 
+  const { data: subObjectives } = useQuery({
+    queryKey: ['oppm-sub-objectives', id, ws?.id],
+    queryFn: () => api.get<OPPMSubObjective[]>(`${wsPath}/projects/${id}/oppm/sub-objectives`),
+    enabled: !!ws,
+  })
+
   const { data: members } = useQuery({
     queryKey: ['workspace-members', ws?.id],
     queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
@@ -113,11 +121,21 @@ export function ProjectDetail() {
   })
 
   const createTask = useMutation({
-    mutationFn: (data: Record<string, unknown>) =>
-      api.post(`${wsPath}/tasks`, { ...data, project_id: id }),
+    mutationFn: async (data: Record<string, unknown>) => {
+      const subObjIds = data.sub_objective_ids as string[] | undefined
+      const { sub_objective_ids: _removed, ...rest } = data
+      void _removed
+      const payload = { ...rest, project_id: id }
+      const task = await api.post<{ id: string }>(`${wsPath}/tasks`, payload)
+      if (subObjIds && subObjIds.length > 0 && task?.id) {
+        await api.put(`${wsPath}/projects/${id}/oppm/tasks/${task.id}/sub-objectives`, { sub_objective_ids: subObjIds })
+      }
+      return task
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', id] })
       queryClient.invalidateQueries({ queryKey: ['project', id] })
+      queryClient.invalidateQueries({ queryKey: ['oppm-objectives', id] })
       setShowCreate(false)
     },
   })
@@ -181,6 +199,8 @@ export function ProjectDetail() {
 
   const objectiveMap = new Map((objectives ?? []).map((o) => [o.id, o.title]))
   const memberMap = new Map((members ?? []).map((m) => [m.user_id, m.display_name || m.email || m.user_id.slice(0, 8)]))
+  const currentMember = (members ?? []).find((m) => m.user_id === currentUserId)
+  const isLead = !p.lead_id || (!!currentMember && currentMember.id === p.lead_id)
 
   const handleStatusChange = (task: Task) =>
     updateTask.mutate({ taskId: task.id, data: { status: NEXT_STATUS[task.status] } })
@@ -341,12 +361,14 @@ export function ProjectDetail() {
               <GitBranch className="h-3.5 w-3.5" /> Timeline
             </button>
           </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-dark transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add Task
-          </button>
+          {isLead && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-dark transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add Task
+            </button>
+          )}
         </div>
       </div>
 
@@ -355,12 +377,15 @@ export function ProjectDetail() {
         <TaskForm
           title="Create Task"
           objectives={objectives ?? []}
+          subObjectives={subObjectives ?? []}
           members={members ?? []}
           allTasks={taskList}
           onSubmit={(data) => createTask.mutate(data)}
           onCancel={() => setShowCreate(false)}
           isPending={createTask.isPending}
           wsPath={wsPath}
+          isLead={isLead}
+          currentUserId={currentUserId ?? ''}
         />
       )}
       {editingTask && (
@@ -368,12 +393,15 @@ export function ProjectDetail() {
           title="Edit Task"
           initial={editingTask}
           objectives={objectives ?? []}
+          subObjectives={subObjectives ?? []}
           members={members ?? []}
           allTasks={taskList.filter((t) => t.id !== editingTask.id)}
           onSubmit={(data) => updateTask.mutate({ taskId: editingTask.id, data })}
           onCancel={() => setEditingTask(null)}
           isPending={updateTask.isPending}
           wsPath={wsPath}
+          isLead={isLead}
+          currentUserId={currentUserId ?? ''}
         />
       )}
 
@@ -689,22 +717,28 @@ function TaskForm({
   title,
   initial,
   objectives,
+  subObjectives = [],
   members,
   allTasks = [],
   onSubmit,
   onCancel,
   isPending,
   wsPath,
+  isLead = false,
+  currentUserId = '',
 }: {
   title: string
   initial?: Task
   objectives: OPPMObjective[]
+  subObjectives?: OPPMSubObjective[]
   members: WorkspaceMember[]
   allTasks?: Task[]
   onSubmit: (data: Record<string, unknown>) => void
   onCancel: () => void
   isPending: boolean
   wsPath: string
+  isLead?: boolean
+  currentUserId?: string
 }) {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<'details' | 'reports'>('details')
@@ -724,8 +758,13 @@ function TaskForm({
 
   const approveReport = useMutation({
     mutationFn: ({ reportId, is_approved }: { reportId: string; is_approved: boolean }) =>
-      api.patch(`${wsPath}/tasks/${initial!.id}/reports/${reportId}/approve`, { is_approved }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['task-reports', initial?.id] }),
+      api.patch<TaskReport>(`${wsPath}/tasks/${initial!.id}/reports/${reportId}/approve`, { is_approved }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<TaskReport[]>(
+        ['task-reports', initial?.id],
+        (old) => old ? old.map((r) => r.id === updated.id ? updated : r) : old,
+      )
+    },
   })
 
   const deleteReport = useMutation({
@@ -744,6 +783,7 @@ function TaskForm({
     assignee_id: initial?.assignee_id || '',
   })
   const [dependsOn, setDependsOn] = useState<string[]>(initial?.depends_on ?? [])
+  const [subObjIds, setSubObjIds] = useState<string[]>((initial as unknown as Record<string, unknown>)?.sub_objective_ids as string[] ?? [])
 
   const toggleDependency = (taskId: string) => {
     setDependsOn((prev) =>
@@ -751,10 +791,16 @@ function TaskForm({
     )
   }
 
+  const toggleSubObj = (soId: string) => {
+    setSubObjIds((prev) =>
+      prev.includes(soId) ? prev.filter((id) => id !== soId) : [...prev, soId]
+    )
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim()) return
-    const data: Record<string, unknown> = { ...form, depends_on: dependsOn }
+    const data: Record<string, unknown> = { ...form, depends_on: dependsOn, sub_objective_ids: subObjIds }
     if (!data.start_date) delete data.start_date
     if (!data.due_date) delete data.due_date
     if (!data.oppm_objective_id) delete data.oppm_objective_id
@@ -763,6 +809,7 @@ function TaskForm({
       delete data.status
       if (data.progress === 0) delete data.progress
     }
+    if (subObjIds.length === 0) delete data.sub_objective_ids
     onSubmit(data)
   }
 
@@ -847,13 +894,15 @@ function TaskForm({
               <p className="text-sm text-text-secondary">
                 Total hours logged: <span className="font-semibold text-text">{reportsQuery.data ? reportsQuery.data.reduce((s, r) => s + r.hours, 0).toFixed(1) : '—'}</span>
               </p>
-              <button
-                type="button"
-                onClick={() => setShowReportForm(v => !v)}
-                className="inline-flex items-center justify-center gap-1 rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-dark"
-              >
-                <Plus className="h-3.5 w-3.5" /> Add Report
-              </button>
+              {(!initial?.assignee_id || initial.assignee_id === currentUserId) && (
+                <button
+                  type="button"
+                  onClick={() => setShowReportForm(v => !v)}
+                  className="inline-flex items-center justify-center gap-1 rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-dark"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Report
+                </button>
+              )}
             </div>
 
             {showReportForm && (
@@ -910,13 +959,15 @@ function TaskForm({
                     }
                   </div>
                   <div className="flex items-center gap-1">
-                    {!report.is_approved && (
+                    {isLead && !report.is_approved && (
                       <button type="button" onClick={() => approveReport.mutate({ reportId: report.id, is_approved: true })} title="Approve" className="rounded p-1 text-emerald-500 hover:bg-emerald-50 transition-colors"><CheckCircle className="h-3.5 w-3.5" /></button>
                     )}
-                    {report.is_approved && (
+                    {isLead && report.is_approved && (
                       <button type="button" onClick={() => approveReport.mutate({ reportId: report.id, is_approved: false })} title="Revoke approval" className="rounded p-1 text-amber-500 hover:bg-amber-50 transition-colors"><XCircle className="h-3.5 w-3.5" /></button>
                     )}
-                    <button type="button" onClick={() => { if (confirm('Delete this report?')) deleteReport.mutate(report.id) }} title="Delete" className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                    {(isLead || currentUserId === report.reporter_id) && (
+                      <button type="button" onClick={() => { if (confirm('Delete this report?')) deleteReport.mutate(report.id) }} title="Delete" className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                    )}
                   </div>
                 </div>
                 {report.description && <p className="text-xs text-text-secondary">{report.description}</p>}
@@ -1130,6 +1181,49 @@ function TaskForm({
                   {dependsOn.length > 0 && (
                     <p className="mt-2 text-xs text-primary font-medium">
                       {dependsOn.length} dependenc{dependsOn.length === 1 ? 'y' : 'ies'} set
+                    </p>
+                  )}
+                </section>
+              )}
+
+              {/* Sub-objectives (OPPM) */}
+              {subObjectives.length > 0 && (
+                <section className={sectionClass}>
+                  <div className="mb-3 space-y-1">
+                    <p className={sectionEyebrowClass}>Sub Objectives</p>
+                    <h4 className="text-sm font-semibold text-text">Which sub-objectives does this task contribute to?</h4>
+                    <p className="text-xs text-text-secondary">Select the OPPM sub-objectives this task helps achieve.</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                    {Array.from({ length: 6 }, (_, i) => {
+                      const so = subObjectives.find(s => s.position === i + 1)
+                      if (!so) return null
+                      const checked = subObjIds.includes(so.id)
+                      return (
+                        <label
+                          key={so.id}
+                          className={cn(
+                            'flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-colors',
+                            checked
+                              ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                              : 'border-border bg-white text-text hover:bg-surface-alt'
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSubObj(so.id)}
+                            className="h-3.5 w-3.5 accent-indigo-600 shrink-0"
+                          />
+                          <span className="font-bold text-[10px] shrink-0">{i + 1}.</span>
+                          <span className="truncate font-medium">{so.label}</span>
+                        </label>
+                      )
+                    }).filter(Boolean)}
+                  </div>
+                  {subObjIds.length > 0 && (
+                    <p className="mt-2 text-xs text-indigo-600 font-medium">
+                      {subObjIds.length} sub-objective{subObjIds.length > 1 ? 's' : ''} linked
                     </p>
                   )}
                 </section>

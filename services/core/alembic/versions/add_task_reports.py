@@ -1,7 +1,7 @@
 """add_task_reports
 
-Revision ID: b2c3d4e5f6a7
-Revises: a1b2c3d4e5f6
+Revision ID: add_task_reports
+Revises: add_start_date_to_tasks
 Create Date: 2026-04-04 10:00:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers, used by Alembic.
-revision: str = 'b2c3d4e5f6a7'
-down_revision: Union[str, Sequence[str], None] = 'a1b2c3d4e5f6'
+revision: str = 'add_task_reports'
+down_revision: Union[str, Sequence[str], None] = 'add_start_date_to_tasks'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

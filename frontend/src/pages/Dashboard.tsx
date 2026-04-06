@@ -133,11 +133,30 @@ export function Dashboard() {
     enabled: !!ws,
   })
 
-  const { data: recentAnalyses, isLoading: analysesLoading } = useQuery({
+  const {
+    data: recentAnalysesData,
+    isLoading: analysesLoading,
+    isError: analysesError,
+  } = useQuery({
     queryKey: ['recent-analyses', ws?.id],
-    queryFn: () => api.get<CommitAnalysis[]>(`${wsPath}/git/recent-analyses`),
+    queryFn: async () => {
+      try {
+        return await api.get<CommitAnalysis[]>(`${wsPath}/git/recent-analyses`)
+      } catch (e) {
+        const msg = (e as Error).message ?? ''
+        // Gateway/service-down errors — treat as unavailable, don't retry
+        if (/bad gateway|service unavailable|gateway timeout/i.test(msg)) {
+          return null
+        }
+        throw e
+      }
+    },
     enabled: !!ws,
+    retry: 0,
+    refetchOnWindowFocus: false,
   })
+  const recentAnalyses = recentAnalysesData ?? []
+  const gitServiceDown = recentAnalysesData === null
 
   const s = stats ?? {
     total_projects: 0,
@@ -241,8 +260,8 @@ export function Dashboard() {
               <p className="text-xs">Create a project to see its progress here.</p>
             </div>
           ) : (
-            <div className="h-56" style={{ minHeight: 0 }}>
-              <ResponsiveContainer width="100%" height="100%" minHeight={0}>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height={224}>
                 <BarChart
                   data={s.project_progress}
                   margin={{ top: 4, right: 8, left: -16, bottom: 4 }}
@@ -317,6 +336,12 @@ export function Dashboard() {
                   </div>
                 </div>
               ))}
+            </div>
+          ) : analysesError || gitServiceDown ? (
+            <div className="flex h-48 flex-col items-center justify-center gap-2 text-text-secondary">
+              <GitBranch className="h-10 w-10 opacity-25" />
+              <p className="text-sm font-medium">Analysis service unavailable</p>
+              <p className="text-xs text-center">The git service is offline. Data will appear when it&apos;s back.</p>
             </div>
           ) : analyses.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center gap-2 text-text-secondary">

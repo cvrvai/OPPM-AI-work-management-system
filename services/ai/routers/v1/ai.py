@@ -1,7 +1,7 @@
 """AI model routes — workspace-scoped model configuration."""
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_admin
@@ -106,3 +106,98 @@ async def delete_ai_model(
         await session.delete(model)
         await session.flush()
     return SuccessResponse()
+
+
+# ── OCR: extract OPPM structure from an image ──────────────────────────────
+
+_OPPM_EXTRACT_PROMPT = """\
+You are an OPPM (One Page Project Manager) data extraction assistant.
+Analyse the image of an OPPM sheet and return ONLY a valid JSON object — no
+markdown, no extra text — matching this exact structure:
+
+{
+  "project_title": "<string or null>",
+  "project_objective": "<string or null>",
+  "deliverable_output": "<string or null>",
+  "sub_objectives": [
+    {"position": 1, "label": "<string>"},
+    ...up to 6
+  ],
+  "objectives": [
+    {
+      "title": "<string>",
+      "tasks": [
+        {
+          "name": "<string>",
+          "due_date": "<YYYY-MM-DD or null>",
+          "sub_obj_positions": [1, 3]
+        }
+      ]
+    }
+  ],
+  "deliverables": ["<string>"],
+  "forecasts": ["<string>"],
+  "risks": [
+    {"description": "<string>", "rag": "green|amber|red"}
+  ]
+}
+
+Rules:
+- "sub_obj_positions" should list which position numbers (1-6) the task
+  links to, based on the checkmarks visible in the image.
+- If a field is not visible, use null or an empty array as appropriate.
+- Dates must be ISO 8601 (YYYY-MM-DD). If only a month/year is shown,
+  estimate as the last day of that month.
+- RAG colours: green = on-track, amber = at-risk, red = critical.
+"""
+
+
+@router.post("/workspaces/{workspace_id}/ai/oppm-extract")
+async def extract_oppm_from_image(
+    workspace_id: str,
+    file: UploadFile = File(..., description="Image file: PNG, JPEG, or WEBP"),
+    model_id: str = Query(default="llava", description="Ollama vision model name"),
+    ws: WorkspaceContext = Depends(get_workspace_context),
+):
+    """Use an Ollama vision model to extract OPPM data from an uploaded image.
+
+    Returns structured JSON ready to be reviewed and then sent to
+    POST .../oppm/import-json on the core service.
+    Does NOT save anything to the database.
+    """
+    allowed = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+    ct = (file.content_type or "").lower()
+    if ct not in allowed:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type '{ct}'. Upload PNG, JPEG, or WEBP.",
+        )
+
+    image_bytes = await file.read()
+    if len(image_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image must be under 20 MB")
+
+    from infrastructure.llm.ollama import OllamaAdapter
+    from infrastructure.llm.base import ProviderUnavailableError
+
+    try:
+        adapter = OllamaAdapter()
+        result = await adapter.call_vision_json(model_id, _OPPM_EXTRACT_PROMPT, image_bytes)
+    except ProviderUnavailableError as e:
+        logger.warning("Ollama unavailable for OPPM extract: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ollama is not reachable. Make sure the '{model_id}' model is running.",
+        )
+
+    if result is None:
+        raise HTTPException(
+            status_code=422,
+            detail="The vision model did not return parseable JSON. Try a different model or a clearer image.",
+        )
+
+    logger.info(
+        "OPPM extract completed for workspace %s using model %s: %d objectives",
+        workspace_id, model_id, len(result.get("objectives", [])),
+    )
+    return result

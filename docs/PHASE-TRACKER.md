@@ -1,6 +1,6 @@
 # Phase Tracker
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Purpose
 
@@ -118,11 +118,19 @@ Recently completed during this phase:
 - `/invite/accept/:token` added as a public alias while `/invites/:token` remains valid
 - OPPMView reorganized into a clearer strategic brief, execution matrix, and separate cost section without changing the backend model
 - OPPMView further realigned into a spreadsheet-style OPPM sheet with row/column framing, merged metadata rows, a lower X-cross summary area, and a side legend block
+- OPPMView redesigned into a classic OPPM template matching oppmi.com with A/B/C priority objectives, auto-fill tasks, SVG status dots, owner badges, X-diagram summary, risk register, cost bar charts, and legend
+- Task permissions implemented: lead-only create, assignee-only report, lead-only approve/revoke
+- Task report approval and revoke workflow with optimistic UI updates
+- ChatPanel inline input bar replaced browser prompt()
+- Database schema documentation created (DATABASE-SCHEMA.md)
 - frontend and API reference docs refreshed for the Team/Settings ownership split, invite alias route, and owner-only workspace deletion
 
 Current implementation pass:
 
-- no additional shell or OPPM styling slice is open; the latest pass completed the desktop-collapsible sidebar and tightened the sheet styling toward a more authentic spreadsheet surface
+- OPPM classic template design is complete with priority system and auto-fill tasks
+- task permission enforcement is complete end-to-end (backend 403 + frontend gate)
+- database schema documentation is comprehensive and up to date
+- all docs refreshed to reflect current codebase state
 
 Still worth doing next:
 

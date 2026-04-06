@@ -1,6 +1,6 @@
 # Software Requirements Specification
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## 1. Introduction
 
@@ -154,21 +154,25 @@ The platform may integrate with:
 
 ### 5.5 Tasks And Execution
 
-- `FR-TASK-1` The system shall allow write-enabled users to create tasks under a project.
+- `FR-TASK-1` The system shall allow project leads to create tasks under a project.
 - `FR-TASK-2` The system shall allow users to list and retrieve tasks filtered by workspace and optionally by project.
 - `FR-TASK-3` The system shall allow write-enabled users to update task title, description, status, priority, progress, dates, objective link, and assignee.
 - `FR-TASK-4` The system shall allow write-enabled users to delete tasks.
 - `FR-TASK-5` The system shall support task daily reports with report date, hours, description, and approval state.
-- `FR-TASK-6` The system shall allow write-enabled users to approve or reject task reports.
+- `FR-TASK-6` The system shall restrict report submission to the assigned task user.
+- `FR-TASK-7` The system shall allow project leads to approve or revoke task report approvals.
+- `FR-TASK-8` The system shall support task dependencies (task A depends on task B).
 
 ### 5.6 OPPM Planning
 
-- `FR-OPPM-1` The system shall allow users to view project objectives.
+- `FR-OPPM-1` The system shall allow users to view project objectives with linked tasks.
 - `FR-OPPM-2` The system shall allow write-enabled users to create, update, and delete objectives.
-- `FR-OPPM-3` The system shall allow users to view project timeline entries.
-- `FR-OPPM-4` The system shall allow write-enabled users to create or update timeline entries keyed by week.
-- `FR-OPPM-5` The system shall allow users to view project cost rows.
-- `FR-OPPM-6` The system shall allow write-enabled users to create, update, and delete cost rows.
+- `FR-OPPM-3` The system shall support A/B/C priority classification on objectives.
+- `FR-OPPM-4` The system shall allow users to view project timeline entries.
+- `FR-OPPM-5` The system shall allow write-enabled users to create or update timeline entries keyed by week.
+- `FR-OPPM-6` The system shall allow users to view project cost rows.
+- `FR-OPPM-7` The system shall allow write-enabled users to create, update, and delete cost rows.
+- `FR-OPPM-8` The system shall display the classic OPPM template with objectives, owner badges, timeline matrix, summary deliverables, risk register, and cost bar charts.
 
 ### 5.7 Dashboard And Notifications
 

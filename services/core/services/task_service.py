@@ -39,6 +39,22 @@ async def _recalculate_project_progress(session: AsyncSession, project_id: str) 
         await project_repo.update_progress(project_id, round(weighted))
 
 
+def _report_to_dict(report) -> dict:
+    """Convert a TaskReport ORM object to a serializable dict."""
+    return {
+        "id": str(report.id),
+        "task_id": str(report.task_id),
+        "reporter_id": str(report.reporter_id) if report.reporter_id else None,
+        "report_date": report.report_date.isoformat() if report.report_date else None,
+        "hours": float(report.hours),
+        "description": report.description,
+        "is_approved": report.is_approved,
+        "approved_by": str(report.approved_by) if report.approved_by else None,
+        "approved_at": report.approved_at.isoformat() if report.approved_at else None,
+        "created_at": report.created_at.isoformat(),
+    }
+
+
 def _task_to_dict(task, depends_on: list[str] | None = None) -> dict:
     """Convert a Task ORM object to a dict, adding the depends_on field."""
     d = {
@@ -95,7 +111,7 @@ async def get_task(session: AsyncSession, task_id: str, workspace_id: str) -> di
     return _task_to_dict(task, depends_on)
 
 
-async def create_task(session: AsyncSession, data: dict, workspace_id: str, user_id: str) -> dict:
+async def create_task(session: AsyncSession, data: dict, workspace_id: str, user_id: str, member_id: str | None = None) -> dict:
     task_repo = TaskRepository(session)
     project_repo = ProjectRepository(session)
     audit_repo = AuditRepository(session)
@@ -103,6 +119,8 @@ async def create_task(session: AsyncSession, data: dict, workspace_id: str, user
     project = await project_repo.find_by_id(data["project_id"])
     if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
+    if project.lead_id and member_id and str(project.lead_id) != member_id:
+        raise HTTPException(status_code=403, detail="Only the project lead can create tasks")
     depends_on = data.pop("depends_on", None) or []
     data["created_by"] = user_id
     audit_data = {**data}
@@ -153,7 +171,8 @@ async def delete_task(session: AsyncSession, task_id: str, workspace_id: str, us
 async def list_task_reports(session: AsyncSession, task_id: str, workspace_id: str) -> list:
     await get_task(session, task_id, workspace_id)  # validates ownership
     report_repo = TaskReportRepository(session)
-    return await report_repo.find_by_task(task_id)
+    reports = await report_repo.find_by_task(task_id)
+    return [_report_to_dict(r) for r in reports]
 
 
 async def create_task_report(
@@ -163,12 +182,18 @@ async def create_task_report(
     workspace_id: str,
     user_id: str,
 ) -> dict:
-    await get_task(session, task_id, workspace_id)
+    task_data = await get_task(session, task_id, workspace_id)
+    if task_data.get("assignee_id") and task_data["assignee_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Only the assigned user can submit reports")
     report_repo = TaskReportRepository(session)
     data["task_id"] = task_id
     data["reporter_id"] = user_id
     data["is_approved"] = False
-    return await report_repo.create(data)
+    val = data.get("report_date")
+    if isinstance(val, str) and val:
+        data["report_date"] = date.fromisoformat(val)
+    report = await report_repo.create(data)
+    return _report_to_dict(report)
 
 
 async def approve_task_report(
@@ -178,22 +203,24 @@ async def approve_task_report(
     is_approved: bool,
     workspace_id: str,
     user_id: str,
+    member_id: str | None = None,
 ) -> dict:
     from datetime import datetime, timezone
-    await get_task(session, task_id, workspace_id)
+    task_data = await get_task(session, task_id, workspace_id)
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(task_data["project_id"])
+    if project and project.lead_id and member_id and str(project.lead_id) != member_id:
+        raise HTTPException(status_code=403, detail="Only the project lead can approve reports")
     report_repo = TaskReportRepository(session)
     report = await report_repo.find_by_id(report_id)
     if not report or str(report.task_id) != task_id:
         raise HTTPException(status_code=404, detail="Report not found")
-    update_data: dict = {"is_approved": is_approved}
-    if is_approved:
-        update_data["approved_by"] = user_id
-        update_data["approved_at"] = datetime.now(timezone.utc)
-    else:
-        update_data["approved_by"] = None
-        update_data["approved_at"] = None
-    result = await report_repo.update(report_id, update_data)
-    return result
+    approved_by = user_id if is_approved else None
+    approved_at = datetime.now(timezone.utc) if is_approved else None
+    result = await report_repo.update_approval(report_id, is_approved, approved_by, approved_at)
+    if not result:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return _report_to_dict(result)
 
 
 async def delete_task_report(

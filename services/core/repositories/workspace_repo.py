@@ -86,6 +86,18 @@ class WorkspaceInviteRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def find_pending_by_email(self, email: str) -> list[WorkspaceInvite]:
+        stmt = (
+            select(WorkspaceInvite)
+            .where(
+                WorkspaceInvite.email == email,
+                WorkspaceInvite.accepted_at.is_(None),
+            )
+            .order_by(WorkspaceInvite.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
 
 class MemberSkillRepository(BaseRepository):
     model = MemberSkill

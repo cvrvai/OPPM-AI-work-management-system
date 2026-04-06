@@ -13,6 +13,7 @@ import { Commits } from '@/pages/Commits'
 import { Settings } from '@/pages/Settings'
 import { AcceptInvite } from '@/pages/AcceptInvite'
 import { Team } from '@/pages/Team'
+import { Invitations } from '@/pages/Invitations'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="projects/:id" element={<ProjectDetail />} />
             <Route path="projects/:id/oppm" element={<OPPMView />} />
             <Route path="team" element={<Team />} />
+            <Route path="invitations" element={<Invitations />} />
             <Route path="commits" element={<Commits />} />
             <Route path="settings" element={<Settings />} />
           </Route>

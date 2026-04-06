@@ -1,6 +1,6 @@
 # Microservices Review
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Executive Summary
 
@@ -191,8 +191,17 @@ Priority order:
 1. normalize workspace role response naming between backend and frontend
 2. rename or wrap the project member add payload so the public field matches the real identifier type
 3. decide whether `task_assignees` is still strategic or should be retired from the live path
-4. add automated tests around invites, project membership, task reports, and webhook-to-analysis flow
+4. add automated tests around invites, project membership, task reports/approvals, and webhook-to-analysis flow
 5. keep Python gateway and nginx gateway routing rules synchronized whenever routes change
+
+## Recent Improvements (2026-04-06)
+
+- task permission enforcement: lead-only create, assignee-only reports, lead-only approval
+- OPPM view redesigned to classic template with A/B/C priority, auto-fill tasks, SVG status dots
+- `priority VARCHAR(1)` added to `oppm_objectives` table
+- OPPM serialization bug fixed (UUID/datetime objects now properly converted for JSON responses)
+- cost summary serialization fixed (`_row_to_dict` helper used consistently)
+- comprehensive database schema documentation created (`docs/DATABASE-SCHEMA.md`)
 
 ## Overall Conclusion
 

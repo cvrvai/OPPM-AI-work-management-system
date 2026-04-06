@@ -2,6 +2,7 @@
 SQLAlchemy async engine + session factory shared across all microservices.
 """
 
+import asyncio
 import logging
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -89,11 +90,30 @@ async def get_session() -> AsyncSession:
             raise
 
 
-async def init_db() -> None:
-    """Create engine and verify connectivity on startup."""
+async def _reconnect_loop() -> None:
+    """Background task: retry DB connection every 5 s until successful."""
     engine = get_engine()
-    async with engine.begin() as conn:
-        logger.info("Database connection verified")
+    while True:
+        await asyncio.sleep(5)
+        try:
+            async with engine.begin() as conn:
+                logger.info("Database reconnected successfully")
+                return
+        except Exception:
+            pass  # keep retrying silently
+
+
+async def init_db() -> None:
+    """Create engine and verify connectivity on startup. Non-fatal if DB is unavailable."""
+    engine = get_engine()
+    try:
+        async with engine.begin() as conn:
+            logger.info("Database connection verified")
+    except Exception as e:
+        logger.warning(
+            "Database not available at startup — retrying in background: %s", e
+        )
+        asyncio.create_task(_reconnect_loop())
 
 
 async def close_db() -> None:

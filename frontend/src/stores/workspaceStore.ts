@@ -25,13 +25,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         set({ loading: true })
         try {
           const workspaces = await api.get<Workspace[]>('/v1/workspaces')
-          set({ workspaces, loading: false })
-          // Validate that the persisted workspace belongs to this user.
-          // If not (stale data from a previous session/user), switch to first available.
+          // Always sync currentWorkspace with the fresh API object so that
+          // current_user_role (and other fields) are never stale from localStorage.
           const current = get().currentWorkspace
-          if (!current || !workspaces.find((w) => w.id === current.id)) {
-            set({ currentWorkspace: workspaces[0] ?? null })
-          }
+          const freshCurrent = current ? (workspaces.find((w) => w.id === current.id) ?? null) : null
+          set({ workspaces, currentWorkspace: freshCurrent ?? workspaces[0] ?? null, loading: false })
         } catch {
           set({ loading: false })
         }

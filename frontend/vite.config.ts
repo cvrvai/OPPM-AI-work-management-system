@@ -20,6 +20,11 @@ export default defineConfig({
       '^/api/v1/workspaces/[^/]+/git':              { target: 'http://127.0.0.1:8002', changeOrigin: true },
       '^/api/git':                                   { target: 'http://127.0.0.1:8002', changeOrigin: true },
 
+      // AI service routes (port 8001) — before generic /api rule
+      '^/api/v1/workspaces/[^/]+/projects/[^/]+/ai': { target: 'http://127.0.0.1:8001', changeOrigin: true },
+      '^/api/v1/workspaces/[^/]+/ai':               { target: 'http://127.0.0.1:8001', changeOrigin: true },
+      '^/api/v1/workspaces/[^/]+/rag':              { target: 'http://127.0.0.1:8001', changeOrigin: true },
+
       // Everything else goes to the core service (port 8000)
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
 

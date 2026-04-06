@@ -39,12 +39,12 @@ async def get_project_route(project_id: str, ws: WorkspaceContext = Depends(get_
 
 @router.post("/workspaces/{workspace_id}/projects", status_code=201)
 async def create_project_route(data: ProjectCreate, ws: WorkspaceContext = Depends(require_write), session: AsyncSession = Depends(get_session)):
-    return await create_project(session, ws.workspace_id, ws.user.id, data.model_dump(), ws.member_id)
+    return await create_project(session, ws.workspace_id, ws.user.id, data.model_dump(mode='json'), ws.member_id)
 
 
 @router.put("/workspaces/{workspace_id}/projects/{project_id}")
 async def update_project_route(project_id: str, data: ProjectUpdate, ws: WorkspaceContext = Depends(require_write), session: AsyncSession = Depends(get_session)):
-    return await update_project(session, project_id, ws.workspace_id, ws.user.id, data.model_dump(exclude_none=True))
+    return await update_project(session, project_id, ws.workspace_id, ws.user.id, data.model_dump(mode='json', exclude_none=True))
 
 
 @router.delete("/workspaces/{workspace_id}/projects/{project_id}")

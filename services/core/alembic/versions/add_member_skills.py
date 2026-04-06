@@ -1,17 +1,20 @@
 """add_member_skills
 
-Revision ID: d4e5f6a7b8c9
-Revises: c3d4e5f6a7b8
+Revision ID: add_member_skills
+Revises: add_project_header_fields
 Create Date: 2026-04-04 00:00:00.000000
 
 """
+from typing import Sequence, Union
+
 from alembic import op
 import sqlalchemy as sa
 
-revision = 'd4e5f6a7b8c9'
-down_revision = 'c3d4e5f6a7b8'
-branch_labels = None
-depends_on = None
+# revision identifiers, used by Alembic.
+revision: str = 'add_member_skills'
+down_revision: Union[str, Sequence[str], None] = 'add_project_header_fields'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:

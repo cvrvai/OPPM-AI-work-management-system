@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Purpose
 
@@ -9,6 +9,7 @@ This document describes the current runtime architecture of the OPPM AI Work Man
 Use this file for system-level orientation. Use the supporting docs for detail:
 
 - [API-REFERENCE.md](API-REFERENCE.md)
+- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md)
 - [ERD.md](ERD.md)
 - [FLOWCHARTS.md](FLOWCHARTS.md)
 - [FRONTEND-REFERENCE.md](FRONTEND-REFERENCE.md)
@@ -154,7 +155,7 @@ Important facts:
 
 - the ORM models live in `shared/models/`
 - migrations live in `services/core/alembic/`
-- `supabase/schema.sql` is a reference schema snapshot, not the authoritative migration runner
+- 23 tables across 7 domain groups (see [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) and [ERD.md](ERD.md))
 - RAG embeddings are stored in the same database
 - audit and notification data are part of the same application database
 

@@ -44,13 +44,24 @@ export function Commits() {
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   useChatContext('workspace')
 
-  const { data: commits, isLoading } = useQuery({
+  const { data: commits, isLoading, isError } = useQuery({
     queryKey: ['commits', ws?.id],
-    queryFn: () => api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>(`${wsPath}/commits`),
+    queryFn: async () => {
+      try {
+        return await api.get<(CommitEvent & { analysis?: CommitAnalysis })[]>(`${wsPath}/commits`)
+      } catch (e) {
+        if (/bad gateway|service unavailable|gateway timeout/i.test((e as Error).message ?? '')) {
+          return null
+        }
+        throw e
+      }
+    },
     enabled: !!ws,
+    retry: 0,
   })
 
-  const list = commits || []
+  const gitServiceDown = commits === null
+  const list = commits ?? []
 
   return (
     <div className="space-y-6">
@@ -66,6 +77,12 @@ export function Commits() {
       {isLoading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        </div>
+      ) : isError || gitServiceDown ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <GitCommitHorizontal className="h-12 w-12 text-text-secondary/30 mb-3" />
+          <p className="text-sm font-medium text-text-secondary">Git service unavailable</p>
+          <p className="text-xs text-text-secondary/70 mt-1">The git service is offline. Data will appear when it's back.</p>
         </div>
       ) : list.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">

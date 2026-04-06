@@ -17,11 +17,13 @@ class Task(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     oppm_objective_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_objectives.id", ondelete="SET NULL"), index=True)
+    parent_task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="todo", nullable=False)
     priority: Mapped[str] = mapped_column(String(10), default="medium", nullable=False)
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     project_contribution: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -73,4 +75,18 @@ class TaskDependency(Base):
 
     __table_args__ = (
         PrimaryKeyConstraint("task_id", "depends_on_task_id", name="pk_task_dependencies"),
+    )
+
+
+class TaskOwner(Base):
+    __tablename__ = "task_owners"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspace_members.id", ondelete="CASCADE"), nullable=False, index=True)
+    priority: Mapped[str] = mapped_column(String(1), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("priority IN ('A', 'B', 'C')", name="ck_task_owners_priority"),
+        UniqueConstraint("task_id", "member_id", name="uq_task_owners_task_member"),
     )

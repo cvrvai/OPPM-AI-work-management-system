@@ -1,12 +1,35 @@
-"""OPPM objectives, timeline, and costs repositories."""
+"""OPPM objectives, timeline, costs, sub-objectives, task-owners, deliverables, forecasts, risks repositories."""
 
-from datetime import date
-from sqlalchemy import select
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.base import BaseRepository
-from shared.models.oppm import OPPMObjective, OPPMTimelineEntry, ProjectCost
-from shared.models.task import Task
+from shared.models.oppm import (
+    OPPMObjective, OPPMTimelineEntry, ProjectCost,
+    OPPMSubObjective, TaskSubObjective,
+    OPPMDeliverable, OPPMForecast, OPPMRisk,
+    OPPMTemplate,
+)
+from shared.models.task import Task, TaskAssignee, TaskOwner
+from shared.models.workspace import WorkspaceMember
+
+
+def _serialize(value):
+    """Convert ORM column value to JSON-safe type."""
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def _row_to_dict(obj) -> dict:
+    return {c.name: _serialize(getattr(obj, c.name)) for c in obj.__table__.columns}
 
 
 class ObjectiveRepository(BaseRepository):
@@ -20,14 +43,68 @@ class ObjectiveRepository(BaseRepository):
         )
 
     async def find_with_tasks(self, project_id: str) -> list[dict]:
-        """Get objectives with nested tasks for OPPM view."""
+        """Get objectives with nested tasks including owners and sub-objective links."""
         objectives = await self.find_project_objectives(project_id)
         result = []
         for obj in objectives:
-            d = {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
-            stmt = select(Task).where(Task.oppm_objective_id == obj.id).order_by(Task.created_at)
+            d = _row_to_dict(obj)
+            stmt = select(Task).where(Task.oppm_objective_id == obj.id).order_by(Task.sort_order, Task.created_at)
             tasks_result = await self.session.execute(stmt)
-            d["tasks"] = [{c.name: getattr(t, c.name) for c in t.__table__.columns} for t in tasks_result.scalars().all()]
+            tasks = tasks_result.scalars().all()
+
+            task_ids = [t.id for t in tasks]
+
+            # Bulk-load assignees
+            assignees_map: dict[str, list[dict]] = {str(tid): [] for tid in task_ids}
+            if task_ids:
+                assign_stmt = (
+                    select(TaskAssignee.task_id, WorkspaceMember.id, WorkspaceMember.display_name)
+                    .join(WorkspaceMember, WorkspaceMember.id == TaskAssignee.member_id)
+                    .where(TaskAssignee.task_id.in_(task_ids))
+                )
+                assign_result = await self.session.execute(assign_stmt)
+                for row in assign_result.all():
+                    assignees_map[str(row.task_id)].append({
+                        "id": str(row.id),
+                        "display_name": row.display_name,
+                    })
+
+            # Bulk-load task owners (A/B/C per member)
+            owners_map: dict[str, list[dict]] = {str(tid): [] for tid in task_ids}
+            if task_ids:
+                owner_stmt = (
+                    select(TaskOwner.task_id, TaskOwner.member_id, TaskOwner.priority, WorkspaceMember.display_name)
+                    .join(WorkspaceMember, WorkspaceMember.id == TaskOwner.member_id)
+                    .where(TaskOwner.task_id.in_(task_ids))
+                )
+                owner_result = await self.session.execute(owner_stmt)
+                for row in owner_result.all():
+                    owners_map[str(row.task_id)].append({
+                        "member_id": str(row.member_id),
+                        "display_name": row.display_name,
+                        "priority": row.priority,
+                    })
+
+            # Bulk-load sub-objective links
+            sub_obj_map: dict[str, list[str]] = {str(tid): [] for tid in task_ids}
+            if task_ids:
+                sub_stmt = (
+                    select(TaskSubObjective.task_id, TaskSubObjective.sub_objective_id)
+                    .where(TaskSubObjective.task_id.in_(task_ids))
+                )
+                sub_result = await self.session.execute(sub_stmt)
+                for row in sub_result.all():
+                    sub_obj_map[str(row.task_id)].append(str(row.sub_objective_id))
+
+            task_dicts = []
+            for t in tasks:
+                td = _row_to_dict(t)
+                td["assignees"] = assignees_map.get(str(t.id), [])
+                td["owners"] = owners_map.get(str(t.id), [])
+                td["sub_objective_ids"] = sub_obj_map.get(str(t.id), [])
+                task_dicts.append(td)
+
+            d["tasks"] = task_dicts
             result.append(d)
         return result
 
@@ -51,7 +128,7 @@ class TimelineRepository(BaseRepository):
         stmt = (
             select(OPPMTimelineEntry)
             .where(
-                OPPMTimelineEntry.objective_id == data["objective_id"],
+                OPPMTimelineEntry.task_id == data["task_id"],
                 OPPMTimelineEntry.week_start == week_start_val,
             )
             .limit(1)
@@ -85,5 +162,145 @@ class CostRepository(BaseRepository):
         return {
             "total_planned": sum(float(c.planned_amount) for c in costs),
             "total_actual": sum(float(c.actual_amount) for c in costs),
-            "items": costs,
+            "items": [_row_to_dict(c) for c in costs],
         }
+
+
+# ─── Sub-Objectives ───────────────────────────────────────────
+
+class SubObjectiveRepository(BaseRepository):
+    model = OPPMSubObjective
+
+    async def find_project_sub_objectives(self, project_id: str) -> list[OPPMSubObjective]:
+        return await self.find_all(
+            filters={"project_id": project_id},
+            order_by="position",
+            desc=False,
+        )
+
+    async def set_task_sub_objectives(self, task_id: str, sub_objective_ids: list[str]) -> list[str]:
+        """Replace all sub-objective links for a task."""
+        await self.session.execute(
+            sa_delete(TaskSubObjective).where(TaskSubObjective.task_id == task_id)
+        )
+        for so_id in sub_objective_ids:
+            self.session.add(TaskSubObjective(task_id=task_id, sub_objective_id=so_id))
+        await self.session.flush()
+        return sub_objective_ids
+
+
+# ─── Task Owners ──────────────────────────────────────────────
+
+class TaskOwnerRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def set_owner(self, task_id: str, member_id: str, priority: str) -> dict:
+        """Set (upsert) A/B/C priority for a task-member pair."""
+        stmt = (
+            select(TaskOwner)
+            .where(TaskOwner.task_id == task_id, TaskOwner.member_id == member_id)
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.priority = priority
+            await self.session.flush()
+            return _row_to_dict(existing)
+        owner = TaskOwner(task_id=task_id, member_id=member_id, priority=priority)
+        self.session.add(owner)
+        await self.session.flush()
+        return _row_to_dict(owner)
+
+    async def remove_owner(self, task_id: str, member_id: str) -> bool:
+        await self.session.execute(
+            sa_delete(TaskOwner).where(
+                TaskOwner.task_id == task_id, TaskOwner.member_id == member_id
+            )
+        )
+        await self.session.flush()
+        return True
+
+    async def find_task_owners(self, task_id: str) -> list[dict]:
+        stmt = (
+            select(TaskOwner.member_id, TaskOwner.priority, WorkspaceMember.display_name)
+            .join(WorkspaceMember, WorkspaceMember.id == TaskOwner.member_id)
+            .where(TaskOwner.task_id == task_id)
+        )
+        result = await self.session.execute(stmt)
+        return [
+            {"member_id": str(r.member_id), "display_name": r.display_name, "priority": r.priority}
+            for r in result.all()
+        ]
+
+
+# ─── Deliverables ─────────────────────────────────────────────
+
+class DeliverableRepository(BaseRepository):
+    model = OPPMDeliverable
+
+    async def find_project_deliverables(self, project_id: str) -> list[OPPMDeliverable]:
+        return await self.find_all(
+            filters={"project_id": project_id},
+            order_by="item_number",
+            desc=False,
+        )
+
+
+# ─── Forecasts ────────────────────────────────────────────────
+
+class ForecastRepository(BaseRepository):
+    model = OPPMForecast
+
+    async def find_project_forecasts(self, project_id: str) -> list[OPPMForecast]:
+        return await self.find_all(
+            filters={"project_id": project_id},
+            order_by="item_number",
+            desc=False,
+        )
+
+
+# ─── Risks ────────────────────────────────────────────────────
+
+class RiskRepository(BaseRepository):
+    model = OPPMRisk
+
+    async def find_project_risks(self, project_id: str) -> list[OPPMRisk]:
+        return await self.find_all(
+            filters={"project_id": project_id},
+            order_by="item_number",
+            desc=False,
+        )
+
+
+# ─── OPPM Templates ──────────────────────────────────────────
+
+class OPPMTemplateRepository(BaseRepository):
+    model = OPPMTemplate
+
+    async def find_by_project(self, project_id: str) -> OPPMTemplate | None:
+        stmt = select(OPPMTemplate).where(OPPMTemplate.project_id == project_id).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def upsert(self, project_id: str, workspace_id: str, sheet_data: list, file_name: str | None = None) -> OPPMTemplate:
+        existing = await self.find_by_project(project_id)
+        if existing:
+            existing.sheet_data = sheet_data
+            existing.file_name = file_name
+            existing.updated_at = datetime.utcnow()
+            await self.session.flush()
+            return existing
+        return await self.create({
+            "project_id": project_id,
+            "workspace_id": workspace_id,
+            "sheet_data": sheet_data,
+            "file_name": file_name,
+        })
+
+    async def delete_by_project(self, project_id: str) -> bool:
+        stmt = sa_delete(OPPMTemplate).where(OPPMTemplate.project_id == project_id)
+        await self.session.execute(stmt)
+        await self.session.flush()
+        return True

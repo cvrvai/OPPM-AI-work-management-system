@@ -1,10 +1,10 @@
-"""OPPM objective, timeline entry, and project cost models."""
+"""OPPM objective, timeline entry, project cost, sub-objective, deliverable, forecast, risk models."""
 
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from sqlalchemy import String, Text, Integer, Date, DateTime, Numeric, ForeignKey, CheckConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import String, Text, Integer, Date, DateTime, Numeric, ForeignKey, CheckConstraint, UniqueConstraint, PrimaryKeyConstraint, func
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.database import Base
@@ -17,8 +17,35 @@ class OPPMObjective(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspace_members.id", ondelete="SET NULL"))
+    priority: Mapped[str | None] = mapped_column(String(1))
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OPPMSubObjective(Base):
+    __tablename__ = "oppm_sub_objectives"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("position BETWEEN 1 AND 6", name="ck_sub_objectives_position"),
+        UniqueConstraint("project_id", "position", name="uq_sub_objectives_project_position"),
+    )
+
+
+class TaskSubObjective(Base):
+    __tablename__ = "task_sub_objectives"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    sub_objective_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_sub_objectives.id", ondelete="CASCADE"), nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("task_id", "sub_objective_id", name="pk_task_sub_objectives"),
+    )
 
 
 class OPPMTimelineEntry(Base):
@@ -26,15 +53,17 @@ class OPPMTimelineEntry(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    objective_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_objectives.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="planned", nullable=False)
+    quality: Mapped[str | None] = mapped_column(String(10))
     ai_score: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("status IN ('planned', 'in_progress', 'completed', 'at_risk', 'blocked')", name="ck_timeline_status"),
+        CheckConstraint("quality IS NULL OR quality IN ('good', 'average', 'bad')", name="ck_timeline_quality"),
         CheckConstraint("ai_score IS NULL OR (ai_score >= 0 AND ai_score <= 100)", name="ck_timeline_ai_score"),
     )
 
@@ -51,3 +80,50 @@ class ProjectCost(Base):
     period: Mapped[str | None] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class OPPMDeliverable(Base):
+    __tablename__ = "oppm_deliverables"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OPPMForecast(Base):
+    __tablename__ = "oppm_forecasts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OPPMRisk(Base):
+    __tablename__ = "oppm_risks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    rag: Mapped[str] = mapped_column(String(10), default="green", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("rag IN ('green', 'amber', 'red')", name="ck_risks_rag"),
+    )
+
+
+class OPPMTemplate(Base):
+    __tablename__ = "oppm_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    sheet_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    file_name: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

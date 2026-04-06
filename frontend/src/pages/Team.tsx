@@ -204,6 +204,26 @@ export function Team() {
   // Find the current user's workspace member record
   const currentMember = members.find((m) => m.user_id === currentUserId) ?? null
 
+  if (!ws) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-text">Team</h1>
+          <p className="text-sm text-text-secondary mt-0.5">
+            Manage workspace members, invitations, and skills in one place
+          </p>
+        </div>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-white py-20 shadow-sm text-center">
+          <Users className="h-12 w-12 text-text-secondary/30 mb-3" />
+          <p className="text-base font-medium text-text">No workspace selected</p>
+          <p className="text-sm text-text-secondary mt-1">
+            Select or create a workspace to manage your team members and invitations.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -214,7 +234,7 @@ export function Team() {
         </p>
       </div>
 
-      {ws && <WorkspaceMembersPanel />}
+      <WorkspaceMembersPanel />
 
       {/* Legend */}
       <div className="space-y-3">

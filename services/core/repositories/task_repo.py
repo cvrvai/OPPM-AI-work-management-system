@@ -1,6 +1,6 @@
 """Task repository."""
 
-from sqlalchemy import select, delete, insert
+from sqlalchemy import select, delete, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.base import BaseRepository
@@ -109,3 +109,20 @@ class TaskReportRepository(BaseRepository):
         stmt = select(TaskReport.hours).where(TaskReport.task_id == task_id)
         result = await self.session.execute(stmt)
         return sum(r.hours for r in result.all())
+
+    async def update_approval(
+        self,
+        report_id: str,
+        is_approved: bool,
+        approved_by: "str | None",
+        approved_at: object,
+    ) -> "TaskReport | None":
+        stmt = (
+            update(TaskReport)
+            .where(TaskReport.id == report_id)
+            .values(is_approved=is_approved, approved_by=approved_by, approved_at=approved_at)
+            .returning(TaskReport)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.scalar_one_or_none()

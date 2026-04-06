@@ -1348,7 +1348,7 @@ function AIModelSettings() {
                         onClick={() =>
                           createModel.mutate({
                             name: m.name,
-                            provider: activeProvider,
+                            provider: activePreset?.provider ?? activeProvider,
                             model_id: m.model_id,
                             endpoint_url: m.endpoint ?? null,
                           })

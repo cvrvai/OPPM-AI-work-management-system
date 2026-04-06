@@ -21,6 +21,7 @@ class Project(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     project_code: Mapped[str | None] = mapped_column(String(50))
     objective_summary: Mapped[str | None] = mapped_column(Text)
+    deliverable_output: Mapped[str | None] = mapped_column(Text)
     budget: Mapped[float] = mapped_column(Numeric(14, 2), default=0, nullable=False)
     planning_hours: Mapped[float] = mapped_column(Numeric(10, 2), default=0, nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date)

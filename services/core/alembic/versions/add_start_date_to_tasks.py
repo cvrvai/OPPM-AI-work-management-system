@@ -1,7 +1,7 @@
 """add_start_date_to_tasks
 
-Revision ID: a1b2c3d4e5f6
-Revises: c856c65cc033
+Revision ID: add_start_date_to_tasks
+Revises: initial_schema
 Create Date: 2026-04-04 00:00:00.000000
 
 """
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, Sequence[str], None] = 'c856c65cc033'
+revision: str = 'add_start_date_to_tasks'
+down_revision: Union[str, Sequence[str], None] = 'initial_schema'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

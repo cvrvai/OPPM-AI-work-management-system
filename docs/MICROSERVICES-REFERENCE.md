@@ -1,6 +1,6 @@
 # Microservices Reference
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Purpose
 
@@ -103,8 +103,9 @@ Current functional ownership:
 - members and invites
 - member skills
 - projects and project members
-- tasks and task reports
-- OPPM objectives, timeline, costs
+- tasks, task reports, and task dependencies
+- task permission enforcement (lead-only create, assignee-only report, lead-only approve)
+- OPPM objectives (with A/B/C priority), timeline, costs
 - notifications
 - dashboard stats
 

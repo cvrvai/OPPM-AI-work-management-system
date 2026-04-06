@@ -1,6 +1,6 @@
 """initial_schema
 
-Revision ID: c856c65cc033
+Revision ID: initial_schema
 Revises: 
 Create Date: 2026-04-03 19:25:34.726342
 
@@ -13,7 +13,7 @@ import pgvector.sqlalchemy
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'c856c65cc033'
+revision: str = 'initial_schema'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

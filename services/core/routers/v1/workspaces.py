@@ -26,6 +26,8 @@ from services.workspace_service import (
     list_member_skills,
     add_member_skill,
     delete_member_skill,
+    list_my_invites,
+    decline_invite,
 )
 
 router = APIRouter()
@@ -122,6 +124,18 @@ async def lookup_member_route(
 @router.post("/invites/accept")
 async def accept_invite_route(data: InviteAccept, user: CurrentUser = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     return await accept_invite(session, data.token, user.id)
+
+
+@router.get("/invites/my-invites")
+async def list_my_invites_route(user: CurrentUser = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    """Return all pending workspace invites addressed to the current user's email."""
+    return await list_my_invites(session, user.email)
+
+
+@router.post("/invites/{invite_id}/decline")
+async def decline_invite_route(invite_id: str, user: CurrentUser = Depends(get_current_user), session: AsyncSession = Depends(get_session)) -> SuccessResponse:
+    await decline_invite(session, invite_id, user.email)
+    return SuccessResponse()
 
 
 @router.get("/invites/preview/{token}")

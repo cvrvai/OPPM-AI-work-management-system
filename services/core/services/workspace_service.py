@@ -371,3 +371,53 @@ async def delete_member_skill(session: AsyncSession, workspace_id: str, workspac
     if not skill or str(skill.workspace_member_id) != workspace_member_id:
         raise HTTPException(status_code=404, detail="Skill not found")
     return await skill_repo.delete(skill_id)
+
+
+# ── User invite inbox ──
+
+async def list_my_invites(session: AsyncSession, user_email: str) -> list[dict]:
+    """Return all pending invites addressed to the current user's email."""
+    invite_repo = WorkspaceInviteRepository(session)
+    workspace_repo = WorkspaceRepository(session)
+    member_repo = WorkspaceMemberRepository(session)
+
+    invites = await invite_repo.find_pending_by_email(user_email)
+    now = datetime.now(timezone.utc)
+    result = []
+    for invite in invites:
+        ws = await workspace_repo.find_by_id(str(invite.workspace_id))
+        if not ws:
+            continue
+        inviter_member = await member_repo.find_by_user_and_workspace(
+            str(invite.invited_by), str(invite.workspace_id)
+        )
+        inviter_display = ""
+        if inviter_member:
+            inviter_display = inviter_member.get("display_name") or inviter_member.get("email", "")
+        result.append({
+            "id": str(invite.id),
+            "workspace_id": str(invite.workspace_id),
+            "workspace_name": ws.name,
+            "workspace_slug": ws.slug,
+            "inviter_name": inviter_display,
+            "role": invite.role,
+            "token": invite.token,
+            "expires_at": invite.expires_at.isoformat(),
+            "created_at": invite.created_at.isoformat(),
+            "is_expired": invite.expires_at < now,
+        })
+    return result
+
+
+async def decline_invite(session: AsyncSession, invite_id: str, user_email: str) -> None:
+    """Decline (delete) a pending invite. User may only decline their own invites."""
+    invite_repo = WorkspaceInviteRepository(session)
+
+    invite = await invite_repo.find_by_id(invite_id)
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite.email.lower() != user_email.lower():
+        raise HTTPException(status_code=403, detail="Not authorized to decline this invite")
+    if invite.accepted_at:
+        raise HTTPException(status_code=400, detail="Invite already accepted")
+    await invite_repo.delete(invite_id)

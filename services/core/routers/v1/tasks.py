@@ -50,7 +50,7 @@ async def create_task_route(
     ws: WorkspaceContext = Depends(require_write),
     session: AsyncSession = Depends(get_session),
 ):
-    return await create_task(session, data=data.model_dump(), workspace_id=ws.workspace_id, user_id=ws.user.id)
+    return await create_task(session, data=data.model_dump(), workspace_id=ws.workspace_id, user_id=ws.user.id, member_id=ws.member_id)
 
 
 @router.put("/workspaces/{workspace_id}/tasks/{task_id}")
@@ -109,6 +109,7 @@ async def approve_task_report_route(
         session, task_id=task_id, report_id=report_id,
         is_approved=data.is_approved,
         workspace_id=ws.workspace_id, user_id=ws.user.id,
+        member_id=ws.member_id,
     )
 
 

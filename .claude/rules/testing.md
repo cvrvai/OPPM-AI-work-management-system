@@ -14,7 +14,7 @@
 - Test workspace-scoped queries with and without workspace selected
 
 ## Manual Testing Checklist
-- [ ] Create workspace → verify in Supabase
+- [ ] Create workspace → verify in PostgreSQL (psql or pgAdmin)
 - [ ] Switch workspace → verify API calls include workspace_id
 - [ ] Create project → verify workspace_id is set
 - [ ] OPPM view → verify objectives, timeline, costs load

@@ -1,6 +1,6 @@
 # Testing Guide
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Purpose
 
@@ -214,48 +214,61 @@ Expected:
 
 Steps:
 
-1. open a project detail page
+1. open a project detail page as the project lead
 2. create tasks with different priorities and statuses
 3. assign a workspace member as owner
 4. move tasks across statuses
 5. edit and delete a task
+6. switch to a non-lead member and verify the Create Task button is hidden
 
 Expected:
 
+- only project leads can create tasks (non-leads see no create button)
 - task list updates without full reload
 - progress and summary cards update
 - assignee name displays correctly
 - board and list modes stay consistent
 
-### 7. Task Daily Reports
+### 7. Task Daily Reports And Approvals
 
 Steps:
 
-1. open a task-enabled project
-2. create a report for a task
-3. approve or reject the report from a write-enabled account
-4. delete a report if needed
+1. as a task assignee, submit a daily report on an assigned task
+2. as a non-assignee, verify you cannot submit a report (403)
+3. as the project lead, approve the report
+4. as the project lead, revoke the approval
+5. verify non-lead members cannot approve/revoke
+6. delete a report
 
 Expected:
 
-- report appears in task report list
-- approval updates `is_approved`
-- deletion removes the report cleanly
+- only the assigned user can submit reports
+- only project leads can approve/revoke
+- approval state updates in real-time without page refresh
+- `is_approved`, `approved_by`, and `approved_at` update correctly
+- non-authorized actions return 403
 
 ### 8. OPPM View
 
 Steps:
 
 1. open `/projects/:id/oppm`
-2. create objectives
-3. create or update timeline entries
-4. create cost rows
-5. refresh the page
+2. create objectives with different A/B/C priorities
+3. assign owners to objectives
+4. verify tasks auto-fill from linked tasks per objective
+5. create or update timeline entries
+6. create cost rows
+7. verify the X-diagram summary, deliverables, and risk register
+8. verify cost bar charts show planned vs actual
+9. refresh the page
 
 Expected:
 
 - objectives, timeline, and cost rows persist
-- timeline uses weekly `week_start` dates
+- A/B/C priority toggles update correctly
+- owner badges display workspace member names
+- timeline uses weekly `week_start` dates with SVG status dots
+- cost bar charts render planned and actual amounts
 - changes remain visible after refresh
 
 ### 9. AI Model Configuration

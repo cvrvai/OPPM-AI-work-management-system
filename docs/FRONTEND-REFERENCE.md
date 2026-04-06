@@ -1,6 +1,6 @@
 # Frontend Reference
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Purpose
 
@@ -78,6 +78,8 @@ Current important areas:
   Floating entry point for AI chat.
 - `ChatPanel.tsx`
   Sliding chat panel used in workspace and project contexts.
+- `GanttChart.tsx`
+  Gantt-style timeline visualization component.
 - `Skeleton.tsx`
   Loading placeholder component.
 
@@ -304,6 +306,15 @@ Important current behavior:
 - the team assignment step stores workspace member ids but posts them in a field named `user_id`
 - create and edit flows now use the same wider modal rhythm as the task editor for denser setup without cramped form spacing
 
+### Task Permissions
+
+The task system enforces role-based permissions:
+
+- only project leads can create tasks
+- only the assigned user can submit daily reports
+- only project leads can approve/revoke report approvals
+- approval status updates use optimistic UI via `setQueryData`
+
 ### OPPM
 
 Start with:
@@ -314,9 +325,14 @@ Start with:
 
 Important current behavior:
 
-- the page now renders as a spreadsheet-style OPPM sheet with visible row and column framing, merged metadata cells, an objective timeline matrix, a lower X-cross summary area, and a ledger-style cost section
-- the objective timeline remains UI-only on the current backend model and reuses linked `tasks` only as context, not as editable sub-rows
-- objective rows still mutate the same objective owner/title and weekly status routes as before
+- the page renders as a classic OPPM template matching the oppmi.com methodology
+- project header section shows owner, dates, and objective summary
+- objectives support A/B/C priority toggle and owner assignment
+- tasks are auto-filled from linked tasks per objective
+- weekly timeline uses SVG status dots (planned, in_progress, completed, at_risk, blocked)
+- X-diagram summary area shows deliverables and risk register
+- cost section uses bar charts comparing planned vs actual amounts
+- AI plan suggestion creates objectives and tasks from an LLM-generated plan
 
 ### Team And Skills
 

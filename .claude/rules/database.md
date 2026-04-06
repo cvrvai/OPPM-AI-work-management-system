@@ -8,19 +8,23 @@
 - Use `JSONB` for flexible metadata fields
 
 ## Row-Level Security
-- All tables have RLS enabled
-- Use `is_workspace_member(ws_id)` and `is_workspace_admin(ws_id)` helper functions
-- Backend bypasses RLS via `service_role_key` — this is intentional
-- Webhook and service-inserted data uses `WITH CHECK (true)` policies
+- Backend uses direct DB owner role — RLS is not enforced in the application layer
+- All authorization is handled at the API layer via `require_write` / `require_admin` middleware
 
 ## Migrations
-- Apply via Supabase MCP `apply_migration` tool
+- Apply via `psql` or the Supabase MCP `execute_sql` / `apply_migration` tool
 - Use `IF NOT EXISTS` / `IF EXISTS` for idempotent DDL
 - Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for adding columns to existing tables
 - Always add indexes for foreign keys and frequently filtered columns
 
-## Existing Tables (17)
-workspaces, workspace_members, workspace_invites, projects, project_members,
-oppm_objectives, tasks, task_assignees, oppm_timeline_entries, project_costs,
-github_accounts, repo_configs, commit_events, commit_analyses, ai_models,
-notifications, audit_log
+## Existing Tables (23)
+workspaces, workspace_members, workspace_invites, member_skills,
+projects, project_members,
+tasks, task_assignees, task_reports, task_dependencies,
+oppm_objectives, oppm_timeline_entries, project_costs,
+github_accounts, repo_configs, commit_events, commit_analyses,
+ai_models, document_embeddings,
+notifications, audit_log,
+users, refresh_tokens
+
+See `docs/DATABASE-SCHEMA.md` for full column-level documentation.

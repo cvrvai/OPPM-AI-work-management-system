@@ -47,6 +47,19 @@ export interface WorkspaceInvite {
   is_new_user?: boolean
 }
 
+export interface MyInvite {
+  id: string
+  workspace_id: string
+  workspace_name: string
+  workspace_slug: string
+  inviter_name: string
+  role: WorkspaceRole
+  token: string
+  expires_at: string
+  created_at: string
+  is_expired: boolean
+}
+
 export interface PaginatedResponse<T> {
   items: T[]
   total: number
@@ -65,6 +78,7 @@ export interface Project {
   description: string
   project_code: string | null
   objective_summary: string | null
+  deliverable_output: string | null
   status: ProjectStatus
   priority: Priority
   progress: number
@@ -93,6 +107,12 @@ export interface ProjectMember {
 // ── Task ──
 export type TaskStatus = 'todo' | 'in_progress' | 'completed'
 
+export interface TaskOwner {
+  member_id: string
+  display_name?: string | null
+  priority: 'A' | 'B' | 'C'
+}
+
 export interface Task {
   id: string
   title: string
@@ -102,15 +122,20 @@ export interface Task {
   priority: Priority
   progress: number
   project_contribution: number
+  sort_order: number
   start_date: string | null
   due_date: string | null
   assignee_id: string | null
+  parent_task_id?: string | null
   created_by: string | null
   completed_at: string | null
   created_at: string
   updated_at: string
   oppm_objective_id?: string | null
   depends_on: string[]
+  assignees?: { id: string; display_name?: string | null }[]
+  owners?: TaskOwner[]
+  sub_objective_ids?: string[]
 }
 
 export interface TaskReport {
@@ -132,17 +157,27 @@ export interface OPPMObjective {
   project_id: string
   title: string
   owner_id: string | null
+  priority?: string | null
   owner?: WorkspaceMember
   sort_order: number
   tasks: Task[]
 }
 
+export interface OPPMSubObjective {
+  id: string
+  project_id: string
+  position: number
+  label: string
+  created_at: string
+}
+
 export interface OPPMTimelineEntry {
   id: string
   project_id: string
-  objective_id: string
+  task_id: string
   week_start: string
   status: 'planned' | 'in_progress' | 'completed' | 'at_risk' | 'blocked'
+  quality?: 'good' | 'average' | 'bad' | null
   ai_score?: number | null
   notes?: string | null
   created_at: string
@@ -155,6 +190,33 @@ export interface OPPMCost {
   planned_amount: number
   actual_amount: number
   description: string
+  created_at: string
+}
+
+export interface OPPMDeliverable {
+  id: string
+  project_id: string
+  item_number: number
+  description: string
+  created_at: string
+}
+
+export interface OPPMForecast {
+  id: string
+  project_id: string
+  item_number: number
+  description: string
+  created_at: string
+}
+
+export type RagStatus = 'green' | 'amber' | 'red'
+
+export interface OPPMRisk {
+  id: string
+  project_id: string
+  item_number: number
+  description: string
+  rag: RagStatus
   created_at: string
 }
 

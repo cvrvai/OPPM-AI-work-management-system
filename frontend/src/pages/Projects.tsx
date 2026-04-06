@@ -26,7 +26,7 @@ import {
 
 interface CreateProjectPayload {
   title: string
-  description: string | null
+  description: string
   project_code: string | null
   objective_summary: string | null
   priority: Priority
@@ -42,7 +42,7 @@ interface CreateProjectPayload {
 
 interface UpdateProjectPayload {
   title: string
-  description: string | null
+  description: string
   project_code: string | null
   objective_summary: string | null
   status: Project['status']
@@ -317,15 +317,15 @@ const ROLE_LABEL: Record<ProjectRole, string> = {
   observer: 'Observer',
 }
 
-const fieldLabelClass = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-text-secondary'
-const inputClass = 'w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10'
-const selectClass = 'w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors focus:border-primary focus:ring-4 focus:ring-primary/10'
-const textareaClass = 'w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10 resize-none'
-const sectionClass = 'rounded-2xl border border-border bg-surface-alt/70 p-4 sm:p-5'
+const fieldLabelClass = 'mb-1.5 block text-sm font-medium text-text-secondary'
+const inputClass = 'w-full rounded-lg border border-border bg-white px-3.5 py-2 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-2 focus:ring-primary/10'
+const selectClass = 'w-full rounded-lg border border-border bg-white px-3.5 py-2 text-sm text-text outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/10'
+const textareaClass = 'w-full rounded-lg border border-border bg-white px-3.5 py-2 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-2 focus:ring-primary/10 resize-none'
+const sectionClass = ''
 const sectionEyebrowClass = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary'
-const modalShellClass = 'flex max-h-[92vh] w-[min(58rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-[1.75rem] border border-border bg-white shadow-2xl'
-const secondaryButtonClass = 'rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-alt'
-const primaryButtonClass = 'inline-flex items-center justify-center rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-dark disabled:opacity-50'
+const modalShellClass = 'flex max-h-[92vh] w-[min(58rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-2xl'
+const secondaryButtonClass = 'rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-alt'
+const primaryButtonClass = 'inline-flex items-center justify-center rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-dark disabled:opacity-50'
 
 function getMemberLabel(member: WorkspaceMember) {
   return member.display_name || member.email || member.user_id.slice(0, 8)
@@ -355,13 +355,13 @@ function CreateProjectModal({
   const [endDate, setEndDate] = useState('')
   const [budget, setBudget] = useState('')
   const [planningHours, setPlanningHours] = useState('')
-  const [leadId, setLeadId] = useState('')
-
   // Step 2 state: map from workspace_member.id → role
   const [assignments, setAssignments] = useState<Record<string, ProjectRole>>({})
 
   const selectedMembers = members.filter((member) => assignments[member.id])
-  const selectedLead = members.find((member) => member.user_id === leadId)
+  // Lead is whoever is assigned the 'lead' role in Step 2
+  const leadEntry = Object.entries(assignments).find(([, role]) => role === 'lead')
+  const selectedLead = leadEntry ? members.find((m) => m.id === leadEntry[0]) : undefined
 
   const toggleMember = (memberId: string) => {
     setAssignments((prev) => {
@@ -382,7 +382,7 @@ function CreateProjectModal({
     const memberAssignments = Object.entries(assignments).map(([userId, role]) => ({ userId, role }))
     const payload: CreateProjectPayload = {
       title,
-      description: description || null,
+      description,
       project_code: projectCode || null,
       objective_summary: objectiveSummary || null,
       priority,
@@ -393,7 +393,7 @@ function CreateProjectModal({
       end_date: endDate || null,
       budget: budget ? Number(budget) : 0,
       planning_hours: planningHours ? Number(planningHours) : 0,
-      lead_id: leadId || null,
+      lead_id: leadEntry ? leadEntry[0] : null,
     }
     onSubmit(payload, memberAssignments)
   }
@@ -421,57 +421,73 @@ function CreateProjectModal({
             </button>
           </div>
 
-          <div className="flex gap-1.5 overflow-x-auto pb-3">
+          {/* Stepper */}
+          <div className="flex items-center gap-0 pb-4">
+            {/* Step 1 */}
             <button
               type="button"
               onClick={() => setStep(1)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors',
-                step === 1
-                  ? 'bg-primary/10 text-primary ring-1 ring-primary/15'
-                  : 'bg-surface-alt text-text-secondary hover:text-text'
-              )}
+              className="flex items-center gap-2.5 text-sm font-medium transition-colors"
             >
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] font-bold ring-1 ring-slate-200">1</span>
-              Project Brief
+              <span className={cn(
+                'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors',
+                step === 1 ? 'bg-primary text-white' : 'bg-primary/10 text-primary'
+              )}>
+                1
+              </span>
+              <span className={step === 1 ? 'text-text font-semibold' : 'text-text-secondary'}>
+                Project Brief
+              </span>
             </button>
+
+            {/* Connector */}
+            <div className="mx-3 h-px flex-1 bg-border" />
+
+            {/* Step 2 */}
             <button
               type="button"
               disabled={!title.trim()}
               onClick={() => title.trim() && setStep(2)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-colors',
-                step === 2
-                  ? 'bg-primary/10 text-primary ring-1 ring-primary/15'
-                  : !title.trim()
-                    ? 'cursor-not-allowed bg-surface-alt text-slate-300'
-                    : 'bg-surface-alt text-text-secondary hover:text-text'
-              )}
+              className="flex items-center gap-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed"
             >
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] font-bold ring-1 ring-slate-200">2</span>
-              Team Setup
-              {selectedCount > 0 && (
-                <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200">
-                  {selectedCount}
-                </span>
-              )}
+              <span className={cn(
+                'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors',
+                step === 2
+                  ? 'bg-primary text-white'
+                  : title.trim()
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-slate-100 text-slate-400'
+              )}>
+                {selectedCount > 0 && step !== 2 ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : '2'}
+              </span>
+              <span className={cn(
+                step === 2 ? 'text-text font-semibold' : title.trim() ? 'text-text-secondary' : 'text-slate-400'
+              )}>
+                Team Setup
+                {selectedCount > 0 && (
+                  <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                    {selectedCount}
+                  </span>
+                )}
+              </span>
             </button>
           </div>
         </div>
 
-        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
           {step === 1 ? (
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-5">
-              <div className="space-y-5 xl:col-span-3">
-                <section className={sectionClass}>
-                  <div className="mb-4 space-y-1">
-                    <p className={sectionEyebrowClass}>Project brief</p>
-                    <h3 className="text-sm font-semibold text-text">Define the core outcome</h3>
-                  </div>
+            <div className="grid grid-cols-1 gap-x-8 xl:grid-cols-5">
+              {/* Left column — form fields */}
+              <div className="xl:col-span-3">
 
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {/* Section: Project details */}
+                <div className="pb-4 mb-3 border-b border-border">
+                  <h3 className="mb-3 text-sm font-semibold text-text">Project details</h3>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                     <div className="md:col-span-2">
-                      <label className={fieldLabelClass}>Project Name *</label>
+                      <label className={fieldLabelClass}>Project Name <span className="text-red-500">*</span></label>
                       <input
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
@@ -492,7 +508,7 @@ function CreateProjectModal({
                     </div>
                   </div>
 
-                  <div className="mt-4">
+                  <div className="mt-3">
                     <label className={fieldLabelClass}>Objective Summary</label>
                     <input
                       value={objectiveSummary}
@@ -502,25 +518,22 @@ function CreateProjectModal({
                     />
                   </div>
 
-                  <div className="mt-4">
+                  <div className="mt-3">
                     <label className={fieldLabelClass}>Description</label>
                     <textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
-                      rows={4}
+                      rows={2}
                       placeholder="Add context, delivery notes, and success criteria"
                       className={textareaClass}
                     />
                   </div>
-                </section>
+                </div>
 
-                <section className={sectionClass}>
-                  <div className="mb-4 space-y-1">
-                    <p className={sectionEyebrowClass}>Schedule</p>
-                    <h3 className="text-sm font-semibold text-text">Set the planning window</h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                {/* Section: Schedule */}
+                <div className="pb-4 mb-3 border-b border-border">
+                  <h3 className="mb-3 text-sm font-semibold text-text">Schedule</h3>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                     <div>
                       <label className={fieldLabelClass}>Start Date</label>
                       <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
@@ -534,148 +547,125 @@ function CreateProjectModal({
                       <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputClass} />
                     </div>
                   </div>
-                </section>
+                </div>
 
-                <section className={sectionClass}>
-                  <div className="mb-4 space-y-1">
-                    <p className={sectionEyebrowClass}>Resources and ownership</p>
-                    <h3 className="text-sm font-semibold text-text">Set the initial planning envelope</h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* Section: Resources & ownership */}
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold text-text">Resources &amp; ownership</h3>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div>
                       <label className={fieldLabelClass}>Budget</label>
                       <div className="relative">
-                        <DollarSign className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
+                        <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
                         <input
                           type="number"
                           min="0"
                           step="0.01"
                           value={budget}
                           onChange={(e) => setBudget(e.target.value)}
-                          placeholder="0.00"
-                          className="w-full rounded-xl border border-border bg-white py-3 pl-10 pr-4 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                          placeholder="e.g. 50,000"
+                          className="w-full rounded-lg border border-border bg-white py-2 pl-9 pr-3.5 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-2 focus:ring-primary/10"
                         />
                       </div>
                     </div>
                     <div>
                       <label className={fieldLabelClass}>Planning Hours</label>
                       <div className="relative">
-                        <Clock className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
+                        <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
                         <input
                           type="number"
                           min="0"
                           step="0.5"
                           value={planningHours}
                           onChange={(e) => setPlanningHours(e.target.value)}
-                          placeholder="0"
-                          className="w-full rounded-xl border border-border bg-white py-3 pl-10 pr-4 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                          placeholder="e.g. 120"
+                          className="w-full rounded-lg border border-border bg-white py-2 pl-9 pr-3.5 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-2 focus:ring-primary/10"
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className={fieldLabelClass}>Priority</label>
-                      <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)} className={selectClass}>
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="critical">Critical</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className={fieldLabelClass}>Project Leader</label>
-                      <select value={leadId} onChange={(e) => setLeadId(e.target.value)} className={selectClass}>
-                        <option value="">Unassigned</option>
-                        {members.map((member) => (
-                          <option key={member.user_id} value={member.user_id}>
-                            {getMemberLabel(member)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                  <div className="mt-3">
+                    <label className={fieldLabelClass}>Priority</label>
+                    <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)} className={selectClass}>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
                   </div>
-                </section>
+                </div>
               </div>
 
-              <div className="space-y-5 xl:col-span-2">
-                <section className={sectionClass}>
-                  <div className="mb-4 space-y-1">
-                    <p className={sectionEyebrowClass}>Planning snapshot</p>
-                    <h3 className="text-sm font-semibold text-text">What the project looks like so far</h3>
+              {/* Right column — snapshot sidebar */}
+              <div className="mt-6 space-y-5 xl:col-span-2 xl:mt-0">
+
+                {/* Planning snapshot card */}
+                <div className="rounded-xl border border-border bg-white p-4 shadow-sm">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">Preview</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-text">{title.trim() || 'Untitled project'}</p>
+                      <p className="mt-1 text-xs text-text-secondary line-clamp-2">
+                        {objectiveSummary.trim() || 'No objective summary yet.'}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      Planning
+                    </span>
                   </div>
 
-                  <div className="rounded-2xl border border-border bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-text">{title.trim() || 'Untitled project'}</p>
-                        <p className="mt-1 text-sm text-text-secondary">
-                          {objectiveSummary.trim() || 'Add a one-line objective summary to make the project easier to scan later.'}
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                        Planning
-                      </span>
+                  <div className="mt-4 divide-y divide-border text-sm">
+                    <div className="flex items-center justify-between gap-3 py-2">
+                      <span className="text-text-secondary">Leader</span>
+                      <span className="font-medium text-text">{selectedLead ? getMemberLabel(selectedLead) : <span className="text-slate-400">Unassigned</span>}</span>
                     </div>
-
-                    <div className="mt-4 space-y-3 text-sm text-text-secondary">
-                      <div className="flex items-center justify-between gap-3">
-                        <span>Leader</span>
-                        <span className="text-right font-medium text-text">{selectedLead ? getMemberLabel(selectedLead) : 'Not assigned yet'}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span>Priority</span>
-                        <span className="font-medium capitalize text-text">{priority.replace('_', ' ')}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span>Budget</span>
-                        <span className="font-medium text-text">{budget ? `$${Number(budget).toLocaleString()}` : 'Not set'}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span>Planning Hours</span>
-                        <span className="font-medium text-text">{planningHours || '0'}</span>
-                      </div>
+                    <div className="flex items-center justify-between gap-3 py-2">
+                      <span className="text-text-secondary">Priority</span>
+                      <span className={cn(
+                        'rounded-md px-2 py-0.5 text-xs font-semibold capitalize',
+                        priority === 'critical' ? 'bg-red-100 text-red-700' :
+                        priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                        priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-slate-100 text-slate-600'
+                      )}>{priority}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 py-2">
+                      <span className="text-text-secondary">Budget</span>
+                      <span className="font-medium text-text">{budget ? `$${Number(budget).toLocaleString()}` : <span className="text-slate-400">—</span>}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 py-2">
+                      <span className="text-text-secondary">Planning Hours</span>
+                      <span className="font-medium text-text">{planningHours ? `${planningHours} h` : <span className="text-slate-400">—</span>}</span>
                     </div>
                   </div>
-                </section>
+                </div>
 
-                <section className={sectionClass}>
-                  <div className="mb-4 space-y-1">
-                    <p className={sectionEyebrowClass}>What happens next</p>
-                    <h3 className="text-sm font-semibold text-text">Step 2 prepares the delivery team</h3>
-                  </div>
-
-                  <div className="space-y-3 text-sm text-text-secondary">
-                    <div className="rounded-xl border border-border bg-white px-4 py-3">
-                      Pick which workspace members should join the project.
-                    </div>
-                    <div className="rounded-xl border border-border bg-white px-4 py-3">
-                      Assign each selected member a project role before creation.
-                    </div>
-                    <div className="rounded-xl border border-border bg-white px-4 py-3">
-                      The project still starts in planning and can be refined later in detail view.
-                    </div>
-                  </div>
-                </section>
+                {/* What happens next */}
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3.5">
+                  <p className="mb-2 text-xs font-semibold text-blue-700">Step 2 — Team Setup</p>
+                  <ul className="space-y-1.5 text-xs text-blue-600">
+                    <li className="flex items-start gap-1.5"><span className="mt-px shrink-0">•</span>Pick which workspace members join this project.</li>
+                    <li className="flex items-start gap-1.5"><span className="mt-px shrink-0">•</span>Assign each member a role (lead, contributor, reviewer, observer).</li>
+                    <li className="flex items-start gap-1.5"><span className="mt-px shrink-0">•</span>The project starts in <strong>Planning</strong> and can be refined later.</li>
+                  </ul>
+                </div>
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-5">
-              <section className={cn(sectionClass, 'xl:col-span-3')}>
-                <div className="mb-4 space-y-1">
-                  <p className={sectionEyebrowClass}>Team selection</p>
-                  <h3 className="text-sm font-semibold text-text">Choose members and project roles</h3>
-                </div>
+            <div className="grid grid-cols-1 gap-x-8 xl:grid-cols-5">
+
+              {/* Member list */}
+              <div className="xl:col-span-3">
+                <h3 className="mb-4 text-sm font-semibold text-text">Choose members and assign roles</h3>
 
                 {members.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-gray-200 py-10 text-center">
+                  <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center">
                     <User className="mx-auto mb-2 h-8 w-8 text-gray-300" />
                     <p className="text-sm text-text-secondary">No workspace members found.</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {members.map((member) => {
                       const selected = !!assignments[member.id]
                       return (
@@ -683,7 +673,7 @@ function CreateProjectModal({
                           key={member.id}
                           onClick={() => toggleMember(member.id)}
                           className={cn(
-                            'flex flex-col gap-3 rounded-2xl border px-4 py-4 transition-colors sm:flex-row sm:items-center',
+                            'flex flex-col gap-3 rounded-lg border px-4 py-3.5 cursor-pointer transition-colors sm:flex-row sm:items-center',
                             selected
                               ? 'border-primary/40 bg-primary/5 shadow-sm'
                               : 'border-border bg-white hover:border-primary/20 hover:bg-surface-alt'
@@ -691,12 +681,12 @@ function CreateProjectModal({
                         >
                           <div className="flex items-center gap-3">
                             <div className={cn(
-                              'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border transition-colors',
+                              'flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border transition-colors',
                               selected ? 'border-primary bg-primary text-white' : 'border-slate-300 bg-white text-transparent'
                             )}>
-                              <Check className="h-3.5 w-3.5" />
+                              <Check className="h-3 w-3" />
                             </div>
-                            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
                               {getMemberLabel(member).charAt(0).toUpperCase()}
                             </div>
                           </div>
@@ -718,7 +708,7 @@ function CreateProjectModal({
                                 e.stopPropagation()
                                 setMemberRole(member.id, e.target.value as ProjectRole)
                               }}
-                              className="w-full rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-medium outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 sm:w-44"
+                              className="w-full rounded-lg border border-border bg-white px-3.5 py-2 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 sm:w-40"
                             >
                               {PROJECT_ROLES.map((role) => (
                                 <option key={role} value={role}>{ROLE_LABEL[role]}</option>
@@ -730,53 +720,47 @@ function CreateProjectModal({
                     })}
                   </div>
                 )}
-              </section>
+              </div>
 
-              <div className="space-y-5 xl:col-span-2">
-                <section className={sectionClass}>
-                  <div className="mb-4 space-y-1">
-                    <p className={sectionEyebrowClass}>Current selection</p>
-                    <h3 className="text-sm font-semibold text-text">Project team summary</h3>
+              {/* Right sidebar */}
+              <div className="mt-6 space-y-5 xl:col-span-2 xl:mt-0">
+
+                {/* Team summary card */}
+                <div className="rounded-xl border border-border bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary">Selected team</p>
+                    <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                      {title.trim() || 'Untitled project'}
+                    </span>
                   </div>
+                  <p className="mb-3 text-sm font-semibold text-text">{selectedCount} member{selectedCount === 1 ? '' : 's'} selected</p>
 
-                  <div className="rounded-2xl border border-border bg-white p-4 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-text">{selectedCount} member{selectedCount === 1 ? '' : 's'} selected</p>
-                      <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-                        {title.trim() || 'Untitled project'}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 space-y-2">
-                      {selectedMembers.length === 0 ? (
-                        <p className="text-sm text-text-secondary">Select at least one teammate if you want to assign the project immediately.</p>
-                      ) : (
-                        selectedMembers.map((member) => (
-                          <div key={member.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-sm">
-                            <span className="min-w-0 truncate font-medium text-text">{getMemberLabel(member)}</span>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                              {ROLE_LABEL[assignments[member.id]]}
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
+                  <div className="space-y-1.5">
+                    {selectedMembers.length === 0 ? (
+                      <p className="text-sm text-text-secondary">No members selected yet. Select teammates from the list.</p>
+                    ) : (
+                      selectedMembers.map((member) => (
+                        <div key={member.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                          <span className="min-w-0 truncate font-medium text-text">{getMemberLabel(member)}</span>
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                            {ROLE_LABEL[assignments[member.id]]}
+                          </span>
+                        </div>
+                      ))
+                    )}
                   </div>
-                </section>
+                </div>
 
-                <section className={sectionClass}>
-                  <div className="mb-4 space-y-1">
-                    <p className={sectionEyebrowClass}>Role guide</p>
-                    <h3 className="text-sm font-semibold text-text">Use the lightest role that fits</h3>
+                {/* Role guide */}
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Role guide</p>
+                  <div className="space-y-1.5 text-sm text-text-secondary">
+                    <div className="rounded-lg border border-border bg-white px-3.5 py-2.5"><strong className="text-text">Lead</strong> — owns delivery and major decisions.</div>
+                    <div className="rounded-lg border border-border bg-white px-3.5 py-2.5"><strong className="text-text">Contributor</strong> — does the main execution work.</div>
+                    <div className="rounded-lg border border-border bg-white px-3.5 py-2.5"><strong className="text-text">Reviewer</strong> — validates quality and approvals.</div>
+                    <div className="rounded-lg border border-border bg-white px-3.5 py-2.5"><strong className="text-text">Observer</strong> — stays informed, no delivery duties.</div>
                   </div>
-
-                  <div className="space-y-3 text-sm text-text-secondary">
-                    <div className="rounded-xl border border-border bg-white px-4 py-3"><strong className="text-text">Lead</strong> keeps delivery moving and owns major decisions.</div>
-                    <div className="rounded-xl border border-border bg-white px-4 py-3"><strong className="text-text">Contributor</strong> does the main execution work.</div>
-                    <div className="rounded-xl border border-border bg-white px-4 py-3"><strong className="text-text">Reviewer</strong> validates quality, readiness, or approvals.</div>
-                    <div className="rounded-xl border border-border bg-white px-4 py-3"><strong className="text-text">Observer</strong> stays informed without owning delivery work.</div>
-                  </div>
-                </section>
+                </div>
               </div>
             </div>
           )}
@@ -844,13 +828,13 @@ function EditProjectModal({
   const [budget, setBudget] = useState(project.budget ? String(project.budget) : '')
   const [planningHours, setPlanningHours] = useState(project.planning_hours ? String(project.planning_hours) : '')
   const [leadId, setLeadId] = useState(project.lead_id ?? '')
-  const selectedLead = members.find((member) => member.user_id === leadId)
+  const selectedLead = members.find((member) => member.id === leadId)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const payload: UpdateProjectPayload = {
       title,
-      description: description || null,
+      description,
       project_code: projectCode || null,
       objective_summary: objectiveSummary || null,
       status,
@@ -890,16 +874,13 @@ function EditProjectModal({
             </button>
           </div>
         </div>
-        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-5">
-            <div className="space-y-5 xl:col-span-3">
-              <section className={sectionClass}>
-                <div className="mb-4 space-y-1">
-                  <p className={sectionEyebrowClass}>Project brief</p>
-                  <h3 className="text-sm font-semibold text-text">Keep the project easy to scan</h3>
-                </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
+          <div className="grid grid-cols-1 gap-x-8 xl:grid-cols-5">
+            <div className="xl:col-span-3">
+              <section className="pb-4 mb-3 border-b border-border">
+                <h3 className="mb-3 text-sm font-semibold text-text">Project details</h3>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                   <div className="md:col-span-2">
                     <label className={fieldLabelClass}>Project Name *</label>
                     <input value={title} onChange={(e) => setTitle(e.target.value)} required className={inputClass} />
@@ -910,24 +891,21 @@ function EditProjectModal({
                   </div>
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-3">
                   <label className={fieldLabelClass}>Objective Summary</label>
                   <input value={objectiveSummary} onChange={(e) => setObjectiveSummary(e.target.value)} placeholder="One-line project objective" className={inputClass} />
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-3">
                   <label className={fieldLabelClass}>Description</label>
-                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className={textareaClass} />
+                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className={textareaClass} />
                 </div>
               </section>
 
-              <section className={sectionClass}>
-                <div className="mb-4 space-y-1">
-                  <p className={sectionEyebrowClass}>Schedule</p>
-                  <h3 className="text-sm font-semibold text-text">Adjust delivery dates</h3>
-                </div>
+              <section className="pb-4 mb-3 border-b border-border">
+                <h3 className="mb-3 text-sm font-semibold text-text">Schedule</h3>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                   <div>
                     <label className={fieldLabelClass}>Start Date</label>
                     <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
@@ -943,46 +921,43 @@ function EditProjectModal({
                 </div>
               </section>
 
-              <section className={sectionClass}>
-                <div className="mb-4 space-y-1">
-                  <p className={sectionEyebrowClass}>Delivery setup</p>
-                  <h3 className="text-sm font-semibold text-text">Status, priority, and planning inputs</h3>
-                </div>
+              <section>
+                <h3 className="mb-3 text-sm font-semibold text-text">Resources &amp; ownership</h3>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div>
                     <label className={fieldLabelClass}>Budget</label>
                     <div className="relative">
-                      <DollarSign className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
+                      <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         value={budget}
                         onChange={(e) => setBudget(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full rounded-xl border border-border bg-white py-3 pl-10 pr-4 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                        placeholder="e.g. 50,000"
+                        className="w-full rounded-lg border border-border bg-white py-2 pl-9 pr-3.5 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-2 focus:ring-primary/10"
                       />
                     </div>
                   </div>
                   <div>
                     <label className={fieldLabelClass}>Planning Hours</label>
                     <div className="relative">
-                      <Clock className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
+                      <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
                       <input
                         type="number"
                         min="0"
                         step="0.5"
                         value={planningHours}
                         onChange={(e) => setPlanningHours(e.target.value)}
-                        placeholder="0"
-                        className="w-full rounded-xl border border-border bg-white py-3 pl-10 pr-4 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                        placeholder="e.g. 120"
+                        className="w-full rounded-lg border border-border bg-white py-2 pl-9 pr-3.5 text-sm text-text outline-none transition-colors placeholder:text-slate-300 focus:border-primary focus:ring-2 focus:ring-primary/10"
                       />
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
                   <div>
                     <label className={fieldLabelClass}>Status</label>
                     <select value={status} onChange={(e) => setStatus(e.target.value as Project['status'])} className={selectClass}>
@@ -1005,9 +980,9 @@ function EditProjectModal({
                   <div>
                     <label className={fieldLabelClass}>Project Leader</label>
                     <select value={leadId} onChange={(e) => setLeadId(e.target.value)} className={selectClass}>
-                      <option value="">Unassigned</option>
+                      <option value="">— Unassigned —</option>
                       {members.map((member) => (
-                        <option key={member.user_id} value={member.user_id}>
+                        <option key={member.id} value={member.id}>
                           {getMemberLabel(member)}
                         </option>
                       ))}
@@ -1017,62 +992,53 @@ function EditProjectModal({
               </section>
             </div>
 
-            <div className="space-y-5 xl:col-span-2">
-              <section className={sectionClass}>
-                <div className="mb-4 space-y-1">
-                  <p className={sectionEyebrowClass}>Current snapshot</p>
-                  <h3 className="text-sm font-semibold text-text">How this project will read in the workspace</h3>
-                </div>
+            <div className="mt-6 space-y-5 xl:col-span-2 xl:mt-0">
 
-                <div className="rounded-2xl border border-border bg-white p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-text">{title.trim() || 'Untitled project'}</p>
-                      <p className="mt-1 text-sm text-text-secondary">
-                        {objectiveSummary.trim() || 'Add a summary to make the project easier to scan in lists and reports.'}
-                      </p>
-                    </div>
-                    <span className={cn('rounded-full px-2.5 py-1 text-xs font-semibold', getStatusColor(status))}>
-                      {status.replace('_', ' ')}
-                    </span>
+              {/* Preview card */}
+              <div className="rounded-xl border border-border bg-white p-4 shadow-sm">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">Preview</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-text">{title.trim() || 'Untitled project'}</p>
+                    <p className="mt-1 text-xs text-text-secondary line-clamp-2">
+                      {objectiveSummary.trim() || 'No objective summary yet.'}
+                    </p>
                   </div>
-
-                  <div className="mt-4 space-y-3 text-sm text-text-secondary">
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Leader</span>
-                      <span className="text-right font-medium text-text">{selectedLead ? getMemberLabel(selectedLead) : 'Not assigned yet'}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Priority</span>
-                      <span className="font-medium capitalize text-text">{priority.replace('_', ' ')}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Budget</span>
-                      <span className="font-medium text-text">{budget ? `$${Number(budget).toLocaleString()}` : 'Not set'}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Planning Hours</span>
-                      <span className="font-medium text-text">{planningHours || '0'}</span>
-                    </div>
-                  </div>
+                  <span className={cn('shrink-0 rounded-md px-2 py-0.5 text-xs font-medium', getStatusColor(status))}>
+                    {status.replace('_', ' ')}
+                  </span>
                 </div>
-              </section>
-
-              <section className={sectionClass}>
-                <div className="mb-4 space-y-1">
-                  <p className={sectionEyebrowClass}>Editing note</p>
-                  <h3 className="text-sm font-semibold text-text">This form keeps execution stable</h3>
-                </div>
-
-                <div className="space-y-3 text-sm text-text-secondary">
-                  <div className="rounded-xl border border-border bg-white px-4 py-3">
-                    Existing tasks, OPPM entries, and memberships stay untouched while you update planning fields.
+                <div className="mt-4 divide-y divide-border text-sm">
+                  <div className="flex items-center justify-between gap-3 py-2">
+                    <span className="text-text-secondary">Leader</span>
+                    <span className="font-medium text-text">{selectedLead ? getMemberLabel(selectedLead) : <span className="text-slate-400">Unassigned</span>}</span>
                   </div>
-                  <div className="rounded-xl border border-border bg-white px-4 py-3">
-                    Use status for delivery state and keep the summary short enough to read in a crowded portfolio.
+                  <div className="flex items-center justify-between gap-3 py-2">
+                    <span className="text-text-secondary">Priority</span>
+                    <span className={cn(
+                      'rounded-md px-2 py-0.5 text-xs font-semibold capitalize',
+                      priority === 'critical' ? 'bg-red-100 text-red-700' :
+                      priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                      priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-slate-100 text-slate-600'
+                    )}>{priority}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 py-2">
+                    <span className="text-text-secondary">Budget</span>
+                    <span className="font-medium text-text">{budget ? `$${Number(budget).toLocaleString()}` : <span className="text-slate-400">—</span>}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 py-2">
+                    <span className="text-text-secondary">Planning Hours</span>
+                    <span className="font-medium text-text">{planningHours ? `${planningHours} h` : <span className="text-slate-400">—</span>}</span>
                   </div>
                 </div>
-              </section>
+              </div>
+
+              {/* Editing note */}
+              <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3.5">
+                <p className="mb-1.5 text-xs font-semibold text-amber-700">Editing note</p>
+                <p className="text-xs text-amber-600">Tasks, OPPM entries, and memberships are unaffected. Only planning fields are updated here.</p>
+              </div>
             </div>
           </div>
         </div>

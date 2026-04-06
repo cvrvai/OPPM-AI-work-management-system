@@ -31,7 +31,7 @@ _plan_cache: dict[str, dict] = {}
 
 
 async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | None = None) -> list[dict]:
-    """Return ordered list of AI models for fallback."""
+    """Return ordered list of AI models for fallback. Falls back to local Ollama if none configured."""
     if model_id:
         primary = await session.execute(
             select(AIModel).where(AIModel.id == model_id, AIModel.workspace_id == workspace_id).limit(1)
@@ -45,9 +45,24 @@ async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | 
             select(AIModel).where(AIModel.workspace_id == workspace_id, AIModel.is_active == True)
         )
         models = list(result.scalars().all())
-    return [{"id": str(m.id), "provider": m.provider, "model_id": m.model_id,
-             "api_key": m.api_key, "base_url": m.base_url, "name": m.name,
-             "is_active": m.is_active} for m in models]
+    serialized = [{"id": str(m.id), "provider": m.provider, "model_id": m.model_id,
+                   "api_key": None, "base_url": m.endpoint_url, "name": m.name,
+                   "endpoint_url": m.endpoint_url, "is_active": m.is_active} for m in models]
+    if not serialized:
+        from config import get_settings as get_ai_settings
+        ollama_url = get_ai_settings().ollama_url
+        logger.info("No AI models configured for workspace %s — using Ollama default at %s", workspace_id, ollama_url)
+        serialized = [{
+            "id": "default-ollama",
+            "provider": "ollama",
+            "model_id": "kimi-k2.5:cloud",
+            "api_key": None,
+            "base_url": ollama_url,
+            "endpoint_url": ollama_url,
+            "name": "Ollama (default)",
+            "is_active": True,
+        }]
+    return serialized
 
 SYSTEM_PROMPT = """You are OPPM AI, a project management assistant using the One Page Project Manager (OPPM) methodology.
 

@@ -1,6 +1,6 @@
 # API Reference
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Purpose
 
@@ -225,12 +225,12 @@ Treat this field as a workspace member identifier, even though the public field 
 |---|---|---|---|---|
 | `GET` | `/api/v1/workspaces/{workspace_id}/tasks` | Yes | Member | Query params: `project_id`, `status`, `page`, `page_size`. Returns `{ items, total }`. |
 | `GET` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}` | Yes | Member | Returns one task. |
-| `POST` | `/api/v1/workspaces/{workspace_id}/tasks` | Yes | Write | Creates a task. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/tasks` | Yes | Write | Creates a task. Only project leads can create tasks. |
 | `PUT` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}` | Yes | Write | Updates a task. |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}` | Yes | Write | Deletes a task. |
 | `GET` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports` | Yes | Member | Lists daily reports for a task. |
-| `POST` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports` | Yes | Member | Creates a daily report entry. |
-| `PATCH` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}/approve` | Yes | Write | Approves or rejects a report. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports` | Yes | Member | Creates a daily report entry. Only the task's assignee can submit reports. |
+| `PATCH` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}/approve` | Yes | Write | Approves or revokes approval of a report. Only project leads can approve. Send `{"is_approved": true}` or `{"is_approved": false}`. |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}` | Yes | Member | Deletes a report. |
 
 ### Current Task Model Notes
@@ -270,7 +270,15 @@ Treat this field as a workspace member identifier, even though the public field 
 
 - timeline rows are keyed by `week_start` date, not separate year and month fields
 - objective/task linkage is handled through `tasks.oppm_objective_id`
+- objectives have an optional `priority` field (single character: `A`, `B`, or `C`)
 - costs are project-scoped and tracked independently from tasks
+
+### Objective Create/Update Fields
+
+- `title` (required on create)
+- `owner_id` (workspace member id)
+- `priority` (optional, single char: A/B/C)
+- `sort_order` (integer)
 
 ## Notification Routes (Core Service)
 

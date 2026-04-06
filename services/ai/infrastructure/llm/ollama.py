@@ -1,5 +1,6 @@
 """Ollama (local/cloud) LLM adapter."""
 
+import base64
 import json
 import logging
 import httpx
@@ -70,3 +71,43 @@ class OllamaAdapter(LLMAdapter):
             if e.response.status_code in (404, 502, 503):
                 raise ProviderUnavailableError(self.provider, f"HTTP {e.response.status_code}") from e
             raise
+
+    async def call_vision_json(
+        self, model_id: str, prompt: str, image_bytes: bytes, **kwargs
+    ) -> dict | None:
+        """Send an image + prompt to an Ollama vision model and return parsed JSON.
+
+        The model must support multimodal input (e.g. llava, llama3.2-vision,
+        bakllava).  ``image_bytes`` is the raw binary image data (PNG/JPEG/WEBP).
+        """
+        url = self._url(**kwargs)
+        image_b64 = base64.b64encode(image_bytes).decode()
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(
+                    f"{url}/api/chat",
+                    json={
+                        "model": model_id,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": prompt,
+                                "images": [image_b64],
+                            }
+                        ],
+                        "stream": False,
+                        "format": "json",
+                    },
+                )
+                resp.raise_for_status()
+                text = resp.json().get("message", {}).get("content", "")
+                return json.loads(text)
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            raise ProviderUnavailableError(self.provider, str(e)) from e
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (404, 502, 503):
+                raise ProviderUnavailableError(self.provider, f"HTTP {e.response.status_code}") from e
+            raise
+        except json.JSONDecodeError as e:
+            logger.warning("Ollama vision returned non-JSON: %s", e)
+            return None

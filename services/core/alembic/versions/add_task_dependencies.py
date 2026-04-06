@@ -1,18 +1,21 @@
 """add_task_dependencies
 
-Revision ID: e5f6a7b8c9d0
-Revises: d4e5f6a7b8c9
+Revision ID: add_task_dependencies
+Revises: add_member_skills
 Create Date: 2026-04-04 00:00:00.000000
 
 """
+from typing import Sequence, Union
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = 'e5f6a7b8c9d0'
-down_revision = 'd4e5f6a7b8c9'
-branch_labels = None
-depends_on = None
+# revision identifiers, used by Alembic.
+revision: str = 'add_task_dependencies'
+down_revision: Union[str, Sequence[str], None] = 'add_member_skills'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:

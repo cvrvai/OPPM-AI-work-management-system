@@ -62,8 +62,11 @@ const ENTITY_QUERY_MAP: Record<string, string> = {
 export function ChatPanel() {
   const [input, setInput] = useState('')
   const [pendingPlan, setPendingPlan] = useState<SuggestPlanResponse | null>(null)
+  const [showPlanInput, setShowPlanInput] = useState(false)
+  const [planGoal, setPlanGoal] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const planInputRef = useRef<HTMLInputElement>(null)
 
   const isOpen = useChatStore((s) => s.isOpen)
   const messages = useChatStore((s) => s.messages)
@@ -88,6 +91,11 @@ export function ChatPanel() {
   useEffect(() => {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 200)
   }, [isOpen])
+
+  // Focus plan goal input when shown
+  useEffect(() => {
+    if (showPlanInput) setTimeout(() => planInputRef.current?.focus(), 50)
+  }, [showPlanInput])
 
   // Invalidate queries for updated entities
   const invalidateEntities = useCallback(
@@ -195,6 +203,15 @@ export function ChatPanel() {
     )
   }, [input, messages, chatMutation, addMessage])
 
+  const handleSuggestPlan = useCallback(() => {
+    const goal = planGoal.trim()
+    if (!goal) return
+    setShowPlanInput(false)
+    setPlanGoal('')
+    addMessage({ role: 'user', content: `Generate a plan: ${goal}` })
+    suggestPlanMutation.mutate(goal)
+  }, [planGoal, addMessage, suggestPlanMutation])
+
   const isLoading =
     chatMutation.isPending ||
     suggestPlanMutation.isPending ||
@@ -235,13 +252,7 @@ export function ChatPanel() {
       {isProjectContext && (
         <div className="flex gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50/50">
           <button
-            onClick={() => {
-              const desc = prompt('Describe the project goals for AI plan generation:')
-              if (desc) {
-                addMessage({ role: 'user', content: `Generate a plan: ${desc}` })
-                suggestPlanMutation.mutate(desc)
-              }
-            }}
+            onClick={() => setShowPlanInput(true)}
             disabled={isLoading}
             className="flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700 rounded-full px-3 py-1.5 hover:bg-blue-100 disabled:opacity-50 font-medium"
           >
@@ -365,34 +376,68 @@ export function ChatPanel() {
 
       {/* Input area */}
       <div className="border-t border-gray-200 px-4 py-3">
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                handleSend()
+        {showPlanInput ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-gray-600">Describe the project goals for AI plan generation:</p>
+            <div className="flex items-center gap-2">
+              <input
+                ref={planInputRef}
+                value={planGoal}
+                onChange={(e) => setPlanGoal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); handleSuggestPlan() }
+                  if (e.key === 'Escape') { setShowPlanInput(false); setPlanGoal('') }
+                }}
+                placeholder="e.g. Build a healthcare data platform…"
+                className="flex-1 rounded-xl border border-blue-300 bg-blue-50/60 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 placeholder:text-blue-300"
+              />
+              <button
+                onClick={handleSuggestPlan}
+                disabled={!planGoal.trim()}
+                className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Generate plan"
+              >
+                <Sparkles className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => { setShowPlanInput(false); setPlanGoal('') }}
+                className="rounded-xl border border-gray-200 p-2 text-gray-500 hover:bg-gray-100"
+                title="Cancel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+              placeholder={
+                isProjectContext
+                  ? 'Ask about your project…'
+                  : 'Ask about your workspace…'
               }
-            }}
-            placeholder={
-              isProjectContext
-                ? 'Ask about your project…'
-                : 'Ask about your workspace…'
-            }
-            rows={1}
-            className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 placeholder:text-gray-400"
-            style={{ maxHeight: '120px' }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        </div>
+              rows={1}
+              className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 placeholder:text-gray-400"
+              style={{ maxHeight: '120px' }}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isLoading}
+              className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

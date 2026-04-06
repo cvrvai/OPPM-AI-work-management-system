@@ -1,5 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
+import { api } from '@/lib/api'
 import { WorkspaceSelector } from '@/components/workspace/WorkspaceSelector'
 import {
   LayoutDashboard,
@@ -10,8 +12,10 @@ import {
   Target,
   Users,
   X,
+  Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { MyInvite } from '@/types'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -20,6 +24,23 @@ const navItems = [
   { to: '/commits', icon: GitCommitHorizontal, label: 'Commits' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
+
+function InviteBadge() {
+  const { data } = useQuery({
+    queryKey: ['my-invites'],
+    queryFn: () => api.get<MyInvite[]>('/v1/invites/my-invites'),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    retry: 1,
+  })
+  const count = (data ?? []).filter((i) => !i.is_expired).length
+  if (!count) return null
+  return (
+    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white">
+      {count}
+    </span>
+  )
+}
 
 export function Sidebar({
   isMobileOpen,
@@ -114,6 +135,23 @@ export function Sidebar({
               {label}
             </NavLink>
           ))}
+          {/* Invitations — with live badge */}
+          <NavLink
+            to="/invitations"
+            onClick={onCloseMobile}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-sidebar-active text-white'
+                  : 'text-sidebar-text hover:bg-sidebar-hover hover:text-white'
+              )
+            }
+          >
+            <Mail className="h-4.5 w-4.5" />
+            Invitations
+            <InviteBadge />
+          </NavLink>
         </nav>
 
         {/* Footer */}
