@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatContext } from '@/hooks/useChatContext'
+import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import type { Project, Task, TaskReport, Priority, TaskStatus, OPPMObjective, OPPMSubObjective, WorkspaceMember } from '@/types'
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
 import { Skeleton } from '@/components/Skeleton'
@@ -85,6 +86,9 @@ export function ProjectDetail() {
   const currentUserId = useAuthStore((s) => s.user?.id)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const queryClient = useQueryClient()
+
+  // Redirect to /projects when workspace changes — prevents cross-workspace 404s
+  useWorkspaceNavGuard()
 
   const [showCreate, setShowCreate] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)

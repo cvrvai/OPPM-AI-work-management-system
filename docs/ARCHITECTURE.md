@@ -163,14 +163,27 @@ Important facts:
 
 Redis is used as a support dependency, not as the source of truth.
 
-Current roles:
+**How Redis works in this system:**
 
-- token blacklist support on signout
-- rate limiting support
-- cache support for selected flows
-- workspace membership cache bootstrap support
+Redis is an in-memory key-value store. The app uses `redis.asyncio` (async client) via `shared/redis_client.py`, which maintains a singleton connection pool.
 
-If Redis is unavailable, the app can still start, but some performance and security-related behaviors degrade.
+Current roles in code:
+
+| Role | Where | How |
+|---|---|---|
+| Token blacklist | `auth_service.signout()` | On signout, current access token hash is stored with a TTL equal to the remaining token lifetime. Subsequent requests check this key before accepting the token. |
+| Rate limiting | `middleware/` | Request count per user/IP stored as a Redis key with a sliding window TTL. Returns `429` when limit exceeded. |
+| Cache (planned) | Not yet active in routes | Workspace membership lookups are the intended first cache target. |
+
+If Redis is unavailable, the app can still start, but:
+- signed-out access tokens may still work until they expire naturally
+- rate limit enforcement degrades to in-memory (non-distributed)
+
+**To check if Redis is running:**
+```powershell
+redis-cli ping  # should return PONG
+```
+The connection URL comes from `REDIS_URL` env var (default: `redis://localhost:6379`).
 
 ## Authentication And Authorization
 
@@ -246,8 +259,113 @@ The frontend follows a simple pattern:
 - client session, workspace, and chat state with Zustand
 - all HTTP requests through `frontend/src/lib/api.ts`
 - route protection through `ProtectedRoute` in `frontend/src/App.tsx`
+- workspace-scoped navigation safety via `useWorkspaceNavGuard` hook
 
 See [FRONTEND-REFERENCE.md](FRONTEND-REFERENCE.md) for the detailed folder-level map.
+
+## Load Balancing
+
+### How Load Balancing Works
+
+There are two load balancing implementations — one for native dev, one for Docker.
+
+#### Python Gateway (native dev) — `services/gateway/`
+
+```
+Browser
+  -> gateway:8080
+      -> HealthyRoundRobin.next()
+          -> next healthy instance from pool
+              -> target service (core:8000, ai:8001, etc.)
+```
+
+`HealthyRoundRobin` in `services/gateway/load_balancer.py` uses Python's `itertools.cycle` to
+select the next upstream in a round-robin loop, but only from the set of currently healthy instances.
+
+Every 10 seconds an async background task pings each upstream's `/health` endpoint.
+If a service returns HTTP 5xx or is unreachable, it is removed from the cycle.
+When it recovers, it is added back.
+
+To run multiple instances of a service, set the env var to a comma-separated list:
+```
+CORE_URLS=http://localhost:8000,http://localhost:8010
+```
+
+#### Nginx Gateway (Docker / production) — `gateway/nginx.conf`
+
+Nginx uses its built-in `upstream` directive with the default round-robin strategy.
+The same route ownership table applies — the Docker and native rules must stay in sync.
+
+#### Route Ownership (both gateways)
+
+| URL prefix | Service |
+|---|---|
+| `/api/v1/workspaces/*/ai/*` | ai |
+| `/api/v1/workspaces/*/rag/*` | ai |
+| `/api/v1/workspaces/*/mcp/*` | mcp |
+| `/api/v1/workspaces/*/github-accounts*` | git |
+| `/api/v1/workspaces/*/commits*` | git |
+| `/api/v1/git/webhook` | git |
+| all other `/api/*` | core |
+
+## Real-Time Collaboration (Design Note)
+
+The current architecture does not implement real-time multi-user collaboration (like Google Docs).
+This section documents the algorithm and approach that would be used if it were added.
+
+### Google Docs Technique: Operational Transformation (OT)
+
+Google Docs uses **Operational Transformation**. The simpler modern alternative is **CRDTs** (Conflict-free Replicated Data Types), used by Figma, Notion, and others.
+
+**How OT works (simplified):**
+
+```
+User A types "Hello"  →  Op: Insert("Hello", position=0)
+User B types "World"  →  Op: Insert("World", position=0)
+
+Server receives A's op first.
+Server transforms B's op: Insert("World", position=5)  ← shifted past A's insert
+Both users see "HelloWorld"
+```
+
+**How CRDTs work:**
+
+Each operation is designed so that applying it in any order always produces the same result (commutativity + idempotency). No central transform needed — just merge.
+
+### How to Add Real-Time to This System
+
+The recommended approach given this stack:
+
+```
+1. Backend: Add WebSocket endpoint per project (FastAPI supports this natively)
+   POST /api/v1/workspaces/{ws}/projects/{id}/ws
+
+2. Connection: Frontend keeps a WebSocket open while on a project page
+
+3. Broadcast: When any user saves a change (spreadsheet op, task update),
+   the server fans out the operation to all connected clients for that project
+
+4. Redis Pub/Sub: Use Redis as the message bus across multiple core instances
+   - Core instance A receives op from User A
+   - Publishes to Redis channel "project:{id}:ops"
+   - Core instance B is subscribed and forwards to User B's WebSocket
+```
+
+**Redis Pub/Sub pattern (would be added to `shared/redis_client.py`):**
+```python
+# Publisher (when a user saves)
+redis = await get_redis()
+await redis.publish(f"project:{project_id}:ops", json.dumps(op))
+
+# Subscriber (WebSocket handler)
+pubsub = redis.pubsub()
+await pubsub.subscribe(f"project:{project_id}:ops")
+async for message in pubsub.listen():
+    await ws.send_text(message["data"])
+```
+
+**The FortuneSheet spreadsheet** already exposes an `onOp` callback that fires for every cell change,
+making it the natural source of ops to broadcast.
 
 ## Deployment Modes
 

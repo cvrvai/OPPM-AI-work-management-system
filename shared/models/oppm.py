@@ -127,3 +127,51 @@ class OPPMTemplate(Base):
     file_name: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OPPMHeader(Base):
+    """Per-project OPPM form header fields.
+
+    Stores the free-text cells in the OPPM template that are NOT already
+    captured on the projects table (objective_summary, deliverable_output,
+    start_date, deadline are on projects — no duplication here).
+    """
+    __tablename__ = "oppm_header"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    # "Project Leader:" text cell (row 2, left) — free text, not a FK
+    project_leader_text: Mapped[str | None] = mapped_column(String(200))
+    # "Project Completed By: Text" header on the right completion panel
+    completed_by_text: Mapped[str | None] = mapped_column(String, nullable=True)
+    # "# People working on the project" row
+    people_count: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OPPMTaskItem(Base):
+    """Numbered major-task / sub-task rows in the OPPM template.
+
+    These represent the OPPM form's task layout (1., 1.1, 1.2, 2., …)
+    and are distinct from the general-purpose tasks table.
+    An optional task_id links back to a real task when desired.
+    """
+    __tablename__ = "oppm_task_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    # NULL → major task;  set → sub-task row
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_task_items.id", ondelete="CASCADE"), index=True)
+    # Optional link to a real task
+    task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
+    # "1", "1.1", "1.2", "2", "2.3" …
+    number_label: Mapped[str] = mapped_column(String(10), nullable=False, default="")
+    title: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    # Free-text deadline shown in the "(Deadline)" column of the OPPM template
+    deadline_text: Mapped[str | None] = mapped_column(String(100))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

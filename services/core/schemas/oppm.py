@@ -139,3 +139,28 @@ class RiskUpdate(BaseModel):
         if v is not None and v not in ("green", "amber", "red"):
             raise ValueError("rag must be green, amber, or red")
         return v
+
+
+# ── OPPM Header ──
+
+class OPPMHeaderUpsert(BaseModel):
+    project_leader_text: Optional[str] = Field(None, max_length=200)
+    completed_by_text: Optional[str] = None
+    people_count: Optional[int] = Field(None, ge=0)
+
+
+# ── OPPM Task Items ──
+
+class OPPMTaskItemPayload(BaseModel):
+    number_label: Optional[str] = Field(None, max_length=10)
+    title: Optional[str] = Field(None, max_length=500)
+    deadline_text: Optional[str] = Field(None, max_length=100)
+    task_id: Optional[str] = None
+    children: list["OPPMTaskItemPayload"] = []
+
+
+OPPMTaskItemPayload.model_rebuild()
+
+
+class OPPMTaskItemsReplace(BaseModel):
+    items: list[OPPMTaskItemPayload]

@@ -51,7 +51,7 @@ async def execute_tool(
             case "set_timeline_status":
                 entry_data = {
                     "project_id": project_id,
-                    "objective_id": tool_input["objective_id"],
+                    "task_id": tool_input["task_id"],
                     "week_start": tool_input["week_start"],
                     "status": tool_input["status"],
                 }
@@ -65,7 +65,7 @@ async def execute_tool(
                 for entry in tool_input.get("entries", []):
                     entry_data = {
                         "project_id": project_id,
-                        "objective_id": entry["objective_id"],
+                        "task_id": entry["task_id"],
                         "week_start": entry["week_start"],
                         "status": entry["status"],
                     }

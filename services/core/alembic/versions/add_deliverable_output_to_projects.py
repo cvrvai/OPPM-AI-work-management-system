@@ -14,13 +14,13 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'add_deliverable_output_to_projects'
-down_revision: Union[str, Sequence[str], None] = 'oppm_classic_schema_tables'
+down_revision: Union[str, Sequence[str], None] = 'add_oppm_templates'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('projects', sa.Column('deliverable_output', sa.Text(), nullable=True))
+    op.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS deliverable_output TEXT")
 
 
 def downgrade() -> None:

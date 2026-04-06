@@ -11,6 +11,7 @@ from repositories.oppm_repo import (
     ObjectiveRepository, TimelineRepository, CostRepository,
     SubObjectiveRepository, TaskOwnerRepository,
     DeliverableRepository, ForecastRepository, RiskRepository,
+    OPPMHeaderRepository, OPPMTaskItemRepository,
     _row_to_dict,
 )
 from repositories.project_repo import ProjectRepository
@@ -394,6 +395,41 @@ async def delete_risk(session: AsyncSession, item_id: str, workspace_id: str) ->
         raise HTTPException(status_code=404, detail="Risk not found")
     await _verify_project_workspace(session, str(obj.project_id), workspace_id)
     return await repo.delete(item_id)
+
+
+# ── OPPM Header ──
+
+async def get_oppm_header(session: AsyncSession, project_id: str, workspace_id: str) -> dict | None:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    repo = OPPMHeaderRepository(session)
+    header = await repo.find_by_project(project_id)
+    return _row_to_dict(header) if header else None
+
+
+async def upsert_oppm_header(session: AsyncSession, project_id: str, data: dict, workspace_id: str) -> dict:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    repo = OPPMHeaderRepository(session)
+    header = await repo.upsert(project_id, workspace_id, data)
+    return _row_to_dict(header)
+
+
+# ── OPPM Task Items ──
+
+async def get_oppm_task_items(session: AsyncSession, project_id: str, workspace_id: str) -> list[dict]:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    repo = OPPMTaskItemRepository(session)
+    return await repo.find_project_items_tree(project_id)
+
+
+async def replace_oppm_task_items(
+    session: AsyncSession,
+    project_id: str,
+    items: list[dict],
+    workspace_id: str,
+) -> list[dict]:
+    await _verify_project_workspace(session, project_id, workspace_id)
+    repo = OPPMTaskItemRepository(session)
+    return await repo.replace_all(project_id, workspace_id, items)
 
 
 # ── Helpers ──

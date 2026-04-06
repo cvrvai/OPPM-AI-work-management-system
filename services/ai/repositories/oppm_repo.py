@@ -40,7 +40,7 @@ class TimelineRepository(BaseRepository):
             select(OPPMTimelineEntry)
             .where(
                 OPPMTimelineEntry.project_id == data["project_id"],
-                OPPMTimelineEntry.objective_id == data["objective_id"],
+                OPPMTimelineEntry.task_id == data["task_id"],
                 OPPMTimelineEntry.week_start == data["week_start"],
             )
             .limit(1)

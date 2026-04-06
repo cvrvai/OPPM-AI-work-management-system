@@ -11,7 +11,7 @@ from shared.models.oppm import (
     OPPMObjective, OPPMTimelineEntry, ProjectCost,
     OPPMSubObjective, TaskSubObjective,
     OPPMDeliverable, OPPMForecast, OPPMRisk,
-    OPPMTemplate,
+    OPPMTemplate, OPPMHeader, OPPMTaskItem,
 )
 from shared.models.task import Task, TaskAssignee, TaskOwner
 from shared.models.workspace import WorkspaceMember
@@ -304,3 +304,104 @@ class OPPMTemplateRepository(BaseRepository):
         await self.session.execute(stmt)
         await self.session.flush()
         return True
+
+
+# ─── OPPM Header ──────────────────────────────────────────────
+
+class OPPMHeaderRepository(BaseRepository):
+    model = OPPMHeader
+
+    async def find_by_project(self, project_id: str) -> OPPMHeader | None:
+        stmt = select(OPPMHeader).where(OPPMHeader.project_id == project_id).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def upsert(self, project_id: str, workspace_id: str, data: dict) -> OPPMHeader:
+        existing = await self.find_by_project(project_id)
+        if existing:
+            for k, v in data.items():
+                setattr(existing, k, v)
+            existing.updated_at = datetime.utcnow()
+            await self.session.flush()
+            return existing
+        return await self.create({
+            "project_id": project_id,
+            "workspace_id": workspace_id,
+            **data,
+        })
+
+
+# ─── OPPM Task Items ──────────────────────────────────────────
+
+class OPPMTaskItemRepository(BaseRepository):
+    model = OPPMTaskItem
+
+    async def find_project_items(self, project_id: str) -> list[OPPMTaskItem]:
+        """Return all items for a project ordered by sort_order."""
+        stmt = (
+            select(OPPMTaskItem)
+            .where(OPPMTaskItem.project_id == project_id)
+            .order_by(OPPMTaskItem.sort_order)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def find_project_items_tree(self, project_id: str) -> list[dict]:
+        """Return major tasks with their sub-tasks nested under 'children'."""
+        items = await self.find_project_items(project_id)
+        by_id: dict[str, dict] = {}
+        roots: list[dict] = []
+        for item in items:
+            d = _row_to_dict(item)
+            d["children"] = []
+            by_id[str(item.id)] = d
+        for item in items:
+            d = by_id[str(item.id)]
+            if item.parent_id is None:
+                roots.append(d)
+            else:
+                parent = by_id.get(str(item.parent_id))
+                if parent:
+                    parent["children"].append(d)
+        return roots
+
+    async def replace_all(self, project_id: str, workspace_id: str, items: list[dict]) -> list[dict]:
+        """Delete all existing items for a project and insert the new set.
+
+        Each item in *items* may contain a 'children' list for sub-tasks.
+        Parent rows are inserted first; children reference the newly created parent id.
+        """
+        await self.session.execute(
+            sa_delete(OPPMTaskItem).where(OPPMTaskItem.project_id == project_id)
+        )
+        await self.session.flush()
+
+        result_rows: list[dict] = []
+        sort = 0
+        for item in items:
+            children = item.pop("children", [])
+            item.pop("id", None)  # strip client-side id
+            parent = await self.create({
+                **item,
+                "project_id": project_id,
+                "workspace_id": workspace_id,
+                "parent_id": None,
+                "sort_order": sort,
+            })
+            sort += 1
+            pd = _row_to_dict(parent)
+            pd["children"] = []
+            for child in children:
+                child.pop("id", None)
+                child.pop("children", None)
+                sub = await self.create({
+                    **child,
+                    "project_id": project_id,
+                    "workspace_id": workspace_id,
+                    "parent_id": parent.id,
+                    "sort_order": sort,
+                })
+                sort += 1
+                pd["children"].append(_row_to_dict(sub))
+            result_rows.append(pd)
+        return result_rows

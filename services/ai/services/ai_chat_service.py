@@ -8,6 +8,7 @@ and executes them via the tool executor.
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime
 
@@ -79,14 +80,14 @@ When the user wants to make changes, include a JSON tool_calls array at the END 
 Available tools:
 - create_objective: {{"title": "...", "sort_order": N}}
 - update_objective: {{"objective_id": "...", "title": "..."}}
-- set_timeline_status: {{"objective_id": "...", "week_start": "YYYY-MM-DD", "status": "planned|in_progress|completed|at_risk|blocked"}}
-- bulk_set_timeline: {{"entries": [{{"objective_id": "...", "week_start": "YYYY-MM-DD", "status": "..."}}]}}
+- set_timeline_status: {{"task_id": "...", "week_start": "YYYY-MM-DD", "status": "planned|in_progress|completed|at_risk|blocked"}}
+- bulk_set_timeline: {{"entries": [{{"task_id": "...", "week_start": "YYYY-MM-DD", "status": "..."}}]}}
 - create_task: {{"title": "...", "description": "...", "priority": "low|medium|high|critical", "oppm_objective_id": "..."}}
 - update_task: {{"task_id": "...", "status": "todo|in_progress|completed", "progress": N}}
 
 Example:
 <tool_calls>
-[{{"tool": "set_timeline_status", "input": {{"objective_id": "abc-123", "week_start": "2026-04-06", "status": "completed"}}}}]
+[{{"tool": "set_timeline_status", "input": {{"task_id": "abc-123", "week_start": "2026-04-06", "status": "completed"}}}}]
 </tool_calls>
 
 ## Rules
@@ -114,17 +115,17 @@ async def _build_project_context(session: AsyncSession, project_id: str, workspa
     timeline = await timeline_repo.find_project_timeline(project_id)
     costs = await cost_repo.get_cost_summary(project_id)
 
-    # Build timeline lookup
+    # Build timeline lookup: task_id → week → status
     tl_map: dict[str, dict[str, str]] = {}
     for entry in timeline:
-        oid = str(entry.objective_id)
-        if oid not in tl_map:
-            tl_map[oid] = {}
-        tl_map[oid][str(entry.week_start)] = entry.status
+        tid = str(entry.task_id)
+        if tid not in tl_map:
+            tl_map[tid] = {}
+        tl_map[tid][str(entry.week_start)] = entry.status
 
     # Get workspace members
     result = await session.execute(
-        select(WorkspaceMember.user_id, WorkspaceMember.display_name, WorkspaceMember.email, WorkspaceMember.role)
+        select(WorkspaceMember.user_id, WorkspaceMember.display_name, WorkspaceMember.role)
         .where(WorkspaceMember.workspace_id == workspace_id)
     )
     member_list = result.all()
@@ -140,11 +141,13 @@ async def _build_project_context(session: AsyncSession, project_id: str, workspa
     ]
 
     for obj in objectives:
-        tl = tl_map.get(obj["id"], {})
-        tl_str = ", ".join(f"{k}: {v}" for k, v in sorted(tl.items())) or "no timeline entries"
         task_count = len(obj.get("tasks", []))
         lines.append(f'- [{obj["id"]}] "{obj["title"]}" (tasks: {task_count})')
-        lines.append(f'  Timeline: {tl_str}')
+        for task in obj.get("tasks", []):
+            tid = str(task["id"])
+            tl = tl_map.get(tid, {})
+            tl_str = ", ".join(f"{k}: {v}" for k, v in sorted(tl.items())) or "no entries"
+            lines.append(f'  - Task [{tid}] "{task["title"]}" | status: {task["status"]} | timeline: {tl_str}')
 
     if not objectives:
         lines.append("  No objectives defined yet.")
@@ -155,7 +158,7 @@ async def _build_project_context(session: AsyncSession, project_id: str, workspa
     lines.append("")
     lines.append("## Team Members")
     for m in member_list:
-        name = m.display_name or m.email or str(m.user_id)[:8]
+        name = m.display_name or str(m.user_id)[:8]
         lines.append(f'- {name} ({m.role})')
 
     return "\n".join(lines)
@@ -163,7 +166,6 @@ async def _build_project_context(session: AsyncSession, project_id: str, workspa
 
 def _parse_tool_calls(text: str) -> tuple[str, list[dict]]:
     """Extract tool_calls JSON from the LLM response and return clean text + parsed calls."""
-    import re
     match = re.search(r"<tool_calls>\s*(.*?)\s*</tool_calls>", text, re.DOTALL)
     if not match:
         return text.strip(), []
@@ -319,13 +321,29 @@ Return ONLY valid JSON with this structure:
 Generate 3-7 objectives with logical week assignments. Use W1-W8 format."""
 
     try:
-        result = await call_with_fallback(models, prompt, json_mode=True)
+        response = await call_with_fallback(models, prompt)
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable for suggest_plan: %s", e)
         raise HTTPException(status_code=502, detail="All AI models are currently unavailable.")
     except Exception as e:
         logger.warning("Suggest plan LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
+
+    # Extract JSON from the text response (model may wrap it in ```json ... ``` blocks)
+    raw_text = response.text.strip() if response else ""
+    result = None
+    try:
+        # Strip markdown code fences if present
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.DOTALL).strip()
+        result = json.loads(clean)
+    except (json.JSONDecodeError, ValueError):
+        # Last resort: find first {...} block
+        m = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if m:
+            try:
+                result = json.loads(m.group(0))
+            except (json.JSONDecodeError, ValueError):
+                pass
 
     if not result:
         raise HTTPException(status_code=502, detail="AI returned empty response")
@@ -362,8 +380,6 @@ async def commit_plan(
 
     project_id = plan["project_id"]
     objective_repo = ObjectiveRepository(session)
-    timeline_repo = TimelineRepository(session)
-    project_repo = ProjectRepository(session)
     audit_repo = AuditRepository(session)
     created_objectives = []
 
@@ -374,22 +390,6 @@ async def commit_plan(
             "sort_order": i + 1,
         })
         created_objectives.append(obj)
-
-        project = await project_repo.find_by_id(project_id)
-        start_date = str(project.start_date) if project and project.start_date else None
-        if start_date:
-            from datetime import timedelta
-            from dateutil.parser import parse as parse_date
-            base = parse_date(start_date)
-            for week_label in obj_data.get("suggested_weeks", []):
-                week_num = int(week_label.replace("W", "")) - 1
-                week_start = base + timedelta(weeks=week_num)
-                await timeline_repo.upsert_entry({
-                    "project_id": project_id,
-                    "objective_id": str(obj.id),
-                    "week_start": week_start.strftime("%Y-%m-%d"),
-                    "status": "planned",
-                })
 
     await audit_repo.log(
         workspace_id, user_id,

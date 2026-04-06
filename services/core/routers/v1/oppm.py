@@ -13,6 +13,8 @@ from schemas.oppm import (
     DeliverableCreate, DeliverableUpdate,
     ForecastCreate, ForecastUpdate,
     RiskCreate, RiskUpdate,
+    OPPMHeaderUpsert,
+    OPPMTaskItemsReplace,
 )
 from shared.schemas.common import SuccessResponse
 from services.oppm_service import (
@@ -46,6 +48,10 @@ from services.oppm_service import (
     create_risk,
     update_risk,
     delete_risk,
+    get_oppm_header,
+    upsert_oppm_header,
+    get_oppm_task_items,
+    replace_oppm_task_items,
 )
 from services.export_service import export_oppm_xlsx, import_oppm_xlsx, import_oppm_json, parse_oppm_xlsx_to_preview
 from repositories.oppm_repo import OPPMTemplateRepository
@@ -344,3 +350,50 @@ async def delete_spreadsheet_route(
     repo = OPPMTemplateRepository(session)
     await repo.delete_by_project(project_id)
     return {"deleted": True}
+
+
+# ── OPPM Header ──
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/header")
+async def get_oppm_header_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the OPPM form header fields for a project."""
+    return await get_oppm_header(session, project_id, ws.workspace_id)
+
+
+@router.put("/workspaces/{workspace_id}/projects/{project_id}/oppm/header")
+async def upsert_oppm_header_route(
+    project_id: str,
+    data: OPPMHeaderUpsert,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create or update the OPPM header fields for a project."""
+    return await upsert_oppm_header(session, project_id, data.model_dump(exclude_none=True), ws.workspace_id)
+
+
+# ── OPPM Task Items ──
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/task-items")
+async def list_oppm_task_items_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the OPPM task items tree (major tasks with children) for a project."""
+    return await get_oppm_task_items(session, project_id, ws.workspace_id)
+
+
+@router.put("/workspaces/{workspace_id}/projects/{project_id}/oppm/task-items")
+async def replace_oppm_task_items_route(
+    project_id: str,
+    data: OPPMTaskItemsReplace,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    """Full replace of OPPM task items for a project (delete-all then re-insert)."""
+    items = [i.model_dump() for i in data.items]
+    return await replace_oppm_task_items(session, project_id, items, ws.workspace_id)

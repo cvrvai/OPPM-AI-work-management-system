@@ -94,7 +94,9 @@ Current hooks:
 - `useChatContext.ts`
   Sets chat context to workspace or project and clears messages when the context changes.
 - `useWorkspace.ts`
-  Workspace-related helper hook.
+  Two helpers: `useWorkspaceId()` — throws if no workspace selected; `useWsPath()` — returns `/v1/workspaces/<id>` prefix.
+- `useWorkspaceNavGuard.ts`
+  Detects workspace changes on project-scoped pages and redirects to `/projects`. Apply this in any page that is keyed to a specific project ID so switching workspace never leaves the user on a stale URL that fires cross-workspace 404s.
 
 ### `lib/`
 
@@ -103,7 +105,7 @@ Shared client-side helpers.
 Current files:
 
 - `api.ts`
-  Central HTTP client wrapper around `fetch`.
+  Central HTTP client wrapper around `fetch`. Handles auth header injection, 401 token refresh, and throws `ApiError` (with `.status` field) for all non-ok responses.
 - `tokens.ts`
   Token helper utilities.
 - `utils.ts`
@@ -113,6 +115,30 @@ Important rule already followed in code:
 
 - pages and components use `api.ts`
 - they do not call `fetch` directly for application API traffic
+
+**`ApiError` class** (in `api.ts`):
+
+All failed responses throw `ApiError` instead of a plain `Error`. This allows TanStack Query's `retry` function to inspect `error.status` and skip retrying 4xx errors entirely.
+
+```typescript
+// In App.tsx — never retry client errors (404, 403, 401)
+retry: (failureCount, error) => {
+  if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false
+  return failureCount < 3
+}
+```
+
+## Local Storage
+
+The frontend stores the following keys in `localStorage`:
+
+| Key | Set by | Purpose |
+|---|---|---|
+| `access_token` | `authStore.ts` | JWT access token for API authorization. Sent in every request header. |
+| `refresh_token` | `authStore.ts` | Long-lived refresh token. Used by `api.ts` on 401 to get a new access token without re-login. |
+| `oppm-workspace` | Zustand `persist` middleware | Persists the currently selected workspace across page reloads. |
+
+All three keys are cleared on signout. The workspace key survives reloads but is verified against a fresh workspace list on startup — if the stored workspace no longer exists in the API response, it falls back to the first available workspace.
 
 ### `pages/`
 

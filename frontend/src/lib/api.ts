@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem('access_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
@@ -42,7 +51,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
         })
         if (!retry.ok) {
           const error = await retry.json().catch(() => ({ detail: retry.statusText }))
-          throw new Error(error.detail || 'Request failed')
+          throw new ApiError(retry.status, error.detail || 'Request failed')
         }
         return retry.json()
       }
@@ -51,12 +60,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     const error = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(error.detail || 'Request failed')
+    throw new ApiError(401, error.detail || 'Request failed')
   }
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(error.detail || 'Request failed')
+    throw new ApiError(res.status, error.detail || 'Request failed')
   }
   return res.json()
 }

@@ -64,7 +64,12 @@ class OllamaAdapter(LLMAdapter):
                 )
                 resp.raise_for_status()
                 text = resp.json().get("message", {}).get("content", "")
+                if not text:
+                    return None
                 return json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("Ollama %s returned non-JSON content", model_id)
+            return None
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             raise ProviderUnavailableError(self.provider, str(e)) from e
         except httpx.HTTPStatusError as e:
