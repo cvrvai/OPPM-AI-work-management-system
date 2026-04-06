@@ -141,15 +141,32 @@ Rules:
 - Keep each text under 120 characters.
 - Be specific and professional."""
 
+    import re as _re
+    import json as _json
+
     try:
-        result_json = await call_with_fallback(models, prompt, json_mode=True)
+        response = await call_with_fallback(models, prompt)
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable for fill_oppm: %s", e)
-        # Gracefully degrade — return project data without LLM enrichment
-        result_json = None
+        response = None
     except Exception as e:
         logger.warning("fill_oppm LLM call failed: %s", e)
-        result_json = None
+        response = None
+
+    result_json: dict | None = None
+    if response:
+        raw_text = response.text.strip()
+        # Strip markdown fences then parse JSON
+        clean = _re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=_re.DOTALL).strip()
+        try:
+            result_json = _json.loads(clean)
+        except Exception:
+            m = _re.search(r'\{[^{}]*"project_objective"[^{}]*\}', raw_text, _re.DOTALL)
+            if m:
+                try:
+                    result_json = _json.loads(m.group())
+                except Exception:
+                    result_json = None
 
     if result_json:
         if not fills["project_objective"]:

@@ -126,7 +126,8 @@ export function OPPMView() {
   useEffect(() => {
     if (spreadsheetData?.sheet_data && !isLoadedRef.current) {
       isLoadedRef.current = true
-      sheetDataRef.current = spreadsheetData.sheet_data
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      sheetDataRef.current = spreadsheetData.sheet_data.map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
       setSheetFileName(spreadsheetData.file_name ?? null)
       setSheetKey(k => k + 1)
     }
@@ -151,9 +152,11 @@ export function OPPMView() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await transformExcelToFortune(file, (sheets: any[]) => {
           if (cancelled) return
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const normalized = sheets.map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
           isLoadedRef.current      = true
           hasInteractedRef.current = false  // fresh load — skip first onChange
-          sheetDataRef.current     = sheets
+          sheetDataRef.current     = normalized
           setSheetFileName('OPPM Template.xlsx')
           setSheetKey(k => k + 1)
           // Persist to backend (fire-and-forget)
@@ -161,7 +164,7 @@ export function OPPMView() {
           fetch(`/api${wsPath}/projects/${id}/oppm/spreadsheet`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ sheet_data: sheets, file_name: 'OPPM Template.xlsx' }),
+            body: JSON.stringify({ sheet_data: normalized, file_name: 'OPPM Template.xlsx' }),
           })
         }, () => {}, sheetRef)
       } catch { /* fallthrough — show error state */ }
@@ -180,27 +183,36 @@ export function OPPMView() {
       if (!Array.isArray(sheet.celldata)) return sheet
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const celldata = sheet.celldata.map((cell: any) => {
-        const display: string = cell?.v?.m ?? String(cell?.v?.v ?? '')
+        const display: string = (cell?.v?.m ?? String(cell?.v?.v ?? '')).trim()
         const dl = display.toLowerCase()
 
+        // ── Multi-line merged cell (all 4 text fields in one cell) ──────
+        // Template: "Project Objective: Text\nDeliverable Output : Text\nStart Date:\nDeadline:"
+        if (/project objective/i.test(dl) && /deliverable output/i.test(dl)) {
+          let newText = display
+          if (fills.project_objective)
+            newText = newText.replace(/Project Objective:.*?(?=\n|$)/i, `Project Objective: ${fills.project_objective}`)
+          if (fills.deliverable_output)
+            newText = newText.replace(/Deliverable Output\s*:.*?(?=\n|$)/i, `Deliverable Output : ${fills.deliverable_output}`)
+          if (fills.start_date)
+            newText = newText.replace(/Start Date:.*?(?=\n|$)/i, `Start Date: ${fills.start_date}`)
+          if (fills.deadline)
+            newText = newText.replace(/Deadline:.*?(?=\n|$)/i, `Deadline: ${fills.deadline}`)
+          if (newText === display) return cell
+          return { ...cell, v: { ...cell.v, v: newText, m: newText } }
+        }
+
+        // ── Single-field header cells ────────────────────────────────────
         let newText: string | null = null
         if (/project leader/i.test(dl) && fills.project_leader)
           newText = `Project Leader: ${fills.project_leader}`
         else if (/project name/i.test(dl) && fills.project_name)
           newText = `Project Name: ${fills.project_name}`
-        else if (/project objective/i.test(dl) && fills.project_objective)
-          newText = `Project Objective: ${fills.project_objective}`
-        else if (/deliverable output/i.test(dl) && fills.deliverable_output)
-          newText = `Deliverable Output : ${fills.deliverable_output}`
-        else if (/start date/i.test(dl) && fills.start_date)
-          newText = `Start Date: ${fills.start_date}`
-        else if (/^deadline/i.test(dl) && fills.deadline)
-          newText = `Deadline: ${fills.deadline}`
 
         if (!newText) return cell
         return { ...cell, v: { ...cell.v, v: newText, m: newText } }
       })
-      return { ...sheet, celldata }
+      return { ...sheet, celldata, scrollTop: 0, scrollLeft: 0 }
     })
     sheetDataRef.current = updated
   }, [])
@@ -263,7 +275,8 @@ export function OPPMView() {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await transformExcelToFortune(file, (sheets: any[]) => {
-        sheetDataRef.current = sheets
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sheetDataRef.current = sheets.map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
         setSheetFileName(file.name)
         setSheetKey(k => k + 1)
         setHasUnsaved(true)
