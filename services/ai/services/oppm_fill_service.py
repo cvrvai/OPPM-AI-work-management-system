@@ -14,9 +14,20 @@ from shared.models.ai_model import AIModel
 from shared.models.project import Project, ProjectMember
 from shared.models.task import Task
 from shared.models.oppm import OPPMObjective
+from shared.models.user import User
 from shared.models.workspace import WorkspaceMember
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_member_name(workspace_member: WorkspaceMember | None, user: User | None) -> str | None:
+    if workspace_member and workspace_member.display_name:
+        return workspace_member.display_name
+    if user and user.full_name:
+        return user.full_name
+    if user and user.email:
+        return user.email
+    return None
 
 
 async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | None = None) -> list[dict]:
@@ -99,11 +110,14 @@ async def fill_oppm(
     lead_name: str | None = None
     if project.lead_id:
         member_result = await session.execute(
-            select(WorkspaceMember).where(WorkspaceMember.id == project.lead_id).limit(1)
+            select(WorkspaceMember, User)
+            .join(User, User.id == WorkspaceMember.user_id)
+            .where(WorkspaceMember.id == project.lead_id)
+            .limit(1)
         )
-        member = member_result.scalar_one_or_none()
-        if member:
-            lead_name = member.display_name
+        lead_row = member_result.first()
+        if lead_row:
+            lead_name = _resolve_member_name(lead_row[0], lead_row[1])
 
     # ── Structured fills (no LLM) ─────────────────────────────
     fills: dict[str, str | None] = {
@@ -117,15 +131,16 @@ async def fill_oppm(
 
     # ── Load workspace members on this project ─────────────────
     pm_result = await session.execute(
-        select(WorkspaceMember)
+        select(WorkspaceMember, User)
         .join(ProjectMember, ProjectMember.member_id == WorkspaceMember.id)
+        .join(User, User.id == WorkspaceMember.user_id)
         .where(ProjectMember.project_id == project_id)
         .order_by(WorkspaceMember.display_name)
     )
-    ws_members = list(pm_result.scalars().all())
+    ws_members = list(pm_result.all())
     member_items = [
-        {"slot": i, "name": m.display_name or ""}
-        for i, m in enumerate(ws_members)
+        {"slot": i, "name": _resolve_member_name(workspace_member, user) or ""}
+        for i, (workspace_member, user) in enumerate(ws_members)
     ]
 
     # ── Load tasks hierarchically ──────────────────────────────
@@ -155,7 +170,7 @@ async def fill_oppm(
     def _fmt(d) -> str | None:
         return d.isoformat() if d else None
 
-    for obj_idx, obj in enumerate(objectives):
+    for obj_idx, obj in enumerate(objectives[:4]):
         # Main task row: the objective itself
         task_items.append({
             "index": str(obj_idx + 1),

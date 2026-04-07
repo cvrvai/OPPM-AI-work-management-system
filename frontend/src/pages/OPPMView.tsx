@@ -220,8 +220,9 @@ export function OPPMView() {
   ) => {
     if (!sheetDataRef.current?.length) return
 
-    // ── Owner column header pattern: single letter A/B/C or "Primary/Owner"
-    const ownerColRe = /^[A-C]$|^Primary\/Owner$/i
+    // ── Owner column header pattern: matches the OPPM template's member label cells
+    // ("Project Leader", "Member 1", "Member 2", etc. and legacy "Primary/Secondary Helper")
+    const ownerColRe = /^Project\s*Leader$|^Member\s*\d+$|^Primary\s*Helper$|^Secondary\s*Helper$/i
 
     // ── Timeline columns M–AC (0-indexed 12–28), 17 slots ────
     const TL_COL_START = 12   // Excel col M
@@ -331,6 +332,17 @@ export function OPPMView() {
       })
       if (taskHeaderRow === Infinity) taskHeaderRow = 4  // fallback: Excel row 5
 
+      // ── Find the column that contains the "Main task N" placeholder ──────
+      // In this template col H has "1. Main task 1" as a single cell (one column
+      // left of the "Major Tasks" header); sub-task titles are in col I (taskCol).
+      // We scan the first data row to detect the actual main-task content column.
+      let mainTaskCol = taskCol - 1   // default: one column left of header
+      sheet.celldata.forEach((cell: any) => {
+        if (cell.r === taskHeaderRow + 1 && /main task/i.test(getCellText(cell))) {
+          mainTaskCol = cell.c
+        }
+      })
+
       // ── Position index (row,col → celldata index) ──────────────────────
       const posIndex = new Map<string, number>()
       celldata.forEach((cell: any, idx: number) => posIndex.set(`${cell.r},${cell.c}`, idx))
@@ -348,27 +360,68 @@ export function OPPMView() {
       }
 
       // ── Fill task rows positionally ─────────────────────────────────────
-      // tasks[i] → row taskHeaderRow+1+i in taskCol.
-      // No text matching — works regardless of prior fill state.
+      // Objectives (is_sub=false) → mainTaskCol (col H: "1. Main task 1" template cell)
+      // Sub-tasks  (is_sub=true)  → taskCol     (col I: "Sub task N" template cell)
       tasks.forEach((task, i) => {
         const r = taskHeaderRow + 1 + i
+        let targetCol: number
         let text: string
         if (!task.is_sub) {
+          // Write to col H (mainTaskCol): replaces "1. Main task 1" with real objective title
+          targetCol = mainTaskCol
           text = `${task.index}. ${task.title}`
         } else {
+          // Write to col I (taskCol): replaces "Sub task N" with "  Title  (deadline)"
+          // The index ("1.1") is already in the template's col H cell — not duplicated here
+          targetCol = taskCol
           const deadline = task.deadline ? `  (${task.deadline})` : ''
-          text = `   ${task.index}  ${task.title}${deadline}`
+          text = `  ${task.title}${deadline}`
         }
-        const existingIdx = posIndex.get(`${r},${taskCol}`)
-        const baseCell = existingIdx !== undefined ? celldata[existingIdx] : { r, c: taskCol, v: {} }
-        upsertCell(r, taskCol, setPlainText(baseCell, text))
+        const existingIdx = posIndex.get(`${r},${targetCol}`)
+        const baseCell = existingIdx !== undefined ? celldata[existingIdx] : { r, c: targetCol, v: {} }
+        upsertCell(r, targetCol, setPlainText(baseCell, text))
       })
 
-      // ── Fill owner column headers with member names ───────────────────
-      ownerHeaderCells.forEach(({ idx }, i) => {
-        const m = members.find(mb => mb.slot === i)
-        if (!m) return
-        celldata[idx] = setPlainText(celldata[idx], m.name)
+      // ── Fill owner/member section by label text ───────────────────────
+      // The lower-right section has explicit labels like "Project Leader",
+      // "Member 1", "Member 2", etc. Use those labels directly rather than
+      // relying on match order so rotated/vertical cells still map correctly.
+      const leaderName = (fills.project_leader ?? '').trim()
+      const memberPool = members.filter((mb) => {
+        const name = (mb.name ?? '').trim()
+        return !!name && name.toLowerCase() !== leaderName.toLowerCase()
+      })
+
+      ownerHeaderCells.forEach(({ idx }) => {
+        const label = getCellText(celldata[idx]).trim()
+
+        if (/^Project\s*Leader$/i.test(label)) {
+          if (!leaderName) return
+          celldata[idx] = setPlainText(celldata[idx], leaderName)
+          return
+        }
+
+        const memberMatch = label.match(/^Member\s*(\d+)$/i)
+        if (memberMatch) {
+          const slot = Number(memberMatch[1]) - 1
+          const member = memberPool[slot]
+          if (!member) return
+          celldata[idx] = setPlainText(celldata[idx], member.name)
+          return
+        }
+
+        if (/^Primary\s*Helper$/i.test(label)) {
+          const member = memberPool[0]
+          if (!member) return
+          celldata[idx] = setPlainText(celldata[idx], member.name)
+          return
+        }
+
+        if (/^Secondary\s*Helper$/i.test(label)) {
+          const member = memberPool[1]
+          if (!member) return
+          celldata[idx] = setPlainText(celldata[idx], member.name)
+        }
       })
 
       // ── Place timeline deadline markers ("■") for each task ──────────
@@ -422,6 +475,15 @@ export function OPPMView() {
       }
       applyFillsToSheet(fills, tasks, members)
       setIsFilled(true)
+      // Persist filled sheet to backend so it loads correctly on next visit
+      try {
+        const saveToken = localStorage.getItem('access_token') ?? ''
+        fetch(`/api${wsPath}/projects/${id}/oppm/spreadsheet`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${saveToken}` },
+          body: JSON.stringify({ sheet_data: sheetDataRef.current, file_name: sheetFileName ?? 'OPPM Template.xlsx' }),
+        })
+      } catch { /* fire-and-forget */ }
       setSheetKey(k => k + 1)  // re-render Workbook with updated data
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'AI fill failed'
