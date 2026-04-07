@@ -334,7 +334,19 @@ export function ProjectDetail() {
 
       {/* -- Tasks header -- */}
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-text">Tasks</h2>
+        <div>
+          <h2 className="text-base font-semibold text-text">Tasks</h2>
+          {taskList.length === 0 && isLead && (
+            <p className="text-xs text-text-secondary mt-0.5">
+              Start by creating <strong>main tasks</strong>, then add <strong>sub-tasks</strong> under each one.
+            </p>
+          )}
+          {taskList.length > 0 && (
+            <p className="text-xs text-text-secondary mt-0.5">
+              {taskList.filter(t => !t.parent_task_id).length} main tasks · {taskList.filter(t => t.parent_task_id).length} sub-tasks
+            </p>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center rounded-lg border border-border bg-white p-0.5 shadow-sm">
             <button
@@ -369,6 +381,7 @@ export function ProjectDetail() {
             <button
               onClick={() => setShowCreate(true)}
               className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-dark transition-colors"
+              title="Create a main task or sub-task"
             >
               <Plus className="h-3.5 w-3.5" /> Add Task
             </button>
@@ -590,6 +603,37 @@ function TableView({
     )
   }
 
+  // Build hierarchical ordering: main tasks followed by their sub-tasks
+  const orderedTasks = (() => {
+    const mainTasks = tasks.filter(t => !t.parent_task_id)
+    const subByParent = new Map<string, Task[]>()
+    for (const t of tasks) {
+      if (t.parent_task_id) {
+        const arr = subByParent.get(t.parent_task_id) ?? []
+        arr.push(t)
+        subByParent.set(t.parent_task_id, arr)
+      }
+    }
+    // If no main tasks (all flat), return as-is
+    if (mainTasks.length === 0 && tasks.length > 0) return tasks.map(t => ({ task: t, isSub: false }))
+    const result: { task: Task; isSub: boolean }[] = []
+    for (const mt of mainTasks) {
+      result.push({ task: mt, isSub: false })
+      for (const st of subByParent.get(mt.id) ?? []) {
+        result.push({ task: st, isSub: true })
+      }
+    }
+    // Include orphaned sub-tasks (parent not in current list)
+    for (const t of tasks) {
+      if (t.parent_task_id && !mainTasks.find(m => m.id === t.parent_task_id)) {
+        if (!result.find(r => r.task.id === t.id)) {
+          result.push({ task: t, isSub: true })
+        }
+      }
+    }
+    return result
+  })()
+
   return (
     <div className="rounded-xl border border-border bg-white shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
@@ -609,20 +653,26 @@ function TableView({
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task, index) => (
+            {orderedTasks.map(({ task, isSub }, index) => (
               <tr
                 key={task.id}
                 className={cn(
                   'border-b border-border last:border-0 hover:bg-blue-50/30 transition-colors',
-                  index % 2 === 1 ? 'bg-gray-50/40' : 'bg-white'
+                  isSub ? 'bg-gray-50/40' : 'bg-white'
                 )}
               >
                 <td className="px-4 py-3 text-xs text-text-secondary">{index + 1}</td>
                 <td className="px-4 py-3 max-w-[220px]">
                   <button
                     onClick={() => onEdit(task)}
-                    className="text-left font-semibold text-text hover:text-primary transition-colors line-clamp-1 w-full"
+                    className={cn(
+                      'text-left transition-colors line-clamp-1 w-full',
+                      isSub
+                        ? 'pl-5 text-text-secondary hover:text-primary font-normal'
+                        : 'font-semibold text-text hover:text-primary'
+                    )}
                   >
+                    {isSub && <span className="text-gray-300 mr-1">└</span>}
                     {task.title}
                   </button>
                   {task.description && (
@@ -785,6 +835,7 @@ function TaskForm({
     due_date: initial?.due_date || '',
     oppm_objective_id: initial?.oppm_objective_id || '',
     assignee_id: initial?.assignee_id || '',
+    parent_task_id: initial?.parent_task_id || '',
   })
   const [dependsOn, setDependsOn] = useState<string[]>(initial?.depends_on ?? [])
   const [subObjIds, setSubObjIds] = useState<string[]>((initial as unknown as Record<string, unknown>)?.sub_objective_ids as string[] ?? [])
@@ -809,6 +860,7 @@ function TaskForm({
     if (!data.due_date) delete data.due_date
     if (!data.oppm_objective_id) delete data.oppm_objective_id
     if (!data.assignee_id) delete data.assignee_id
+    if (!data.parent_task_id) delete data.parent_task_id
     if (!initial) {
       delete data.status
       if (data.progress === 0) delete data.progress
@@ -837,7 +889,7 @@ function TaskForm({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
       <form
         onSubmit={handleSubmit}
-        className="flex max-h-[92vh] w-[min(100%-1rem,54rem)] flex-col overflow-hidden rounded-[1.75rem] border border-border bg-white shadow-2xl"
+        className="flex max-h-[92vh] w-[min(100%-1rem,72rem)] flex-col overflow-hidden rounded-[1.75rem] border border-border bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-border px-4 pt-4 sm:px-6 sm:pt-5">
@@ -981,8 +1033,66 @@ function TaskForm({
         ) : (
         <>
         <div className="max-h-[72vh] overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
-            <div className="space-y-5 lg:col-span-3">
+          {/* Quick-start guide for new users */}
+          {!initial && (
+            <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-full bg-blue-100 p-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 text-blue-600" />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-sm font-semibold text-blue-900">How OPPM task hierarchy works</p>
+                  <div className="text-xs text-blue-700 space-y-1">
+                    <p><strong>Step 1:</strong> Create <strong>Main Tasks</strong> — these are the major deliverables (e.g., "Cloud infrastructure provisioning")</p>
+                    <p><strong>Step 2:</strong> Create <strong>Sub-Tasks</strong> under each main task by selecting a <strong>Parent Task</strong> below (e.g., "Kubernetes cluster setup" under "Cloud infrastructure provisioning")</p>
+                    <p><strong>Tip:</strong> Link every task to an <strong>Objective</strong> and assign an <strong>Owner</strong> for full OPPM alignment.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Task type toggle */}
+          {!initial && allTasks.filter(t => !t.parent_task_id).length > 0 && (
+            <div className="mb-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, parent_task_id: '' }))}
+                className={cn(
+                  'flex-1 rounded-xl border-2 px-4 py-3 text-center transition-all',
+                  !form.parent_task_id
+                    ? 'border-primary bg-primary/5 shadow-sm'
+                    : 'border-border bg-white hover:border-gray-300'
+                )}
+              >
+                <p className={cn('text-sm font-semibold', !form.parent_task_id ? 'text-primary' : 'text-text')}>
+                  Main Task
+                </p>
+                <p className="text-[11px] text-text-secondary mt-0.5">Top-level deliverable</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const firstMain = allTasks.find(t => !t.parent_task_id)
+                  if (firstMain) setForm(f => ({ ...f, parent_task_id: firstMain.id }))
+                }}
+                className={cn(
+                  'flex-1 rounded-xl border-2 px-4 py-3 text-center transition-all',
+                  form.parent_task_id
+                    ? 'border-primary bg-primary/5 shadow-sm'
+                    : 'border-border bg-white hover:border-gray-300'
+                )}
+              >
+                <p className={cn('text-sm font-semibold', form.parent_task_id ? 'text-primary' : 'text-text')}>
+                  Sub-Task
+                </p>
+                <p className="text-[11px] text-text-secondary mt-0.5">Belongs under a main task</p>
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <div className="space-y-5">
               <section className={sectionClass}>
                 <div className="mb-4 space-y-1">
                   <p className={sectionEyebrowClass}>Task brief</p>
@@ -1085,11 +1195,12 @@ function TaskForm({
               </section>
             </div>
 
-            <div className="space-y-5 lg:col-span-2">
+            <div className="space-y-5">
               <section className={sectionClass}>
                 <div className="mb-4 space-y-1">
                   <p className={sectionEyebrowClass}>Ownership and alignment</p>
                   <h4 className="text-sm font-semibold text-text">Connect the task to the delivery plan</h4>
+                  <p className="text-xs text-text-secondary">Link to an objective and assign an owner for OPPM visibility. Set a parent task to create a sub-task.</p>
                 </div>
 
                 <div>
@@ -1116,6 +1227,42 @@ function TaskForm({
                     <p className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-sm italic text-text-secondary">
                       No objectives yet. Create objectives in OPPM View first.
                     </p>
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <label className={fieldLabelClass}>Parent Task (makes this a sub-task)</label>
+                  {allTasks.filter(t => !t.parent_task_id && t.id !== initial?.id).length > 0 ? (
+                    <>
+                      <select
+                        value={form.parent_task_id}
+                        onChange={(e) => setForm((f) => ({ ...f, parent_task_id: e.target.value }))}
+                        className={cn(selectClass, form.parent_task_id && 'border-primary ring-2 ring-primary/10')}
+                      >
+                        <option value="">None (this is a main task)</option>
+                        {allTasks.filter(t => !t.parent_task_id && t.id !== initial?.id).map((t) => (
+                          <option key={t.id} value={t.id}>↳ {t.title}</option>
+                        ))}
+                      </select>
+                      {form.parent_task_id ? (
+                        <div className="mt-2 flex items-center gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+                          <GitBranch className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <p className="text-xs text-primary font-medium">
+                            Sub-task of "{allTasks.find(t => t.id === form.parent_task_id)?.title}"
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-text-secondary">
+                          Leave empty to create a top-level main task. Select a parent to nest this as a sub-task.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-gray-200 px-4 py-3">
+                      <p className="text-sm italic text-text-secondary">
+                        No main tasks yet — this will be created as a <strong>main task</strong>.
+                      </p>
+                    </div>
                   )}
                 </div>
 
@@ -1155,7 +1302,7 @@ function TaskForm({
                     <h4 className="text-sm font-semibold text-text">This task depends on</h4>
                     <p className="text-xs text-text-secondary">Select tasks that must be completed before this one can start.</p>
                   </div>
-                  <div className="max-h-40 overflow-y-auto space-y-1.5">
+                  <div className="max-h-52 overflow-y-auto space-y-1.5">
                     {allTasks.map((t) => (
                       <label
                         key={t.id}
@@ -1170,9 +1317,9 @@ function TaskForm({
                           type="checkbox"
                           checked={dependsOn.includes(t.id)}
                           onChange={() => toggleDependency(t.id)}
-                          className="h-3.5 w-3.5 accent-primary"
+                          className="h-3.5 w-3.5 accent-primary shrink-0"
                         />
-                        <span className="flex-1 truncate font-medium">{t.title}</span>
+                        <span className="flex-1 min-w-0 font-medium">{t.title}</span>
                         <span className={cn(
                           'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
                           STATUS_BADGE[t.status]
@@ -1198,7 +1345,7 @@ function TaskForm({
                     <h4 className="text-sm font-semibold text-text">Which sub-objectives does this task contribute to?</h4>
                     <p className="text-xs text-text-secondary">Select the OPPM sub-objectives this task helps achieve.</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                     {Array.from({ length: 6 }, (_, i) => {
                       const so = subObjectives.find(s => s.position === i + 1)
                       if (!so) return null
@@ -1207,7 +1354,7 @@ function TaskForm({
                         <label
                           key={so.id}
                           className={cn(
-                            'flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-colors',
+                            'flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 text-xs transition-colors',
                             checked
                               ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
                               : 'border-border bg-white text-text hover:bg-surface-alt'
@@ -1217,10 +1364,10 @@ function TaskForm({
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggleSubObj(so.id)}
-                            className="h-3.5 w-3.5 accent-indigo-600 shrink-0"
+                            className="mt-0.5 h-3.5 w-3.5 accent-indigo-600 shrink-0"
                           />
-                          <span className="font-bold text-[10px] shrink-0">{i + 1}.</span>
-                          <span className="truncate font-medium">{so.label}</span>
+                          <span className="font-bold text-[10px] shrink-0 mt-px">{i + 1}.</span>
+                          <span className="font-medium leading-tight">{so.label}</span>
                         </label>
                       )
                     }).filter(Boolean)}

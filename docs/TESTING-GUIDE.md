@@ -215,15 +215,23 @@ Expected:
 Steps:
 
 1. open a project detail page as the project lead
-2. create tasks with different priorities and statuses
-3. assign a workspace member as owner
-4. move tasks across statuses
-5. edit and delete a task
-6. switch to a non-lead member and verify the Create Task button is hidden
+2. create a **main task** (leave Parent Task empty) with objective and owner
+3. create a **sub-task** by selecting a parent task in the Create Task form
+4. verify the task-type toggle (Main Task / Sub-Task) works correctly
+5. verify the quick-start guide appears for new users creating their first task
+6. switch to list view and verify sub-tasks are indented under their parent with `└`
+7. verify "N main tasks · M sub-tasks" count shows in the Tasks header
+8. assign a workspace member as owner
+9. move tasks across statuses
+10. edit and delete a task
+11. switch to a non-lead member and verify the Create Task button is hidden
 
 Expected:
 
 - only project leads can create tasks (non-leads see no create button)
+- main tasks and sub-tasks display in correct hierarchy in list view
+- the Parent Task dropdown shows only main tasks (not other sub-tasks)
+- selecting a parent task shows a visual indicator ("Sub-task of ...")
 - task list updates without full reload
 - progress and summary cards update
 - assignee name displays correctly
@@ -253,23 +261,27 @@ Expected:
 Steps:
 
 1. open `/projects/:id/oppm`
-2. create objectives with different A/B/C priorities
-3. assign owners to objectives
-4. verify tasks auto-fill from linked tasks per objective
-5. create or update timeline entries
-6. create cost rows
-7. verify the X-diagram summary, deliverables, and risk register
-8. verify cost bar charts show planned vs actual
-9. refresh the page
+2. verify the how-to guide banner appears (click to expand/collapse)
+3. verify the spreadsheet template loads with placeholder text
+4. click **AI Fill** → verify Project Name, Leader, Objective, Deliverable Output, Start Date, and Deadline are populated in the template cells
+5. click **Save** → verify the save indicator shows "Saved"
+6. click **Download OPPM** → verify a complete XLSX is downloaded with:
+   - objectives as navy header rows
+   - main tasks in bold with grey background
+   - sub-tasks indented with hierarchical numbering (e.g., 1.1 main, 1.1.1 sub)
+   - timeline dots (completed/in_progress/planned)
+   - owner priority columns (A/B/C)
+   - bottom sections: deliverables, forecasts, risks, costs
+7. verify **Import XLSX** replaces the template with a custom file
+8. verify **Reset** restores the default template
+9. refresh the page and verify the saved spreadsheet persists
 
 Expected:
 
-- objectives, timeline, and cost rows persist
-- A/B/C priority toggles update correctly
-- owner badges display workspace member names
-- timeline uses weekly `week_start` dates with SVG status dots
-- cost bar charts render planned and actual amounts
-- changes remain visible after refresh
+- AI Fill updates exactly 6 fields in the header cells
+- Download OPPM generates a data-driven report (not a copy of the editable template)
+- the how-to guide explains the recommended workflow clearly
+- all toolbar buttons have descriptive tooltips on hover
 
 ### 9. AI Model Configuration
 

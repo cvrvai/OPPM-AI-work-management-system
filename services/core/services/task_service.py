@@ -62,6 +62,7 @@ def _task_to_dict(task, depends_on: list[str] | None = None) -> dict:
         "title": task.title,
         "description": task.description,
         "project_id": str(task.project_id),
+        "parent_task_id": str(task.parent_task_id) if task.parent_task_id else None,
         "oppm_objective_id": str(task.oppm_objective_id) if task.oppm_objective_id else None,
         "assignee_id": str(task.assignee_id) if task.assignee_id else None,
         "status": task.status,

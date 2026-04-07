@@ -162,6 +162,9 @@ The platform may integrate with:
 - `FR-TASK-6` The system shall restrict report submission to the assigned task user.
 - `FR-TASK-7` The system shall allow project leads to approve or revoke task report approvals.
 - `FR-TASK-8` The system shall support task dependencies (task A depends on task B).
+- `FR-TASK-9` The system shall support task hierarchy via `parent_task_id` — main tasks have no parent, sub-tasks reference their parent main task.
+- `FR-TASK-10` The system shall display task hierarchy in the project detail table view with visual indentation for sub-tasks.
+- `FR-TASK-11` The system shall render hierarchical task numbering in the OPPM export (e.g., 1.1 for main task, 1.1.1 for sub-task).
 
 ### 5.6 OPPM Planning
 

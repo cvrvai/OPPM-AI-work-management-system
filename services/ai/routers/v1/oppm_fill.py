@@ -24,10 +24,14 @@ async def oppm_fill_route(
     session: AsyncSession = Depends(get_session),
 ):
     """Use project data + LLM to suggest OPPM spreadsheet header cell values."""
-    fills = await fill_oppm(
+    result = await fill_oppm(
         session=session,
         project_id=project_id,
         workspace_id=ws.workspace_id,
         model_id=data.model_id,
     )
-    return OPPMFillResponse(fills=fills)
+    return OPPMFillResponse(
+        fills=result["fills"],
+        tasks=result["tasks"],
+        members=result["members"],
+    )

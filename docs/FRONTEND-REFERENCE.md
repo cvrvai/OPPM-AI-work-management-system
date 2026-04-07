@@ -155,9 +155,9 @@ Current pages:
 - `Projects.tsx`
   Project list, project creation wizard, and project edit/delete actions.
 - `ProjectDetail.tsx`
-  Per-project task board/list, task CRUD, task reports, summary cards.
+  Per-project task board/list/Gantt, task CRUD with main-task/sub-task hierarchy, task reports, summary cards. Create Task form includes a task-type toggle (Main Task vs Sub-Task), parent task selector, and a quick-start guide explaining OPPM task structure. Table view renders tasks hierarchically with visual indentation for sub-tasks.
 - `OPPMView.tsx`
-  OPPM spreadsheet-style sheet view with project metadata rows, objective timeline matrix, summary block, cost tracking, and AI planning flows.
+  OPPM spreadsheet-style sheet view with project metadata rows, objective timeline matrix, summary block, cost tracking, and AI planning flows. Includes a collapsible how-to guide explaining AI Fill (auto-fills project name, leader, dates, objective, deliverable) and Download OPPM (generates full report from database). Toolbar buttons have descriptive tooltips.
 - `Team.tsx`
   Workspace members, invite management, and member skills UI.
 - `Commits.tsx`
@@ -341,6 +341,19 @@ The task system enforces role-based permissions:
 - only project leads can approve/revoke report approvals
 - approval status updates use optimistic UI via `setQueryData`
 
+### Task Hierarchy
+
+Tasks support a parent/sub-task hierarchy via `parent_task_id`:
+
+- **Main tasks** have `parent_task_id = null` — these are top-level deliverables
+- **Sub-tasks** have `parent_task_id` referencing a main task
+- The Create Task form provides:
+  - A **task-type toggle** (Main Task / Sub-Task) at the top for quick selection
+  - A **Parent Task** dropdown in the Ownership section
+  - A **quick-start guide** explaining the OPPM hierarchy workflow for new users
+- The table view renders tasks hierarchically with `└` indentation for sub-tasks
+- The board (Kanban) view renders all tasks flat grouped by status
+
 ### OPPM
 
 Start with:
@@ -359,6 +372,9 @@ Important current behavior:
 - X-diagram summary area shows deliverables and risk register
 - cost section uses bar charts comparing planned vs actual amounts
 - AI plan suggestion creates objectives and tasks from an LLM-generated plan
+- **AI Fill** button auto-fills 6 fields (Project Name, Leader, Objective, Deliverable Output, Start Date, Deadline) from project data
+- **Download OPPM** generates a complete XLSX report from the database: objectives, tasks (main + sub with hierarchical numbering), timeline dots, owner priorities, costs, deliverables, forecasts, risks
+- A collapsible **how-to guide** explains the recommended workflow: create tasks in Project Detail → use AI Fill → edit cells → save → download OPPM report
 
 ### Team And Skills
 

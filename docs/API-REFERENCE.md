@@ -233,10 +233,30 @@ Treat this field as a workspace member identifier, even though the public field 
 | `PATCH` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}/approve` | Yes | Write | Approves or revokes approval of a report. Only project leads can approve. Send `{"is_approved": true}` or `{"is_approved": false}`. |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/tasks/{task_id}/reports/{report_id}` | Yes | Member | Deletes a report. |
 
+### Task Create/Update Payload
+
+```json
+{
+  "title": "Kubernetes cluster setup",
+  "description": "...",
+  "project_id": "uuid",
+  "priority": "high",
+  "oppm_objective_id": "uuid",
+  "assignee_id": "uuid",
+  "parent_task_id": "uuid",
+  "start_date": "2026-04-01",
+  "due_date": "2026-04-15"
+}
+```
+
 ### Current Task Model Notes
 
 - active task statuses are `todo`, `in_progress`, `completed`
 - the live product uses `tasks.assignee_id` for single-owner assignment
+- `parent_task_id` creates a main-task / sub-task hierarchy (OPPM style)
+  - tasks with `parent_task_id = null` are **main tasks**
+  - tasks with `parent_task_id = <uuid>` are **sub-tasks** nested under the parent
+- the OPPM exporter renders main tasks with bold + grey background and sub-tasks indented underneath
 - the database still contains `task_assignees`, but the current frontend and task routes do not use the many-to-many path
 
 ## OPPM Routes (Core Service)

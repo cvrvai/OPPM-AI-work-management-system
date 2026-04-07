@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.llm import call_with_fallback
 from infrastructure.llm.base import ProviderUnavailableError
 from shared.models.ai_model import AIModel
-from shared.models.project import Project
+from shared.models.project import Project, ProjectMember
+from shared.models.task import Task
+from shared.models.oppm import OPPMObjective
 from shared.models.workspace import WorkspaceMember
 
 logger = logging.getLogger(__name__)
@@ -113,9 +115,93 @@ async def fill_oppm(
         "deliverable_output": project.deliverable_output,
     }
 
+    # ── Load workspace members on this project ─────────────────
+    pm_result = await session.execute(
+        select(WorkspaceMember)
+        .join(ProjectMember, ProjectMember.member_id == WorkspaceMember.id)
+        .where(ProjectMember.project_id == project_id)
+        .order_by(WorkspaceMember.display_name)
+    )
+    ws_members = list(pm_result.scalars().all())
+    member_items = [
+        {"slot": i, "name": m.display_name or ""}
+        for i, m in enumerate(ws_members)
+    ]
+
+    # ── Load tasks hierarchically ──────────────────────────────
+    # Load objectives for this project (ordered)
+    obj_result = await session.execute(
+        select(OPPMObjective)
+        .where(OPPMObjective.project_id == project_id)
+        .order_by(OPPMObjective.sort_order, OPPMObjective.created_at)
+    )
+    objectives = list(obj_result.scalars().all())
+
+    # Load all tasks for this project
+    task_result = await session.execute(
+        select(Task)
+        .where(Task.project_id == project_id)
+        .order_by(Task.sort_order, Task.created_at)
+    )
+    all_tasks = list(task_result.scalars().all())
+
+    # Build hierarchical ordered task list per objective
+    task_items: list[dict] = []
+
+    def _fmt(d) -> str | None:
+        return d.isoformat() if d else None
+
+    for obj_idx, obj in enumerate(objectives):
+        obj_tasks = [t for t in all_tasks if str(t.oppm_objective_id) == str(obj.id)]
+        main_tasks = [t for t in obj_tasks if t.parent_task_id is None]
+        sub_map: dict[str, list[Task]] = {}
+        for t in obj_tasks:
+            if t.parent_task_id:
+                sub_map.setdefault(str(t.parent_task_id), []).append(t)
+
+        for main_idx, mt in enumerate(main_tasks, 1):
+            label = f"{obj_idx + 1}.{main_idx}"
+            task_items.append({
+                "index": label,
+                "title": mt.title,
+                "deadline": _fmt(mt.due_date),
+                "is_sub": False,
+            })
+            for sub_idx, st in enumerate(sub_map.get(str(mt.id), []), 1):
+                task_items.append({
+                    "index": f"{label}.{sub_idx}",
+                    "title": st.title,
+                    "deadline": _fmt(st.due_date),
+                    "is_sub": True,
+                })
+
+    # Tasks with no objective linked — append without objective prefix
+    unlinked = [t for t in all_tasks if t.oppm_objective_id is None and t.parent_task_id is None]
+    unlinked_sub_map: dict[str, list[Task]] = {}
+    for t in all_tasks:
+        if t.oppm_objective_id is None and t.parent_task_id:
+            unlinked_sub_map.setdefault(str(t.parent_task_id), []).append(t)
+
+    base_idx = len(objectives) + 1
+    for main_idx, mt in enumerate(unlinked, 1):
+        label = f"{base_idx}.{main_idx}"
+        task_items.append({
+            "index": label,
+            "title": mt.title,
+            "deadline": _fmt(mt.due_date),
+            "is_sub": False,
+        })
+        for sub_idx, st in enumerate(unlinked_sub_map.get(str(mt.id), []), 1):
+            task_items.append({
+                "index": f"{label}.{sub_idx}",
+                "title": st.title,
+                "deadline": _fmt(st.due_date),
+                "is_sub": True,
+            })
+
     # If both text fields already have content, skip the LLM call
     if fills["project_objective"] and fills["deliverable_output"]:
-        return fills
+        return {"fills": fills, "tasks": task_items, "members": member_items}
 
     # ── LLM call to generate missing text fields ───────────────
     models = await _get_models(session, workspace_id, model_id)
@@ -174,4 +260,4 @@ Rules:
         if not fills["deliverable_output"]:
             fills["deliverable_output"] = result_json.get("deliverable_output")
 
-    return fills
+    return {"fills": fills, "tasks": task_items, "members": member_items}

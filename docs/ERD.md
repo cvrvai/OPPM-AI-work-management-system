@@ -100,7 +100,7 @@ Role and plan constraints:
 |---|---|---|
 | `projects` | Top-level project record | `workspace_id`, `title`, `status`, `priority`, `progress`, `project_code`, `objective_summary`, `budget`, `planning_hours`, `lead_id` |
 | `project_members` | Members assigned to a project | `project_id`, `member_id`, `role`, `joined_at` |
-| `tasks` | Actionable work inside a project | `project_id`, `oppm_objective_id`, `assignee_id`, `status`, `priority`, `progress`, `project_contribution`, `start_date`, `due_date` |
+| `tasks` | Actionable work inside a project; supports parent/sub-task hierarchy | `project_id`, `oppm_objective_id`, `assignee_id`, `parent_task_id`, `status`, `priority`, `progress`, `project_contribution`, `start_date`, `due_date` |
 | `task_reports` | Daily or periodic work log entries with approval workflow | `task_id`, `reporter_id`, `report_date`, `hours`, `is_approved`, `approved_by`, `approved_at` |
 | `task_assignees` | Historical multi-assignee table (not used by active UI) | `task_id`, `member_id` |
 | `task_dependencies` | Task dependency graph | `task_id`, `depends_on_task_id` (composite PK) |

@@ -16,7 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import {
-  ArrowLeft, Loader2, Check, Download, Upload, X, AlertTriangle, RotateCcw, Sparkles,
+  ArrowLeft, Loader2, Check, Download, Upload, X, AlertTriangle, RotateCcw, Sparkles, Info, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { useChatContext } from '@/hooks/useChatContext'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
@@ -74,6 +74,7 @@ export function OPPMView() {
   // ── Import state ────────────────────────────────────────
   const [importing, setImporting]     = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  const [showGuide, setShowGuide]     = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Synchronous reset when project / workspace changes ─
@@ -174,20 +175,73 @@ export function OPPMView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ssLoading, spreadsheetData, ws, id])
 
+  // ── Extract display text from a cell (handles rich text inline strings) ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const getCellText = (cell: any): string => {
+    // Rich text / inline string: concatenate all segment values
+    if (cell?.v?.ct?.t === 'inlineStr' && Array.isArray(cell.v.ct.s)) {
+      return cell.v.ct.s.reduce((acc: string, seg: any) => acc + (seg.v ?? ''), '')
+    }
+    return (cell?.v?.m ?? String(cell?.v?.v ?? '')).trim()
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const setPlainText = (cell: any, text: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { ct, ...rest } = cell.v ?? {}
+    return { ...cell, v: { ...rest, v: text, m: text } }
+  }
+
   // ── Apply AI fills into sheet celldata ─────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const applyFillsToSheet = useCallback((fills: Record<string, string | null>) => {
+  const applyFillsToSheet = useCallback((
+    fills: Record<string, string | null>,
+    tasks: { index: string; title: string; deadline: string | null; is_sub: boolean }[],
+    members: { slot: number; name: string }[],
+  ) => {
     if (!sheetDataRef.current?.length) return
+
+    // ── Task placeholder pattern:
+    //   Combined (number + text in one cell): "1. Main task 1", "  1.1 Sub task 1"
+    //   Text-only (number in separate left cell): "Sub task 1", "Main task 2"
+    const taskPlaceholderRe = /(?:^\s*\d+[\d.]*\s+)?(main task|sub task)\s*\d+/i
+    const hasNumPrefix = (text: string) => /^\s*\d+[\d.]*\s+(main task|sub task)/i.test(text)
+
+    // ── Owner column header pattern: single letter A/B/C or "Primary/Owner"
+    const ownerColRe = /^[A-C]$|^Primary\/Owner$/i
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updated = sheetDataRef.current.map((sheet: any) => {
       if (!Array.isArray(sheet.celldata)) return sheet
+
+      // Collect task placeholder cells in row-then-col order so we can replace by index
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const celldata = sheet.celldata.map((cell: any) => {
-        const display: string = (cell?.v?.m ?? String(cell?.v?.v ?? '')).trim()
+      const taskCells: { idx: number; cell: any }[] = []
+      sheet.celldata.forEach((cell: any, idx: number) => {
+        if (taskPlaceholderRe.test(getCellText(cell))) taskCells.push({ idx, cell })
+      })
+      // Sort by row then column
+      taskCells.sort((a, b) => {
+        const ra = a.cell.r ?? 0, rb = b.cell.r ?? 0
+        if (ra !== rb) return ra - rb
+        return (a.cell.c ?? 0) - (b.cell.c ?? 0)
+      })
+
+      // Collect owner column header cells (A, B, C, Primary/Owner)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ownerHeaderCells: { idx: number; cell: any }[] = []
+      sheet.celldata.forEach((cell: any, idx: number) => {
+        if (ownerColRe.test(getCellText(cell).trim())) ownerHeaderCells.push({ idx, cell })
+      })
+      ownerHeaderCells.sort((a, b) => (a.cell.c ?? 0) - (b.cell.c ?? 0))
+
+      // Build mutable copy of celldata
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const celldata: any[] = sheet.celldata.map((cell: any) => {
+        const display = getCellText(cell)
         const dl = display.toLowerCase()
 
         // ── Multi-line merged cell (all 4 text fields in one cell) ──────
-        // Template: "Project Objective: Text\nDeliverable Output : Text\nStart Date:\nDeadline:"
         if (/project objective/i.test(dl) && /deliverable output/i.test(dl)) {
           let newText = display
           if (fills.project_objective)
@@ -199,7 +253,7 @@ export function OPPMView() {
           if (fills.deadline)
             newText = newText.replace(/Deadline:.*?(?=\n|$)/i, `Deadline: ${fills.deadline}`)
           if (newText === display) return cell
-          return { ...cell, v: { ...cell.v, v: newText, m: newText } }
+          return setPlainText(cell, newText)
         }
 
         // ── Single-field header cells ────────────────────────────────────
@@ -210,11 +264,34 @@ export function OPPMView() {
           newText = `Project Name: ${fills.project_name}`
 
         if (!newText) return cell
-        return { ...cell, v: { ...cell.v, v: newText, m: newText } }
+        return setPlainText(cell, newText)
       })
+
+      // ── Fill task placeholder rows in order ──────────────────
+      taskCells.forEach(({ idx }, i) => {
+        const task = tasks[i]
+        if (!task) return
+        const indent = task.is_sub ? '   ' : ''
+        const deadline = task.deadline ? `  (${task.deadline})` : ''
+        const originalText = getCellText(celldata[idx])
+        // If number prefix is in a separate left cell, write title only; otherwise write full label
+        const text = hasNumPrefix(originalText)
+          ? `${indent}${task.index}  ${task.title}${deadline}`
+          : `${indent}${task.title}${deadline}`
+        celldata[idx] = setPlainText(celldata[idx], text)
+      })
+
+      // ── Fill owner column headers with member names ───────────
+      ownerHeaderCells.forEach(({ idx }, i) => {
+        const m = members.find(mb => mb.slot === i)
+        if (!m) return
+        celldata[idx] = setPlainText(celldata[idx], m.name)
+      })
+
       return { ...sheet, celldata, scrollTop: 0, scrollLeft: 0 }
     })
     sheetDataRef.current = updated
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── AI Fill callback ─────────────────────────────────────
@@ -233,8 +310,8 @@ export function OPPMView() {
         const body = await res.json().catch(() => ({}))
         throw new Error(body?.detail ?? `AI service returned ${res.status}`)
       }
-      const { fills } = await res.json()
-      applyFillsToSheet(fills)
+      const { fills, tasks = [], members = [] } = await res.json()
+      applyFillsToSheet(fills, tasks, members)
       setHasUnsaved(true)
       setSheetKey(k => k + 1)  // re-render Workbook with updated data
     } catch (e: unknown) {
@@ -381,7 +458,7 @@ export function OPPMView() {
               onClick={handleAiFill}
               disabled={aiFilling}
               className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 shadow-sm transition-colors disabled:opacity-50"
-              title="Use AI to fill in project name, leader, dates, objective and deliverable output"
+              title="AI fills: Project Name, Leader, Objective, Deliverable Output, Start Date, Deadline"
             >
               {aiFilling
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -394,6 +471,7 @@ export function OPPMView() {
           <button
             onClick={handleDownload}
             className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 shadow-sm transition-colors"
+            title="Download auto-generated OPPM report with all objectives, tasks, timeline, owners, costs, and risks from database"
           >
             <Download className="h-3.5 w-3.5" />
             Download OPPM
@@ -455,6 +533,48 @@ export function OPPMView() {
           </div>
         </div>
       )}
+
+      {/* ── How-to guide (collapsible) ──────────────────── */}
+      <div className="mt-2 -mx-4 sm:-mx-6 px-4 sm:px-6">
+        <button
+          onClick={() => setShowGuide(g => !g)}
+          className="flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-2 text-left transition-colors hover:bg-indigo-50"
+        >
+          <Info className="h-4 w-4 text-indigo-500 shrink-0" />
+          <span className="flex-1 text-xs font-semibold text-indigo-700">How to use this OPPM view</span>
+          {showGuide
+            ? <ChevronUp className="h-3.5 w-3.5 text-indigo-400" />
+            : <ChevronDown className="h-3.5 w-3.5 text-indigo-400" />}
+        </button>
+        {showGuide && (
+          <div className="mt-1 rounded-lg border border-indigo-200 bg-white px-4 py-3 space-y-3">
+            <div>
+              <p className="text-xs font-bold text-indigo-800 mb-1">📝 This spreadsheet is your editable OPPM template</p>
+              <p className="text-[11px] text-gray-600">You can type directly into any cell. The template shows placeholder text like "Main task 1", "Sub task 1" — replace them with your actual project tasks.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-lg bg-violet-50 border border-violet-200 p-3">
+                <p className="text-xs font-bold text-violet-800 flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Fill</p>
+                <p className="text-[11px] text-violet-700 mt-1">Auto-fills: <strong>Project Name</strong>, <strong>Project Leader</strong>, <strong>Objective</strong>, <strong>Deliverable Output</strong>, <strong>Start Date</strong>, and <strong>Deadline</strong> from your project data. Click it after setting up the project details.</p>
+              </div>
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                <p className="text-xs font-bold text-blue-800 flex items-center gap-1.5"><Download className="h-3.5 w-3.5" /> Download OPPM</p>
+                <p className="text-[11px] text-blue-700 mt-1">Generates a <strong>complete OPPM report</strong> from your database: objectives, tasks (main + sub), timeline dots, owner priorities, costs, deliverables, risks — all auto-populated.</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gray-700 mb-1">Recommended workflow:</p>
+              <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
+                <li>Go to <strong>Project Detail</strong> → create <strong>Objectives</strong>, <strong>Main Tasks</strong>, and <strong>Sub-Tasks</strong></li>
+                <li>Come back here → click <strong>AI Fill</strong> to populate the template header</li>
+                <li>Edit the spreadsheet cells directly to customize the layout</li>
+                <li>Click <strong>Save</strong> to preserve your edits</li>
+                <li>Click <strong>Download OPPM</strong> anytime to get a full auto-generated report</li>
+              </ol>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ── Main content ─────────────────────────────────── */}
       {/* keyed by projectKey — ensures FortuneSheet fully unmounts on switch */}

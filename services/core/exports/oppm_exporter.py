@@ -223,6 +223,7 @@ def build_oppm_xlsx(data: dict) -> bytes:
     f_normal     = Font(name="Calibri", size=10)
     f_header     = Font(name="Calibri", size=9, bold=True)
     f_obj_hdr    = Font(name="Calibri", size=10, bold=True, color=_WHITE)
+    f_main_task  = Font(name="Calibri", size=9, bold=True)
     f_task       = Font(name="Calibri", size=9)
     f_check      = Font(name="Calibri", size=10, bold=True, color=_GREEN_700)
     f_rotated    = Font(name="Calibri", size=8)
@@ -333,13 +334,41 @@ def build_oppm_xlsx(data: dict) -> bytes:
             _sc(ws, r, c, None, fill=_F_NAVY, border=_B_THIN)
         r += 1
 
-        # -- Sub-task rows --------------------------------------------
-        for task_idx, task in enumerate(tasks):
+        # -- Separate main tasks and sub-tasks for hierarchical numbering --
+        main_tasks = [t for t in tasks if not t.get("parent_task_id")]
+        sub_tasks_by_parent: dict[str, list[dict]] = {}
+        for t in tasks:
+            pid = t.get("parent_task_id")
+            if pid:
+                sub_tasks_by_parent.setdefault(str(pid), []).append(t)
+
+        # Build ordered list: main task followed by its sub-tasks
+        ordered_tasks: list[tuple[dict, bool, str]] = []  # (task, is_sub, label)
+        main_idx = 0
+        for mt in main_tasks:
+            main_idx += 1
+            label = f"{obj_idx + 1}.{main_idx}"
+            ordered_tasks.append((mt, False, label))
+            children = sub_tasks_by_parent.get(str(mt.get("id", "")), [])
+            for sub_idx, st in enumerate(children, 1):
+                sub_label = f"{obj_idx + 1}.{main_idx}.{sub_idx}"
+                ordered_tasks.append((st, True, sub_label))
+
+        # If no main tasks found (all tasks are flat), fall back to flat numbering
+        if not main_tasks:
+            for flat_idx, t in enumerate(tasks, 1):
+                ordered_tasks.append((t, False, f"{obj_idx + 1}.{flat_idx}"))
+
+        # -- Task rows ------------------------------------------------
+        for task, is_sub, label in ordered_tasks:
             task_id = str(task.get("id", ""))
             task_sub_ids = {str(s) for s in task.get("sub_objective_ids", [])}
             task_owners: dict[str, str] = {}
             for own in task.get("owners", []):
                 task_owners[str(own.get("member_id", ""))] = own.get("priority", "")
+
+            row_fill = _F_WHITE if is_sub else _F_LGREY
+            row_font = f_task if is_sub else f_main_task
 
             # Sub-objective checkmarks
             for i in range(NUM_SUBO_COLS):
@@ -347,20 +376,21 @@ def build_oppm_xlsx(data: dict) -> bytes:
                 so = sub_obj_by_pos.get(pos)
                 if so and so["id"] in task_sub_ids:
                     _sc(ws, r, C_SUBO_S + i, "\u2713",
-                        font=f_check, fill=_F_WHITE, align=_ALIGN_C, border=_B_HAIR)
+                        font=f_check, fill=row_fill, align=_ALIGN_C, border=_B_HAIR)
                 else:
                     _sc(ws, r, C_SUBO_S + i, None,
-                        fill=_F_WHITE, border=_B_HAIR)
+                        fill=row_fill, border=_B_HAIR)
 
             # Task text (merged) with inline deadline
             due = task.get("due_date")
             task_text = task.get("title", "")
             if due:
                 task_text += f"  ({_fmt_date(due)})"
+            indent = "      " if is_sub else "   "
             _mg(ws, r, C_TASK_S, r, C_TASK_E)
             _sc(ws, r, C_TASK_S,
-                f"   {obj_idx + 1}.{task_idx + 1}  {task_text}",
-                font=f_task, fill=_F_WHITE, align=_ALIGN_L, border=_B_HAIR)
+                f"{indent}{label}  {task_text}",
+                font=row_font, fill=row_fill, align=_ALIGN_L, border=_B_HAIR)
 
             # Timeline dots
             task_tl = tl_map.get(task_id, {})
@@ -373,11 +403,11 @@ def build_oppm_xlsx(data: dict) -> bytes:
                 if dot_info:
                     symbol, dot_font = dot_info
                     _sc(ws, r, col, symbol,
-                        font=dot_font, fill=_F_WHITE, align=_ALIGN_C, border=_B_HAIR)
+                        font=dot_font, fill=row_fill, align=_ALIGN_C, border=_B_HAIR)
                 else:
-                    _sc(ws, r, col, None, fill=_F_WHITE, border=_B_HAIR)
+                    _sc(ws, r, col, None, fill=row_fill, border=_B_HAIR)
             for c in range(C_DATE_S + num_weeks, C_DATE_E + 1):
-                _sc(ws, r, c, None, fill=_F_WHITE, border=_B_HAIR)
+                _sc(ws, r, c, None, fill=row_fill, border=_B_HAIR)
 
             # Member owner columns (A / B / C)
             for i, member in enumerate(members):
@@ -389,9 +419,9 @@ def build_oppm_xlsx(data: dict) -> bytes:
                     _sc(ws, r, col, priority,
                         font=style[0], fill=style[1], align=_ALIGN_C, border=_B_HAIR)
                 else:
-                    _sc(ws, r, col, None, fill=_F_WHITE, border=_B_HAIR)
+                    _sc(ws, r, col, None, fill=row_fill, border=_B_HAIR)
             for c in range(C_MEM_S + num_members, C_MEM_E + 1):
-                _sc(ws, r, c, None, fill=_F_WHITE, border=_B_HAIR)
+                _sc(ws, r, c, None, fill=row_fill, border=_B_HAIR)
 
             r += 1
 

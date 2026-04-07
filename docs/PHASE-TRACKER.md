@@ -23,7 +23,7 @@ It answers one question: what is implemented in the repo right now, what is part
 | 3 | Workspace management | `Completed` | Workspace CRUD, membership checks, owner-only deletion, and invite preview/accept/resend/revoke flows are live. |
 | 4 | Team management | `Completed` | Team now owns member role changes, invite management, and skill management in one surface. |
 | 5 | Project management | `Completed` | Project CRUD, project header fields, project detail view, project membership, and project creation wizard exist. |
-| 6 | Task execution | `Completed` | Task CRUD, board/list display, assignment, progress, and task daily reports are implemented. |
+| 6 | Task execution | `Completed` | Task CRUD with parent/sub-task hierarchy, board/list/Gantt display, assignment, progress, task daily reports, and OPPM-aligned hierarchical numbering in export are implemented. |
 | 7 | OPPM planning | `Completed` | Objectives, weekly timeline, costs, AI-assisted plan suggestion, and project-level OPPM view are implemented. |
 | 8 | Notifications and dashboard | `Completed` | Dashboard stats and notification list/read/unread flows exist. |
 | 9 | GitHub integration | `Completed` | GitHub accounts, repo configs, webhook validation, commit ingestion, reports, and recent analyses are implemented. |
