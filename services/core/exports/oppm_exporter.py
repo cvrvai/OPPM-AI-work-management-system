@@ -71,6 +71,7 @@ _OWNER_STYLES: dict[str, tuple[Font, PatternFill]] = {
 }
 
 _OBJ_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_FALLBACK_PRIORITY_ORDER = ("A", "B", "C")
 
 # -- Layout constants ------------------------------------------------
 NUM_SUBO_COLS  = 6       # sub-objective columns
@@ -160,9 +161,10 @@ def build_oppm_xlsx(data: dict) -> bytes:
 
     # -- Extract data -------------------------------------------------
     project      = data.get("project", {})
+    header       = data.get("header") or {}
     objectives   = data.get("objectives", [])
     sub_objs     = data.get("sub_objectives", [])
-    members      = data.get("members", [])[:6]
+    members      = (data.get("project_members") or data.get("members") or [])[:6]
     timeline     = data.get("timeline", [])
     weeks        = data.get("weeks", [])
     costs        = data.get("costs", {})
@@ -172,6 +174,17 @@ def build_oppm_xlsx(data: dict) -> bytes:
 
     num_weeks   = len(weeks)
     num_members = len(members)
+
+    fallback_owner_by_user_id: dict[str, dict[str, str]] = {}
+    for index, member in enumerate(members):
+        user_id = member.get("user_id")
+        member_id = member.get("id")
+        if not user_id or not member_id:
+            continue
+        fallback_owner_by_user_id[str(user_id)] = {
+            "member_id": str(member_id),
+            "priority": _FALLBACK_PRIORITY_ORDER[index] if index < len(_FALLBACK_PRIORITY_ORDER) else "A",
+        }
 
     # -- Sub-objective position map -----------------------------------
     sub_obj_by_pos: dict[int, dict] = {}
@@ -235,7 +248,7 @@ def build_oppm_xlsx(data: dict) -> bytes:
     # =================================================================
     # ROWS 1-2: Title header
     # =================================================================
-    lead_name = project.get("lead_name") or "\u2014"
+    lead_name = header.get("project_leader_text") or project.get("lead_name") or "\u2014"
     proj_title = project.get("title") or "\u2014"
 
     _mg(ws, 1, C_SUBO_S, 2, C_TASK_E)
@@ -297,7 +310,8 @@ def build_oppm_xlsx(data: dict) -> bytes:
         font=f_header, fill=_F_GREY, align=_ALIGN_C, border=_B_THIN)
     _fr(ws, r, C_TASK_S, r, C_TASK_E, _F_GREY)
 
-    date_header = f"Project Completed By: {_fmt_date(project.get('deadline'))}"
+    completed_by_text = header.get("completed_by_text") or _fmt_date(project.get("deadline"))
+    date_header = f"Project Completed By: {completed_by_text}"
     _mg(ws, r, C_DATE_S, r, C_DATE_E)
     _sc(ws, r, C_DATE_S, date_header,
         font=f_header, fill=_F_GREY, align=_ALIGN_C, border=_B_THIN)
@@ -366,6 +380,10 @@ def build_oppm_xlsx(data: dict) -> bytes:
             task_owners: dict[str, str] = {}
             for own in task.get("owners", []):
                 task_owners[str(own.get("member_id", ""))] = own.get("priority", "")
+            if not task_owners and task.get("assignee_id"):
+                fallback_owner = fallback_owner_by_user_id.get(str(task.get("assignee_id")))
+                if fallback_owner:
+                    task_owners[fallback_owner["member_id"]] = fallback_owner["priority"]
 
             row_fill = _F_WHITE if is_sub else _F_LGREY
             row_font = f_task if is_sub else f_main_task
@@ -444,8 +462,12 @@ def build_oppm_xlsx(data: dict) -> bytes:
     # =================================================================
     # "# People working on the project"
     # =================================================================
+    people_count = header.get("people_count")
+    if people_count is None:
+        people_count = len([member for member in members if member.get("id") or member.get("display_name")])
+    people_label = f"# People working on the project: {people_count}" if people_count else "# People working on the project"
     _mg(ws, r, C_SUBO_S, r, LAST_COL)
-    _sc(ws, r, C_SUBO_S, "# People working on the project",
+    _sc(ws, r, C_SUBO_S, people_label,
         font=f_bold, fill=_F_GREY, align=_ALIGN_L, border=_B_THIN)
     _fr(ws, r, C_SUBO_S, r, LAST_COL, _F_GREY)
     r += 1
@@ -472,8 +494,12 @@ def build_oppm_xlsx(data: dict) -> bytes:
         _sc(ws, r, c, None, fill=_F_GREY, border=_B_THIN)
 
     for i, member in enumerate(members):
-        name = (member.get("display_name") or
-                member.get("email", "").split("@")[0])[:12]
+        name = (
+            member.get("display_name") or
+            member.get("name") or
+            member.get("email", "").split("@")[0] or
+            f"Member {i + 1}"
+        )[:12]
         _sc(ws, r, C_MEM_S + i, name,
             font=f_rotated, fill=_F_GREY, border=_B_THIN, rotation=90)
     for c in range(C_MEM_S + num_members, C_MEM_E + 1):

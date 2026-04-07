@@ -14,7 +14,7 @@ from repositories.oppm_repo import (
     OPPMHeaderRepository, OPPMTaskItemRepository,
     _row_to_dict,
 )
-from repositories.project_repo import ProjectRepository
+from repositories.project_repo import ProjectRepository, ProjectMemberRepository
 from repositories.workspace_repo import WorkspaceMemberRepository
 from repositories.notification_repo import AuditRepository
 
@@ -38,6 +38,8 @@ async def get_oppm_data(session: AsyncSession, project_id: str, workspace_id: st
     forecast_repo = ForecastRepository(session)
     risk_repo = RiskRepository(session)
     ws_member_repo = WorkspaceMemberRepository(session)
+    project_member_repo = ProjectMemberRepository(session)
+    header_repo = OPPMHeaderRepository(session)
 
     objectives = await obj_repo.find_with_tasks(project_id)
     timeline_entries = await tl_repo.find_project_timeline(project_id)
@@ -47,6 +49,8 @@ async def get_oppm_data(session: AsyncSession, project_id: str, workspace_id: st
     forecasts = await forecast_repo.find_project_forecasts(project_id)
     risks = await risk_repo.find_project_risks(project_id)
     ws_members = await ws_member_repo.find_members(workspace_id)
+    project_members = await project_member_repo.find_project_members(project_id)
+    header = await header_repo.find_by_project(project_id)
 
     # Compute weeks
     start_date = _parse_date(project.start_date)
@@ -91,6 +95,17 @@ async def get_oppm_data(session: AsyncSession, project_id: str, workspace_id: st
         "objectives": objectives,
         "sub_objectives": [_row_to_dict(so) for so in sub_objectives],
         "members": ws_members,
+        "project_members": [
+            {
+                "id": pm.get("workspace_members", {}).get("id"),
+                "user_id": pm.get("workspace_members", {}).get("user_id"),
+                "display_name": pm.get("workspace_members", {}).get("display_name"),
+                "role": pm.get("workspace_members", {}).get("role"),
+                "project_role": pm.get("role"),
+            }
+            for pm in project_members
+        ],
+        "header": _row_to_dict(header) if header else None,
         "timeline": [_row_to_dict(e) for e in timeline_entries],
         "weeks": weeks,
         "costs": cost_summary,

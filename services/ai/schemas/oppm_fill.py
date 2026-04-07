@@ -14,9 +14,23 @@ class OPPMFillTaskItem(BaseModel):
     title: str
     deadline: Optional[str] = None  # ISO date or None
     is_sub: bool
+    owners: list["OPPMFillTaskOwnerItem"] = []
+    timeline: list["OPPMFillTimelineItem"] = []
+
+
+class OPPMFillTaskOwnerItem(BaseModel):
+    member_id: str
+    priority: str
+
+
+class OPPMFillTimelineItem(BaseModel):
+    week_start: str
+    status: Optional[str] = None
+    quality: Optional[str] = None
 
 
 class OPPMFillMemberItem(BaseModel):
+    id: str
     slot: int            # 0-based position in owner columns
     name: str
 
@@ -26,8 +40,13 @@ class OPPMFillResponse(BaseModel):
     tasks: list[OPPMFillTaskItem] = []
     members: list[OPPMFillMemberItem] = []
     """
-    fills keys: project_name, project_leader, start_date, deadline,
-                project_objective, deliverable_output
+    fills keys: project_name, project_leader, project_leader_member_id,
+                start_date, deadline, project_objective,
+                deliverable_output, completed_by_text, people_count
     tasks: ordered flat list (main tasks + sub-tasks interleaved)
-    members: workspace members for owner column headers
+           with owner priorities and timeline entries per row
+    members: project members in owner-column order
     """
+
+
+OPPMFillTaskItem.model_rebuild()

@@ -11,13 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.llm import call_with_fallback
 from infrastructure.llm.base import ProviderUnavailableError
 from shared.models.ai_model import AIModel
+from shared.models.oppm import OPPMHeader, OPPMObjective, OPPMTimelineEntry
 from shared.models.project import Project, ProjectMember
-from shared.models.task import Task
-from shared.models.oppm import OPPMObjective
+from shared.models.task import Task, TaskOwner
 from shared.models.user import User
 from shared.models.workspace import WorkspaceMember
 
 logger = logging.getLogger(__name__)
+
+_FALLBACK_PRIORITY_ORDER = ("A", "B", "C")
 
 
 def _resolve_member_name(workspace_member: WorkspaceMember | None, user: User | None) -> str | None:
@@ -26,7 +28,7 @@ def _resolve_member_name(workspace_member: WorkspaceMember | None, user: User | 
     if user and user.full_name:
         return user.full_name
     if user and user.email:
-        return user.email
+        return user.email.split("@", 1)[0]
     return None
 
 
@@ -106,6 +108,14 @@ async def fill_oppm(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
+    header_result = await session.execute(
+        select(OPPMHeader).where(
+            OPPMHeader.project_id == project_id,
+            OPPMHeader.workspace_id == workspace_id,
+        ).limit(1)
+    )
+    header = header_result.scalar_one_or_none()
+
     # ── Load project leader name ───────────────────────────────
     lead_name: str | None = None
     if project.lead_id:
@@ -122,26 +132,65 @@ async def fill_oppm(
     # ── Structured fills (no LLM) ─────────────────────────────
     fills: dict[str, str | None] = {
         "project_name": project.title,
-        "project_leader": lead_name,
+        "project_leader": header.project_leader_text if header and header.project_leader_text else lead_name,
+        "project_leader_member_id": str(project.lead_id) if project.lead_id else None,
         "start_date": str(project.start_date) if project.start_date else None,
         "deadline": str(project.deadline) if project.deadline else None,
         "project_objective": project.objective_summary,
         "deliverable_output": project.deliverable_output,
+        "completed_by_text": (
+            header.completed_by_text
+            if header and header.completed_by_text
+            else (str(project.deadline) if project.deadline else None)
+        ),
+        "people_count": None,
     }
 
-    # ── Load workspace members on this project ─────────────────
+    # ── Load project members in owner-column order ─────────────
     pm_result = await session.execute(
-        select(WorkspaceMember, User)
-        .join(ProjectMember, ProjectMember.member_id == WorkspaceMember.id)
+        select(ProjectMember, WorkspaceMember, User)
+        .join(WorkspaceMember, WorkspaceMember.id == ProjectMember.member_id)
         .join(User, User.id == WorkspaceMember.user_id)
         .where(ProjectMember.project_id == project_id)
-        .order_by(WorkspaceMember.display_name)
+        .order_by(ProjectMember.joined_at, WorkspaceMember.display_name, User.full_name, User.email)
     )
-    ws_members = list(pm_result.all())
+    member_rows: list[dict[str, str]] = []
+    for _, workspace_member, user in pm_result.all():
+        member_rows.append({
+            "id": str(workspace_member.id),
+            "user_id": str(workspace_member.user_id),
+            "name": _resolve_member_name(workspace_member, user) or "",
+        })
+
+    lead_member_id = str(project.lead_id) if project.lead_id else None
+    ordered_members: list[dict[str, str]] = []
+    if lead_member_id:
+        lead_member = next((member for member in member_rows if member["id"] == lead_member_id), None)
+        if lead_member:
+            ordered_members.append(lead_member)
+    ordered_members.extend(member for member in member_rows if member["id"] != lead_member_id)
+    if lead_member_id and lead_name and not any(member["id"] == lead_member_id for member in ordered_members):
+        ordered_members.insert(0, {"id": lead_member_id, "name": lead_name})
+
     member_items = [
-        {"slot": i, "name": _resolve_member_name(workspace_member, user) or ""}
-        for i, (workspace_member, user) in enumerate(ws_members)
+        {"id": member["id"], "slot": i, "name": member["name"]}
+        for i, member in enumerate(ordered_members)
     ]
+    fallback_owner_by_user_id: dict[str, dict[str, str]] = {}
+    for index, member in enumerate(ordered_members):
+        user_id = member.get("user_id")
+        if not user_id:
+            continue
+        fallback_owner_by_user_id[user_id] = {
+            "member_id": member["id"],
+            "priority": _FALLBACK_PRIORITY_ORDER[index] if index < len(_FALLBACK_PRIORITY_ORDER) else "A",
+        }
+    default_people_count = len(member_items)
+    if default_people_count == 0 and lead_name:
+        default_people_count = 1
+    fills["people_count"] = str(
+        header.people_count if header and header.people_count is not None else default_people_count
+    )
 
     # ── Load tasks hierarchically ──────────────────────────────
     # Load objectives for this project (ordered)
@@ -159,6 +208,38 @@ async def fill_oppm(
         .order_by(Task.sort_order, Task.created_at)
     )
     all_tasks = list(task_result.scalars().all())
+    task_ids = [task.id for task in all_tasks]
+
+    owners_by_task: dict[str, list[dict[str, str]]] = {str(task_id): [] for task_id in task_ids}
+    if task_ids:
+        owner_result = await session.execute(
+            select(TaskOwner.task_id, TaskOwner.member_id, TaskOwner.priority)
+            .where(TaskOwner.task_id.in_(task_ids))
+        )
+        for row in owner_result.all():
+            owners_by_task[str(row.task_id)].append({
+                "member_id": str(row.member_id),
+                "priority": row.priority,
+            })
+
+    timeline_by_task: dict[str, list[dict[str, str | None]]] = {str(task_id): [] for task_id in task_ids}
+    if task_ids:
+        timeline_result = await session.execute(
+            select(
+                OPPMTimelineEntry.task_id,
+                OPPMTimelineEntry.week_start,
+                OPPMTimelineEntry.status,
+                OPPMTimelineEntry.quality,
+            )
+            .where(OPPMTimelineEntry.task_id.in_(task_ids))
+            .order_by(OPPMTimelineEntry.week_start)
+        )
+        for row in timeline_result.all():
+            timeline_by_task[str(row.task_id)].append({
+                "week_start": row.week_start.isoformat(),
+                "status": row.status,
+                "quality": row.quality,
+            })
 
     # ── Build OPPM task list: objectives as main-task rows, root tasks as sub-rows ──
     # Template layout:  Row N   = "X. <Objective title>"  (is_sub=False)
@@ -170,6 +251,16 @@ async def fill_oppm(
     def _fmt(d) -> str | None:
         return d.isoformat() if d else None
 
+    def _get_task_owners(task: Task) -> list[dict[str, str]]:
+        explicit_owners = owners_by_task.get(str(task.id), [])
+        if explicit_owners:
+            return explicit_owners
+        if task.assignee_id:
+            fallback_owner = fallback_owner_by_user_id.get(str(task.assignee_id))
+            if fallback_owner:
+                return [fallback_owner]
+        return []
+
     for obj_idx, obj in enumerate(objectives[:4]):
         # Main task row: the objective itself
         task_items.append({
@@ -177,6 +268,8 @@ async def fill_oppm(
             "title": obj.title,
             "deadline": None,
             "is_sub": False,
+            "owners": [],
+            "timeline": [],
         })
         # Sub-task rows: first 3 root tasks of this objective (template has 3 sub-rows per main-task slot)
         obj_root = sorted(
@@ -190,7 +283,24 @@ async def fill_oppm(
                 "title": mt.title,
                 "deadline": _fmt(mt.due_date),
                 "is_sub": True,
+                "owners": _get_task_owners(mt),
+                "timeline": timeline_by_task.get(str(mt.id), []),
             })
+
+        if not obj_root:
+            flat_tasks = sorted(
+                [t for t in all_tasks if str(t.oppm_objective_id) == str(obj.id)],
+                key=lambda t: (t.sort_order or 0, str(t.created_at)),
+            )[:3]
+            for flat_idx, task in enumerate(flat_tasks, 1):
+                task_items.append({
+                    "index": f"{obj_idx + 1}.{flat_idx}",
+                    "title": task.title,
+                    "deadline": _fmt(task.due_date),
+                    "is_sub": True,
+                    "owners": _get_task_owners(task),
+                    "timeline": timeline_by_task.get(str(task.id), []),
+                })
 
     # If both text fields already have content, skip the LLM call
     if fills["project_objective"] and fills["deliverable_output"]:

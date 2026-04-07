@@ -25,6 +25,72 @@ import '@fortune-sheet/react/dist/index.css'
 import { transformExcelToFortune } from '@corbe30/fortune-excel'
 import defaultTemplateUrl from '@/assets/OPPM Template (1).xlsx?url'
 
+type OPPMFillPriority = 'A' | 'B' | 'C'
+type OPPMFillTimelineStatus = 'planned' | 'in_progress' | 'completed' | 'at_risk' | 'blocked'
+type OPPMFillTimelineQuality = 'good' | 'average' | 'bad'
+
+type OPPMFillMap = Record<string, string | null>
+
+type OPPMFillOwner = {
+  member_id: string
+  priority: OPPMFillPriority
+}
+
+type OPPMFillTimeline = {
+  week_start: string
+  status: OPPMFillTimelineStatus | null
+  quality: OPPMFillTimelineQuality | null
+}
+
+type OPPMFillTask = {
+  index: string
+  title: string
+  deadline: string | null
+  is_sub: boolean
+  owners?: OPPMFillOwner[]
+  timeline?: OPPMFillTimeline[]
+}
+
+type OPPMFillMember = {
+  id: string
+  slot: number
+  name: string
+}
+
+type OPPMFillPayload = {
+  fills: OPPMFillMap
+  tasks?: OPPMFillTask[]
+  members?: OPPMFillMember[]
+}
+
+const OWNER_PRIORITY_STYLE: Record<OPPMFillPriority, { bg: string; fc: string }> = {
+  A: { bg: '#1E40AF', fc: '#FFFFFF' },
+  B: { bg: '#60A5FA', fc: '#FFFFFF' },
+  C: { bg: '#BFDBFE', fc: '#1E40AF' },
+}
+
+const TIMELINE_STATUS_SYMBOL: Record<OPPMFillTimelineStatus, string> = {
+  planned: '□',
+  in_progress: '●',
+  completed: '■',
+  at_risk: '●',
+  blocked: '●',
+}
+
+const TIMELINE_STATUS_COLOR: Record<OPPMFillTimelineStatus, string> = {
+  planned: '#333333',
+  in_progress: '#333333',
+  completed: '#333333',
+  at_risk: '#D97706',
+  blocked: '#DC2626',
+}
+
+const TIMELINE_QUALITY_COLOR: Record<OPPMFillTimelineQuality, string> = {
+  good: '#166534',
+  average: '#D97706',
+  bad: '#DC2626',
+}
+
 // ══════════════════════════════════════════════════════════════
 // OPPMView
 // ══════════════════════════════════════════════════════════════
@@ -205,24 +271,36 @@ export function OPPMView() {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const setPlainText = (cell: any, text: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { ct, ...rest } = cell.v ?? {}
-    return { ...cell, v: { ...rest, v: text, m: text } }
+  const setPlainText = (cell: any, text: string, overrides: Record<string, unknown> = {}) => {
+    const value = { ...(cell.v ?? {}) }
+    delete value.ct
+    return { ...cell, v: { ...value, v: text, m: text, ...overrides } }
+  }
+
+  const getTimelineMarker = (status?: string | null, quality?: string | null) => {
+    const statusKey: OPPMFillTimelineStatus =
+      status === 'in_progress' || status === 'completed' || status === 'at_risk' || status === 'blocked'
+        ? status
+        : 'planned'
+    const color =
+      quality === 'good' || quality === 'average' || quality === 'bad'
+        ? TIMELINE_QUALITY_COLOR[quality]
+        : TIMELINE_STATUS_COLOR[statusKey]
+    return { symbol: TIMELINE_STATUS_SYMBOL[statusKey], color }
   }
 
   // ── Apply AI fills into sheet celldata ─────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const applyFillsToSheet = useCallback((
-    fills: Record<string, string | null>,
-    tasks: { index: string; title: string; deadline: string | null; is_sub: boolean }[],
-    members: { slot: number; name: string }[],
+    fills: OPPMFillMap,
+    tasks: OPPMFillTask[],
+    members: OPPMFillMember[],
   ) => {
     if (!sheetDataRef.current?.length) return
 
     // ── Owner column header pattern: matches the OPPM template's member label cells
-    // ("Project Leader", "Member 1", "Member 2", etc. and legacy "Primary/Secondary Helper")
-    const ownerColRe = /^Project\s*Leader$|^Member\s*\d+$|^Primary\s*Helper$|^Secondary\s*Helper$/i
+    // ("Project Leader", "Member 1", etc. plus legacy "Primary/Owner" labels)
+    const ownerColRe = /^Project\s*Leader$|^Primary\s*\/\s*Owner$|^Member\s*\d+$|^Primary\s*Helper$|^Secondary\s*Helper$/i
 
     // ── Timeline columns M–AC (0-indexed 12–28), 17 slots ────
     const TL_COL_START = 12   // Excel col M
@@ -314,6 +392,13 @@ export function OPPMView() {
           newText = `Project Leader: ${fills.project_leader}`
         else if (/project name/i.test(dl) && fills.project_name)
           newText = `Project Name: ${fills.project_name}`
+        else if (/project completed by/i.test(dl)) {
+          const completedBy = (fills.completed_by_text ?? fills.deadline ?? '').trim()
+          if (completedBy) newText = `Project Completed By: ${completedBy}`
+        } else if (/people working on the project/i.test(dl)) {
+          const peopleCount = (fills.people_count ?? '').trim()
+          if (peopleCount) newText = `# People working on the project: ${peopleCount}`
+        }
 
         if (!newText) return cell
         return setPlainText(cell, newText)
@@ -384,20 +469,23 @@ export function OPPMView() {
 
       // ── Fill owner/member section by label text ───────────────────────
       // The lower-right section has explicit labels like "Project Leader",
-      // "Member 1", "Member 2", etc. Use those labels directly rather than
-      // relying on match order so rotated/vertical cells still map correctly.
+      // "Member 1", and legacy "Primary/Owner" helper labels. Use those
+      // labels directly so the same columns can also be reused for task A/B/C fills.
       const leaderName = (fills.project_leader ?? '').trim()
+      const leaderMemberId = (fills.project_leader_member_id ?? '').trim()
       const memberPool = members.filter((mb) => {
         const name = (mb.name ?? '').trim()
-        return !!name && name.toLowerCase() !== leaderName.toLowerCase()
+        return !!name && mb.id !== leaderMemberId
       })
+      const ownerColumns = new Map<string, number>()
 
-      ownerHeaderCells.forEach(({ idx }) => {
-        const label = getCellText(celldata[idx]).trim()
+      ownerHeaderCells.forEach(({ idx, cell }) => {
+        const label = getCellText(cell).trim()
 
-        if (/^Project\s*Leader$/i.test(label)) {
+        if (/^Project\s*Leader$/i.test(label) || /^Primary\s*\/\s*Owner$/i.test(label)) {
           if (!leaderName) return
           celldata[idx] = setPlainText(celldata[idx], leaderName)
+          if (leaderMemberId && !ownerColumns.has(leaderMemberId)) ownerColumns.set(leaderMemberId, cell.c)
           return
         }
 
@@ -407,6 +495,7 @@ export function OPPMView() {
           const member = memberPool[slot]
           if (!member) return
           celldata[idx] = setPlainText(celldata[idx], member.name)
+          if (!ownerColumns.has(member.id)) ownerColumns.set(member.id, cell.c)
           return
         }
 
@@ -414,6 +503,7 @@ export function OPPMView() {
           const member = memberPool[0]
           if (!member) return
           celldata[idx] = setPlainText(celldata[idx], member.name)
+          if (!ownerColumns.has(member.id)) ownerColumns.set(member.id, cell.c)
           return
         }
 
@@ -421,16 +511,67 @@ export function OPPMView() {
           const member = memberPool[1]
           if (!member) return
           celldata[idx] = setPlainText(celldata[idx], member.name)
+          if (!ownerColumns.has(member.id)) ownerColumns.set(member.id, cell.c)
         }
       })
 
-      // ── Place timeline deadline markers ("■") for each task ──────────
+      // ── Fill task owner priorities (A/B/C) by mapped member columns ─────
+      tasks.forEach((task, i) => {
+        const r = taskHeaderRow + 1 + i
+        ;(task.owners ?? []).forEach((owner) => {
+          const col = ownerColumns.get(owner.member_id)
+          const style = OWNER_PRIORITY_STYLE[owner.priority]
+          if (col === undefined || !style) return
+          const existingIdx = posIndex.get(`${r},${col}`)
+          const baseCell = existingIdx !== undefined ? celldata[existingIdx] : { r, c: col, v: {} }
+          upsertCell(r, col, setPlainText(baseCell, owner.priority, {
+            bg: style.bg,
+            fc: style.fc,
+            bl: 1,
+            ht: 0,
+            vt: 0,
+          }))
+        })
+      })
+
+      // ── Place timeline identity markers for each task ──────────────────
       if (colToDate.size > 0) {
+        const placeTimelineMarker = (r: number, c: number, status?: string | null, quality?: string | null) => {
+          const marker = getTimelineMarker(status, quality)
+          const existingIdx = posIndex.get(`${r},${c}`)
+          const baseCell = existingIdx !== undefined ? celldata[existingIdx] : { r, c, v: {} }
+          upsertCell(r, c, setPlainText(baseCell, marker.symbol, {
+            ct: { fa: '@', t: 's' },
+            fc: marker.color,
+            ht: 0,
+            vt: 0,
+          }))
+        }
+
         tasks.forEach((task, i) => {
+          const r = taskHeaderRow + 1 + i
+          const timelineEntries = task.timeline ?? []
+
+          if (timelineEntries.length > 0) {
+            timelineEntries.forEach((entry) => {
+              const timelineDate = parseISODate(entry.week_start)
+              if (!timelineDate) return
+
+              let bestCol = TL_COL_START
+              let bestDiff = Infinity
+              colToDate.forEach((d, c) => {
+                const diff = Math.abs(d.getTime() - timelineDate.getTime())
+                if (diff < bestDiff) { bestDiff = diff; bestCol = c }
+              })
+
+              placeTimelineMarker(r, bestCol, entry.status, entry.quality)
+            })
+            return
+          }
+
           if (!task.deadline) return
           const taskDeadline = parseISODate(task.deadline)
           if (!taskDeadline) return
-          const r = taskHeaderRow + 1 + i
 
           let bestCol = TL_COL_START
           let bestDiff = Infinity
@@ -439,10 +580,7 @@ export function OPPMView() {
             if (diff < bestDiff) { bestDiff = diff; bestCol = c }
           })
 
-          upsertCell(r, bestCol, {
-            r, c: bestCol,
-            v: { v: '■', m: '■', ct: { fa: '@', t: 's' }, fc: '#333333', ht: 0, vt: 0 },
-          })
+          placeTimelineMarker(r, bestCol, 'completed', null)
         })
       }
 
@@ -468,7 +606,8 @@ export function OPPMView() {
         const body = await res.json().catch(() => ({}))
         throw new Error(body?.detail ?? `AI service returned ${res.status}`)
       }
-      const { fills, tasks = [], members = [] } = await res.json()
+      const payload = await res.json() as OPPMFillPayload
+      const { fills, tasks = [], members = [] } = payload
       // Reset to raw template snapshot before applying — makes fill idempotent on repeated clicks
       if (rawSheetRef.current) {
         sheetDataRef.current = JSON.parse(JSON.stringify(rawSheetRef.current))
@@ -569,7 +708,7 @@ export function OPPMView() {
               onClick={handleAiFill}
               disabled={aiFilling}
               className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 shadow-sm transition-colors disabled:opacity-50"
-              title="AI fills: Project Name, Leader, Objective, Deliverable Output, Start Date, Deadline"
+              title="AI fills the OPPM header, completion panel, owner priorities, and timeline symbols from your project data"
             >
               {aiFilling
                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -626,7 +765,7 @@ export function OPPMView() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-lg bg-violet-50 border border-violet-200 p-3">
                 <p className="text-xs font-bold text-violet-800 flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5" /> AI Fill</p>
-                <p className="text-[11px] text-violet-700 mt-1">Auto-fills: <strong>Project Name</strong>, <strong>Project Leader</strong>, <strong>Objective</strong>, <strong>Deliverable Output</strong>, <strong>Start Date</strong>, and <strong>Deadline</strong> from your project data. Click it after setting up the project details.</p>
+                <p className="text-[11px] text-violet-700 mt-1">Auto-fills the template from live project data: <strong>Project Name</strong>, <strong>Project Leader</strong>, <strong>Objective</strong>, <strong>Deliverable Output</strong>, <strong>Start Date</strong>, <strong>Deadline</strong>, <strong>Project Completed By</strong>, owner <strong>A/B/C</strong> priorities, and timeline symbols.</p>
               </div>
               <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
                 <p className="text-xs font-bold text-blue-800 flex items-center gap-1.5"><Download className="h-3.5 w-3.5" /> Download OPPM</p>

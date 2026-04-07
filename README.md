@@ -145,13 +145,14 @@ Browser → Frontend (React/Vite :5173)
 | File | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, service map, data flow |
+| [docs/AI-SYSTEM-CONTEXT.md](docs/AI-SYSTEM-CONTEXT.md) | Fast start reference for future AI or human updates: feature flows, edit hotspots, schema design, and verified drift notes |
 | [docs/API-REFERENCE.md](docs/API-REFERENCE.md) | Current public route reference and contract notes |
 | [docs/FRONTEND-REFERENCE.md](docs/FRONTEND-REFERENCE.md) | Frontend folder map, route ownership, state flow, and feature entry points |
 | [docs/MICROSERVICES-REFERENCE.md](docs/MICROSERVICES-REFERENCE.md) | Service ownership, shared package map, gateway routing, and backend feature entry points |
 | [docs/ERD.md](docs/ERD.md) | Current relational model and relationship notes |
 | [docs/FLOWCHARTS.md](docs/FLOWCHARTS.md) | Runtime flows for auth, invites, projects, AI, GitHub, and routing |
 | [docs/TESTING-GUIDE.md](docs/TESTING-GUIDE.md) | Automated checks, smoke scripts, and manual test matrix |
-| [docs/PHASE-TRACKER.md](docs/PHASE-TRACKER.md) | Outcome-based capability status and hardening priorities |
+| [docs/PHASE-TRACKER.md](docs/PHASE-TRACKER.md) | Active per-task tracker for ongoing implementation work; older trackers are archived in `docs/phase-history/` |
 | [docs/MICROSERVICES-REVIEW.md](docs/MICROSERVICES-REVIEW.md) | Architecture assessment, risks, and cleanup priorities |
 | [docs/SRS.md](docs/SRS.md) | Product-level software requirements specification |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local development setup and conventions |
