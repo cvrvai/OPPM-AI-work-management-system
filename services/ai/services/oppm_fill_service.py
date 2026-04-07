@@ -145,57 +145,35 @@ async def fill_oppm(
     )
     all_tasks = list(task_result.scalars().all())
 
-    # Build hierarchical ordered task list per objective
+    # ── Build OPPM task list: objectives as main-task rows, root tasks as sub-rows ──
+    # Template layout:  Row N   = "X. <Objective title>"  (is_sub=False)
+    #                   Row N+1 = "X.1 <Task title>"      (is_sub=True)
+    #                   Row N+2 = "X.2 <Task title>"      (is_sub=True)
+    # Only the first 3 root tasks per objective are shown (template has 3 sub-rows each).
     task_items: list[dict] = []
 
     def _fmt(d) -> str | None:
         return d.isoformat() if d else None
 
     for obj_idx, obj in enumerate(objectives):
-        obj_tasks = [t for t in all_tasks if str(t.oppm_objective_id) == str(obj.id)]
-        main_tasks = [t for t in obj_tasks if t.parent_task_id is None]
-        sub_map: dict[str, list[Task]] = {}
-        for t in obj_tasks:
-            if t.parent_task_id:
-                sub_map.setdefault(str(t.parent_task_id), []).append(t)
-
-        for main_idx, mt in enumerate(main_tasks, 1):
-            label = f"{obj_idx + 1}.{main_idx}"
-            task_items.append({
-                "index": label,
-                "title": mt.title,
-                "deadline": _fmt(mt.due_date),
-                "is_sub": False,
-            })
-            for sub_idx, st in enumerate(sub_map.get(str(mt.id), []), 1):
-                task_items.append({
-                    "index": f"{label}.{sub_idx}",
-                    "title": st.title,
-                    "deadline": _fmt(st.due_date),
-                    "is_sub": True,
-                })
-
-    # Tasks with no objective linked — append without objective prefix
-    unlinked = [t for t in all_tasks if t.oppm_objective_id is None and t.parent_task_id is None]
-    unlinked_sub_map: dict[str, list[Task]] = {}
-    for t in all_tasks:
-        if t.oppm_objective_id is None and t.parent_task_id:
-            unlinked_sub_map.setdefault(str(t.parent_task_id), []).append(t)
-
-    base_idx = len(objectives) + 1
-    for main_idx, mt in enumerate(unlinked, 1):
-        label = f"{base_idx}.{main_idx}"
+        # Main task row: the objective itself
         task_items.append({
-            "index": label,
-            "title": mt.title,
-            "deadline": _fmt(mt.due_date),
+            "index": str(obj_idx + 1),
+            "title": obj.title,
+            "deadline": None,
             "is_sub": False,
         })
-        for sub_idx, st in enumerate(unlinked_sub_map.get(str(mt.id), []), 1):
+        # Sub-task rows: first 3 root tasks of this objective (template has 3 sub-rows per main-task slot)
+        obj_root = sorted(
+            [t for t in all_tasks
+             if str(t.oppm_objective_id) == str(obj.id) and t.parent_task_id is None],
+            key=lambda t: (t.sort_order or 0, str(t.created_at)),
+        )[:3]
+        for sub_idx, mt in enumerate(obj_root, 1):
             task_items.append({
-                "index": f"{label}.{sub_idx}",
-                "title": st.title,
-                "deadline": _fmt(st.due_date),
+                "index": f"{obj_idx + 1}.{sub_idx}",
+                "title": mt.title,
+                "deadline": _fmt(mt.due_date),
                 "is_sub": True,
             })
 

@@ -16,7 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import {
-  ArrowLeft, Loader2, Check, Download, Upload, X, AlertTriangle, RotateCcw, Sparkles, Info, ChevronDown, ChevronUp,
+  ArrowLeft, Loader2, Download, X, AlertTriangle, RotateCcw, Sparkles, Info, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { useChatContext } from '@/hooks/useChatContext'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
@@ -53,29 +53,24 @@ export function OPPMView() {
   // ── Spreadsheet state ──────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sheetDataRef   = useRef<any[] | null>(null)
+  // rawSheetRef: immutable snapshot of the clean converted template (set once on load).
+  // AI Fill resets sheetDataRef from this before applying fills — makes fill idempotent.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawSheetRef    = useRef<any[] | null>(null)
   const [sheetKey, setSheetKey]             = useState(0)
   const [sheetFileName, setSheetFileName]   = useState<string | null>(null)
-  const [sheetSaving, setSheetSaving]       = useState(false)
-  const [sheetSaved, setSheetSaved]         = useState(false)
-  const [hasUnsaved, setHasUnsaved]         = useState(false)
   const [autoLoading, setAutoLoading]       = useState(false)
   const [aiFilling, setAiFilling]           = useState(false)
   const [aiFillError, setAiFillError]       = useState<string | null>(null)
+  const [isFilled, setIsFilled]             = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sheetRef     = useRef<any>(null)
   // isLoadedRef: true once data is set into the Workbook — prevents background
   // refetches from re-mounting the Workbook while the user is editing.
   const isLoadedRef   = useRef(false)
-  // hasInteractedRef: true after the first user op — FortuneSheet fires onChange
-  // immediately on mount with a normalised version of the data (may strip content).
-  // We skip onChange until the user actually changes something.
-  const hasInteractedRef = useRef(false)
 
-  // ── Import state ────────────────────────────────────────
-  const [importing, setImporting]     = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
+  // ── Guide state ─────────────────────────────────────────
   const [showGuide, setShowGuide]     = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Synchronous reset when project / workspace changes ─
   // Must happen before JSX evaluates sheetDataRef.current to prevent
@@ -90,17 +85,14 @@ export function OPPMView() {
   // Async cleanup (state reset) after project / workspace change
   useEffect(() => {
     sheetDataRef.current = null
-    isLoadedRef.current      = false
-    hasInteractedRef.current = false
+    rawSheetRef.current  = null
+    isLoadedRef.current  = false
     setSheetKey(k => k + 1)
     setSheetFileName(null)
     setAutoLoading(false)
-    setSheetSaving(false)
-    setSheetSaved(false)
-    setHasUnsaved(false)
     setAiFilling(false)
     setAiFillError(null)
-    setImportError(null)
+    setIsFilled(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, ws?.id])
 
@@ -128,7 +120,8 @@ export function OPPMView() {
     if (spreadsheetData?.sheet_data && !isLoadedRef.current) {
       isLoadedRef.current = true
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      sheetDataRef.current = spreadsheetData.sheet_data.map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
+      const normalized = spreadsheetData.sheet_data.map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
+      sheetDataRef.current = normalized
       setSheetFileName(spreadsheetData.file_name ?? null)
       setSheetKey(k => k + 1)
     }
@@ -156,7 +149,6 @@ export function OPPMView() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const normalized = sheets.map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
           isLoadedRef.current      = true
-          hasInteractedRef.current = false  // fresh load — skip first onChange
           sheetDataRef.current     = normalized
           setSheetFileName('OPPM Template.xlsx')
           setSheetKey(k => k + 1)
@@ -174,6 +166,33 @@ export function OPPMView() {
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ssLoading, spreadsheetData, ws, id])
+
+  // ── Always load blank XLSX template into rawSheetRef ───────────────────
+  // rawSheetRef is the reset point for AI Fill. It must always be the BLANK default
+  // template, NOT the backend's stored sheet_data (which may already be filled).
+  // This effect runs on every project/workspace change independently of display data.
+  useEffect(() => {
+    if (!ws || !id) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(defaultTemplateUrl)
+        if (!res.ok || cancelled) return
+        const blob = await res.blob()
+        const file = new File([blob], 'OPPM Template.xlsx', {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await transformExcelToFortune(file, (sheets: any[]) => {
+          if (cancelled) return
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          rawSheetRef.current = (sheets as any[]).map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
+        }, () => {}, sheetRef)
+      } catch { /* ignore — rawSheetRef stays as-is */ }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, ws?.id])
 
   // ── Extract display text from a cell (handles rich text inline strings) ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,31 +220,45 @@ export function OPPMView() {
   ) => {
     if (!sheetDataRef.current?.length) return
 
-    // ── Task placeholder pattern:
-    //   Combined (number + text in one cell): "1. Main task 1", "  1.1 Sub task 1"
-    //   Text-only (number in separate left cell): "Sub task 1", "Main task 2"
-    const taskPlaceholderRe = /(?:^\s*\d+[\d.]*\s+)?(main task|sub task)\s*\d+/i
-    const hasNumPrefix = (text: string) => /^\s*\d+[\d.]*\s+(main task|sub task)/i.test(text)
-
     // ── Owner column header pattern: single letter A/B/C or "Primary/Owner"
     const ownerColRe = /^[A-C]$|^Primary\/Owner$/i
+
+    // ── Timeline columns M–AC (0-indexed 12–28), 17 slots ────
+    const TL_COL_START = 12   // Excel col M
+    const TL_COL_END   = 28   // Excel col AC
+    const TL_COL_COUNT = TL_COL_END - TL_COL_START + 1  // 17
+
+    // Parse ISO date string ("YYYY-MM-DD") → Date | null
+    const parseISODate = (s: string | null | undefined): Date | null => {
+      if (!s) return null
+      const d = new Date(s)
+      return isNaN(d.getTime()) ? null : d
+    }
+
+    // Build 17 evenly-spaced dates across the project timeline
+    const projStart    = parseISODate(fills.start_date)
+    const projDeadline = parseISODate(fills.deadline)
+    const timelineDates: (Date | null)[] = Array(TL_COL_COUNT).fill(null)
+    if (projStart && projDeadline) {
+      const totalMs = projDeadline.getTime() - projStart.getTime()
+      for (let i = 0; i < TL_COL_COUNT; i++) {
+        const frac = i / (TL_COL_COUNT - 1)
+        timelineDates[i] = new Date(projStart.getTime() + frac * totalMs)
+      }
+    }
+
+    // col index → Date map (only populated when project dates are known)
+    const colToDate = new Map<number, Date>()
+    timelineDates.forEach((d, i) => { if (d) colToDate.set(TL_COL_START + i, d) })
+
+    // Short date label: "16-Feb-26"
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const fmtDate = (d: Date): string =>
+      `${d.getDate()}-${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updated = sheetDataRef.current.map((sheet: any) => {
       if (!Array.isArray(sheet.celldata)) return sheet
-
-      // Collect task placeholder cells in row-then-col order so we can replace by index
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const taskCells: { idx: number; cell: any }[] = []
-      sheet.celldata.forEach((cell: any, idx: number) => {
-        if (taskPlaceholderRe.test(getCellText(cell))) taskCells.push({ idx, cell })
-      })
-      // Sort by row then column
-      taskCells.sort((a, b) => {
-        const ra = a.cell.r ?? 0, rb = b.cell.r ?? 0
-        if (ra !== rb) return ra - rb
-        return (a.cell.c ?? 0) - (b.cell.c ?? 0)
-      })
 
       // Collect owner column header cells (A, B, C, Primary/Owner)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -240,6 +273,24 @@ export function OPPMView() {
       const celldata: any[] = sheet.celldata.map((cell: any) => {
         const display = getCellText(cell)
         const dl = display.toLowerCase()
+
+        // ── Update timeline date-header cells (Excel serial in cols 12–28) ──
+        // After fortune-excel conversion, date serials may be stored as number in v.v,
+        // or as a string in v.m (showing "44454.0"). Detect by display text pattern.
+        if (colToDate.size > 0 && cell.c >= TL_COL_START && cell.c <= TL_COL_END) {
+          const serialStr = display.trim()
+          const serialNum = parseFloat(serialStr)
+          const isRawSerial = (
+            /^\d{5}(\.\d*)?$/.test(serialStr) && !isNaN(serialNum) &&
+            serialNum > 40000 && serialNum < 80000
+          ) || (
+            typeof cell?.v?.v === 'number' && cell.v.v > 40000 && cell.v.v < 80000
+          )
+          if (isRawSerial) {
+            const newDate = timelineDates[cell.c - TL_COL_START]
+            if (newDate) return setPlainText(cell, fmtDate(newDate))
+          }
+        }
 
         // ── Multi-line merged cell (all 4 text fields in one cell) ──────
         if (/project objective/i.test(dl) && /deliverable output/i.test(dl)) {
@@ -267,26 +318,80 @@ export function OPPMView() {
         return setPlainText(cell, newText)
       })
 
-      // ── Fill task placeholder rows in order ──────────────────
-      taskCells.forEach(({ idx }, i) => {
-        const task = tasks[i]
-        if (!task) return
-        const indent = task.is_sub ? '   ' : ''
-        const deadline = task.deadline ? `  (${task.deadline})` : ''
-        const originalText = getCellText(celldata[idx])
-        // If number prefix is in a separate left cell, write title only; otherwise write full label
-        const text = hasNumPrefix(originalText)
-          ? `${indent}${task.index}  ${task.title}${deadline}`
-          : `${indent}${task.title}${deadline}`
-        celldata[idx] = setPlainText(celldata[idx], text)
+      // ── Find Major Tasks column by locating its header cell ──────────────
+      // Uses the topmost "Major Tasks" cell — the header never changes during fills,
+      // so this is robust even when task rows have been filled/overwritten before.
+      let taskCol = 8           // fallback: col I (0-indexed)
+      let taskHeaderRow = Infinity as number
+      sheet.celldata.forEach((cell: any) => {
+        if (/^Major Tasks/i.test(getCellText(cell)) && cell.r < taskHeaderRow) {
+          taskCol = cell.c
+          taskHeaderRow = cell.r
+        }
+      })
+      if (taskHeaderRow === Infinity) taskHeaderRow = 4  // fallback: Excel row 5
+
+      // ── Position index (row,col → celldata index) ──────────────────────
+      const posIndex = new Map<string, number>()
+      celldata.forEach((cell: any, idx: number) => posIndex.set(`${cell.r},${cell.c}`, idx))
+
+      // Helper: upsert a cell by (r,c) position
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const upsertCell = (r: number, c: number, newCell: any) => {
+        const key = `${r},${c}`
+        if (posIndex.has(key)) {
+          celldata[posIndex.get(key)!] = newCell
+        } else {
+          posIndex.set(key, celldata.length)
+          celldata.push(newCell)
+        }
+      }
+
+      // ── Fill task rows positionally ─────────────────────────────────────
+      // tasks[i] → row taskHeaderRow+1+i in taskCol.
+      // No text matching — works regardless of prior fill state.
+      tasks.forEach((task, i) => {
+        const r = taskHeaderRow + 1 + i
+        let text: string
+        if (!task.is_sub) {
+          text = `${task.index}. ${task.title}`
+        } else {
+          const deadline = task.deadline ? `  (${task.deadline})` : ''
+          text = `   ${task.index}  ${task.title}${deadline}`
+        }
+        const existingIdx = posIndex.get(`${r},${taskCol}`)
+        const baseCell = existingIdx !== undefined ? celldata[existingIdx] : { r, c: taskCol, v: {} }
+        upsertCell(r, taskCol, setPlainText(baseCell, text))
       })
 
-      // ── Fill owner column headers with member names ───────────
+      // ── Fill owner column headers with member names ───────────────────
       ownerHeaderCells.forEach(({ idx }, i) => {
         const m = members.find(mb => mb.slot === i)
         if (!m) return
         celldata[idx] = setPlainText(celldata[idx], m.name)
       })
+
+      // ── Place timeline deadline markers ("■") for each task ──────────
+      if (colToDate.size > 0) {
+        tasks.forEach((task, i) => {
+          if (!task.deadline) return
+          const taskDeadline = parseISODate(task.deadline)
+          if (!taskDeadline) return
+          const r = taskHeaderRow + 1 + i
+
+          let bestCol = TL_COL_START
+          let bestDiff = Infinity
+          colToDate.forEach((d, c) => {
+            const diff = Math.abs(d.getTime() - taskDeadline.getTime())
+            if (diff < bestDiff) { bestDiff = diff; bestCol = c }
+          })
+
+          upsertCell(r, bestCol, {
+            r, c: bestCol,
+            v: { v: '■', m: '■', ct: { fa: '@', t: 's' }, fc: '#333333', ht: 0, vt: 0 },
+          })
+        })
+      }
 
       return { ...sheet, celldata, scrollTop: 0, scrollLeft: 0 }
     })
@@ -311,8 +416,12 @@ export function OPPMView() {
         throw new Error(body?.detail ?? `AI service returned ${res.status}`)
       }
       const { fills, tasks = [], members = [] } = await res.json()
+      // Reset to raw template snapshot before applying — makes fill idempotent on repeated clicks
+      if (rawSheetRef.current) {
+        sheetDataRef.current = JSON.parse(JSON.stringify(rawSheetRef.current))
+      }
       applyFillsToSheet(fills, tasks, members)
-      setHasUnsaved(true)
+      setIsFilled(true)
       setSheetKey(k => k + 1)  // re-render Workbook with updated data
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'AI fill failed'
@@ -322,64 +431,14 @@ export function OPPMView() {
     }
   }, [ws, id, wsPath, applyFillsToSheet])
 
-  // ── Manual save callback ────────────────────────────────
-  const saveSheetToBackend = useCallback(async () => {
-    if (!ws || !id || !sheetDataRef.current) return
-    setSheetSaving(true)
-    setSheetSaved(false)
-    try {
-      await fetch(`/api${wsPath}/projects/${id}/oppm/spreadsheet`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
-        },
-        body: JSON.stringify({ sheet_data: sheetDataRef.current, file_name: sheetFileName }),
-      })
-      setHasUnsaved(false)
-      setSheetSaved(true)
-      setTimeout(() => setSheetSaved(false), 2000)
-    } finally {
-      setSheetSaving(false)
-    }
-  }, [ws, id, wsPath, sheetFileName])
-
-  // ── Import XLSX ─────────────────────────────────────────
-  const handleImport = async (file: File) => {
-    if (!ws || !id) return
-    setImporting(true)
-    setImportError(null)
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await transformExcelToFortune(file, (sheets: any[]) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sheetDataRef.current = sheets.map((s: any) => ({ ...s, scrollTop: 0, scrollLeft: 0 }))
-        setSheetFileName(file.name)
-        setSheetKey(k => k + 1)
-        setHasUnsaved(true)
-      }, () => {}, sheetRef)
-    } catch {
-      setImportError('Failed to parse XLSX file')
-    } finally {
-      setImporting(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
-
-  // ── Reset to default template ───────────────────────────
-  const handleResetTemplate = async () => {
-    if (!ws || !id) return
-    if (!confirm('Reset to the default OPPM template? Your current template will be deleted.')) return
-    const token = localStorage.getItem('access_token')
-    await fetch(`/api${wsPath}/projects/${id}/oppm/spreadsheet`, {
-      method: 'DELETE',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-    sheetDataRef.current = null
-    setSheetFileName(null)
+  // ── Reset to clean template ────────────────────────────
+  const handleReset = useCallback(() => {
+    if (!rawSheetRef.current) return
+    sheetDataRef.current = JSON.parse(JSON.stringify(rawSheetRef.current))
+    setIsFilled(false)
+    setAiFillError(null)
     setSheetKey(k => k + 1)
-    qc.invalidateQueries({ queryKey: spreadsheetQKey })
-  }
+  }, [])
 
   // ── Download OPPM export ────────────────────────────────
   const handleDownload = async () => {
@@ -429,28 +488,18 @@ export function OPPMView() {
             <h1 className="text-sm font-bold text-gray-900 truncate">{projectTitle ?? '…'}</h1>
           </div>
 
-          {/* Import XLSX */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 shadow-sm transition-colors disabled:opacity-50"
-            title="Replace template with a new XLSX file"
-          >
-            {importing
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : <Upload className="h-3.5 w-3.5" />}
-            Import XLSX
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            onChange={e => {
-              const f = e.target.files?.[0]
-              if (f) handleImport(f)
-            }}
-          />
+          {/* Reset to blank template */}
+          {hasSheet && (
+            <button
+              onClick={handleReset}
+              disabled={aiFilling}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 shadow-sm transition-colors disabled:opacity-50"
+              title="Reset to blank template"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset
+            </button>
+          )}
 
           {/* AI Fill */}
           {hasSheet && (
@@ -477,34 +526,7 @@ export function OPPMView() {
             Download OPPM
           </button>
 
-          {/* Reset to default template */}
-          {hasSheet && (
-            <button
-              onClick={handleResetTemplate}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 shadow-sm transition-colors"
-              title="Reset to default OPPM template"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Reset
-            </button>
-          )}
 
-          {/* Manual save button */}
-          {hasSheet && (
-            <button
-              onClick={saveSheetToBackend}
-              disabled={sheetSaving || !hasUnsaved}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title={hasUnsaved ? 'Save changes to server' : 'No unsaved changes'}
-            >
-              {sheetSaving
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : sheetSaved
-                  ? <Check className="h-3.5 w-3.5" />
-                  : <Check className="h-3.5 w-3.5" />}
-              {sheetSaving ? 'Saving…' : sheetSaved ? 'Saved' : 'Save'}
-            </button>
-          )}
         </div>
       </div>
 
@@ -521,20 +543,7 @@ export function OPPMView() {
         </div>
       )}
 
-      {/* Import error banner ──────────────────────────── */}
-      {importError && (
-        <div className="mt-2 -mx-4 sm:-mx-6 px-4 sm:px-6">
-          <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-2.5">
-            <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-            <p className="flex-1 text-xs text-red-800">{importError}</p>
-            <button onClick={() => setImportError(null)} className="text-red-400 hover:text-red-600">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── How-to guide (collapsible) ──────────────────── */}
+      {/* ── How-to guide (collapsible) ────────────────── */}
       <div className="mt-2 -mx-4 sm:-mx-6 px-4 sm:px-6">
         <button
           onClick={() => setShowGuide(g => !g)}
@@ -549,8 +558,8 @@ export function OPPMView() {
         {showGuide && (
           <div className="mt-1 rounded-lg border border-indigo-200 bg-white px-4 py-3 space-y-3">
             <div>
-              <p className="text-xs font-bold text-indigo-800 mb-1">📝 This spreadsheet is your editable OPPM template</p>
-              <p className="text-[11px] text-gray-600">You can type directly into any cell. The template shows placeholder text like "Main task 1", "Sub task 1" — replace them with your actual project tasks.</p>
+              <p className="text-xs font-bold text-indigo-800 mb-1">�️ This is a read-only OPPM overview</p>
+              <p className="text-[11px] text-gray-600">Scroll horizontally and vertically to explore the full OPPM layout. Use <strong>AI Fill</strong> to populate the template from your project data, then <strong>Download OPPM</strong> to get the full auto-generated report.</p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-lg bg-violet-50 border border-violet-200 p-3">
@@ -567,8 +576,6 @@ export function OPPMView() {
               <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
                 <li>Go to <strong>Project Detail</strong> → create <strong>Objectives</strong>, <strong>Main Tasks</strong>, and <strong>Sub-Tasks</strong></li>
                 <li>Come back here → click <strong>AI Fill</strong> to populate the template header</li>
-                <li>Edit the spreadsheet cells directly to customize the layout</li>
-                <li>Click <strong>Save</strong> to preserve your edits</li>
                 <li>Click <strong>Download OPPM</strong> anytime to get a full auto-generated report</li>
               </ol>
             </div>
@@ -594,17 +601,10 @@ export function OPPMView() {
               ref={sheetRef}
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               data={sheetDataRef.current as any[]}
-              onChange={(data: any) => {
-                // Skip the first onChange that FortuneSheet fires on mount.
-                // That emission can be a normalised/stripped version of the data
-                // which would corrupt sheetDataRef and cause empty saves.
-                if (!hasInteractedRef.current) return
-                sheetDataRef.current = data
-              }}
-              onOp={() => {
-                hasInteractedRef.current = true  // first real user interaction
-                setHasUnsaved(true)              // mark as having unsaved changes
-              }}
+              allowEdit={false}
+              showToolbar={false}
+              onChange={() => {}}
+              onOp={() => {}}
             />
           </div>
         ) : (
