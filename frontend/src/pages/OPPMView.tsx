@@ -86,6 +86,13 @@ const TIMELINE_QUALITY_COLOR: Record<OPPMFillTimelineQuality, string> = {
   bad: '#DC2626',
 }
 
+const FALLBACK_COLUMN_WIDTH = 72
+const PREVIEW_OWNER_COLUMN_WIDTH = 72
+const PREVIEW_LEGEND_COLUMN_WIDTHS = [42, 84, 84, 84]
+const PREVIEW_LEGEND_TITLE_ROW_HEIGHT = 24
+const PREVIEW_LEGEND_BODY_ROW_HEIGHT = 22
+const PREVIEW_MIN_TASK_ROWS = 16
+
 const HORIZONTAL_SCROLL_STEP = 420
 
 // ══════════════════════════════════════════════════════════════
@@ -128,6 +135,7 @@ export function OPPMView() {
   const [isFilled, setIsFilled]             = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sheetRef     = useRef<any>(null)
+  const layoutNormalizedRef = useRef(false)
   // isLoadedRef: true once data is set into the Workbook — prevents background
   // refetches from re-mounting the Workbook while the user is editing.
   const isLoadedRef   = useRef(false)
@@ -156,6 +164,7 @@ export function OPPMView() {
     setAiFilling(false)
     setAiFillError(null)
     setIsFilled(false)
+    layoutNormalizedRef.current = false
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, ws?.id])
 
@@ -442,6 +451,17 @@ export function OPPMView() {
         }
       }
 
+      const ensureCell = (r: number, c: number) => {
+        const key = `${r},${c}`
+        const existingIdx = posIndex.get(key)
+        if (existingIdx !== undefined) return celldata[existingIdx]
+
+        const newCell = { r, c, v: {} }
+        posIndex.set(key, celldata.length)
+        celldata.push(newCell)
+        return newCell
+      }
+
       // ── Fill task rows positionally ─────────────────────────────────────
       // Objectives (is_sub=false) → mainTaskCol (col H: "1. Main task 1" template cell)
       // Sub-tasks  (is_sub=true)  → taskCol     (col I: "Sub task N" template cell)
@@ -472,6 +492,7 @@ export function OPPMView() {
       const leaderName = (fills.project_leader ?? '').trim()
       const leaderMemberId = (fills.project_leader_member_id ?? '').trim()
       const namedMembers = members.filter((member) => (member.name ?? '').trim())
+      const hasMemberFillData = namedMembers.length > 0 || !!leaderName
       const memberPool = members.filter((mb) => {
         const name = (mb.name ?? '').trim()
         return !!name && mb.id !== leaderMemberId
@@ -514,14 +535,19 @@ export function OPPMView() {
         }
       })
 
-      const ownerHeaderKeys = new Set(ownerHeaderCells.map(({ cell }) => `${cell.r},${cell.c}`))
-
       // ── Compact unused owner/member columns in the preview sheet ─────
+      const existingVisibleOwners = ownerHeaderCells.reduce((count, { idx }) => {
+        const text = getCellText(celldata[idx]).trim()
+        return text && !ownerColRe.test(text) ? count + 1 : count
+      }, 0)
+      const targetVisibleOwnerCount = hasMemberFillData
+        ? Math.max(namedMembers.length, leaderName ? 1 : 0)
+        : (existingVisibleOwners || ownerColumnIndexes.length)
       const visibleOwnerCount = Math.max(
         1,
         Math.min(
           ownerColumnIndexes.length,
-          Math.max(namedMembers.length, leaderName ? 1 : 0),
+          targetVisibleOwnerCount,
         ),
       )
       const removedOwnerColumns = ownerColumnIndexes.slice(visibleOwnerCount)
@@ -601,123 +627,324 @@ export function OPPMView() {
         })
       }
 
+      const taskStartRow = taskHeaderRow + 1
+      const taskSectionRowCount = Math.max(tasks.length, PREVIEW_MIN_TASK_ROWS)
+      const legendStartColumn = (ownerColumnIndexes[ownerColumnIndexes.length - 1] ?? TL_COL_END) + 1
+      const legendColumns = Array.from({ length: PREVIEW_LEGEND_COLUMN_WIDTHS.length }, (_, index) => legendStartColumn + index)
+      const legendStartCol = legendColumns[0]
+      const legendEndCol = legendColumns[legendColumns.length - 1] ?? legendStartColumn
+      const legendBodyStartCol = legendColumns[1] ?? legendEndCol
+      const legendBlocks = [
+        {
+          startRow: taskStartRow + 1,
+          title: 'Priority',
+          titleOverrides: {
+            ht: 0,
+          },
+          rows: [
+            ['A', 'Primary'],
+            ['B', 'Secondary'],
+            ['C', 'Support'],
+          ] as Array<[string, string]>,
+        },
+        {
+          startRow: taskStartRow + taskSectionRowCount,
+          title: 'Project Identity Symbol',
+          titleOverrides: {
+            ht: 1,
+            fs: 10,
+          },
+          rows: [
+            ['□', 'Start'],
+            ['●', 'In Progress'],
+            ['■', 'Complete'],
+          ] as Array<[string, string]>,
+        },
+      ]
+
+      const isCellInLegendZone = (r: number, c: number) => legendBlocks.some(({ startRow, rows }) => {
+        const endRow = startRow + rows.length
+        return r >= startRow && r <= endRow && c >= legendStartCol && c <= legendEndCol
+      })
+
+      const doesRangeOverlapLegendZone = (r1: number, r2: number, c1: number, c2: number) => legendBlocks.some(({ startRow, rows }) => {
+        const endRow = startRow + rows.length
+        return !(r2 < startRow || r1 > endRow || c2 < legendStartCol || c1 > legendEndCol)
+      })
+
       const config = { ...(sheet.config ?? {}) }
+      const ownerPriorityHeaderCell = sheet.celldata
+        .filter((cell: any) => /Owner\s*\/\s*Priority/i.test(getCellText(cell)))
+        .sort((a: any, b: any) => (a.r ?? 0) - (b.r ?? 0))[0]
+      const nextMerge = Object.fromEntries(
+        Object.entries(config.merge ?? {}).filter(([, merge]) => {
+          if (!merge || typeof merge !== 'object') return true
+          const mergeInfo = merge as { r: number; c: number; rs?: number; cs?: number }
+          const endRow = mergeInfo.r + (mergeInfo.rs ?? 1) - 1
+          const endCol = mergeInfo.c + (mergeInfo.cs ?? 1) - 1
+          return !doesRangeOverlapLegendZone(mergeInfo.r, endRow, mergeInfo.c, endCol)
+        }),
+      ) as Record<string, { r: number; c: number; rs: number; cs: number }>
+      // Build the mutable border list.
+      // Strategy: clip range entries at legendStartCol instead of dropping them entirely.
+      // The Excel template stores the Owner/Priority grid and the legend area as ONE combined
+      // border-all range. The old filter dropped the whole entry when any part touched the
+      // legend zone, wiping all Owner/Priority borders. We now clip the column span to stop
+      // just before legendStartCol so the owner grid borders survive.
+      const nextBorderInfo: any[] = (Array.isArray(config.borderInfo) ? config.borderInfo : []).flatMap((entry: any) => {
+        if (entry?.rangeType === 'cell' && entry.value) {
+          // Drop only cell borders that sit inside the legend zone (re-drawn below)
+          return isCellInLegendZone(entry.value.row_index, entry.value.col_index) ? [] : [entry]
+        }
+        if (entry?.rangeType === 'range' && Array.isArray(entry.range)) {
+          const clipped = entry.range.flatMap((range: any) => {
+            const col = Array.isArray(range?.column) ? range.column as [number, number] : [0, 0] as [number, number]
+            if (col[1] < legendStartCol) return [range]                               // fully left of legend – keep
+            if (col[0] >= legendStartCol) return [] as typeof entry.range              // fully inside legend – drop
+            return [{ ...range, column: [col[0], legendStartCol - 1] }]               // overlaps – clip right edge
+          })
+          return clipped.length > 0 ? [{ ...entry, range: clipped }] : []
+        }
+        return [entry]
+      })
+
+      const overlappingLegendMergeAnchors = new Set<string>()
+      celldata.forEach((cell: any) => {
+        const mergeInfo = cell?.mc
+        if (!mergeInfo || !('rs' in mergeInfo) || !('cs' in mergeInfo)) return
+
+        const startRow = typeof mergeInfo.r === 'number' ? mergeInfo.r : cell.r
+        const startCol = typeof mergeInfo.c === 'number' ? mergeInfo.c : cell.c
+        const endRow = startRow + (mergeInfo.rs ?? 1) - 1
+        const endCol = startCol + (mergeInfo.cs ?? 1) - 1
+
+        if (doesRangeOverlapLegendZone(startRow, endRow, startCol, endCol)) {
+          overlappingLegendMergeAnchors.add(`${startRow},${startCol}`)
+        }
+      })
+
+      if (overlappingLegendMergeAnchors.size > 0) {
+        for (let index = 0; index < celldata.length; index += 1) {
+          const cell = celldata[index]
+          const mergeInfo = cell?.mc
+          if (!mergeInfo) continue
+
+          const anchorRow = typeof mergeInfo.r === 'number' ? mergeInfo.r : cell.r
+          const anchorCol = typeof mergeInfo.c === 'number' ? mergeInfo.c : cell.c
+          if (!overlappingLegendMergeAnchors.has(`${anchorRow},${anchorCol}`)) continue
+
+          const nextCell = { ...cell }
+          delete nextCell.mc
+          celldata[index] = nextCell
+        }
+      }
+
+      const clearLegendBlock = (startRow: number, rowCount: number) => {
+        const endRow = startRow + rowCount
+        for (let row = startRow; row <= endRow; row += 1) {
+          for (let column = legendStartCol; column <= legendEndCol; column += 1) {
+            const baseCell = { ...ensureCell(row, column) }
+            delete baseCell.mc
+            upsertCell(row, column, setPlainText(baseCell, '', {
+              bg: '#FFFFFF',
+              fc: '#111111',
+              ht: 0,
+              vt: 0,
+            }))
+          }
+        }
+      }
+
+      const setMergeRegion = (startRow: number, startCol: number, endRow: number, endCol: number) => {
+        const rs = endRow - startRow + 1
+        const cs = endCol - startCol + 1
+        const topLeftCell = { ...ensureCell(startRow, startCol) }
+        upsertCell(startRow, startCol, {
+          ...topLeftCell,
+          mc: { r: startRow, c: startCol, rs, cs },
+        })
+        nextMerge[`${startRow}_${startCol}`] = { r: startRow, c: startCol, rs, cs }
+
+        for (let row = startRow; row <= endRow; row += 1) {
+          for (let column = startCol; column <= endCol; column += 1) {
+            if (row === startRow && column === startCol) continue
+            const coveredCell = { ...ensureCell(row, column) }
+            upsertCell(row, column, {
+              ...coveredCell,
+              mc: { r: startRow, c: startCol },
+            })
+          }
+        }
+      }
+
+      const addLegendBorder = (startRow: number, rowCount: number) => {
+        const endRow = startRow + rowCount
+        for (let r = startRow; r <= endRow; r += 1) {
+          for (let c = legendStartCol; c <= legendEndCol; c += 1) {
+            const isTitle = r === startRow
+            addCellBorder(r, c, {
+              l: c === legendStartCol || (!isTitle && c === legendBodyStartCol) ? { color: '#000000', style: '1' } : undefined,
+              r: c === legendEndCol || (!isTitle && c === legendStartCol) ? { color: '#000000', style: '1' } : undefined,
+              t: { color: '#000000', style: '1' },
+              b: { color: '#000000', style: '1' },
+            })
+          }
+        }
+      }
+
+      const addCellBorder = (
+        row: number,
+        column: number,
+        sides: Partial<Record<'l' | 'r' | 't' | 'b', { color: string; style: string }>>,
+      ) => {
+        const borderVal: Record<string, unknown> = {
+          row_index: row,
+          col_index: column,
+        }
+        if (sides.l) borderVal.l = sides.l
+        if (sides.r) borderVal.r = sides.r
+        if (sides.t) borderVal.t = sides.t
+        if (sides.b) borderVal.b = sides.b
+
+        nextBorderInfo.push({
+          rangeType: 'cell',
+          value: borderVal,
+        })
+      }
+
+      const writeLegendBlock = (
+        startRow: number,
+        title: string,
+        rows: Array<[string, string]>,
+        titleOverrides: Record<string, unknown> = {},
+      ) => {
+        clearLegendBlock(startRow, rows.length)
+        setMergeRegion(startRow, legendStartCol, startRow, legendEndCol)
+
+        const titleBase = { ...ensureCell(startRow, legendStartCol) }
+        upsertCell(startRow, legendStartCol, setPlainText(titleBase, title, {
+          bg: '#FFFFFF',
+          bl: 1,
+          ht: 0,
+          vt: 0,
+          fc: '#111111',
+          ...titleOverrides,
+        }))
+
+        rows.forEach(([symbol, label], rowOffset) => {
+          const row = startRow + rowOffset + 1
+          setMergeRegion(row, legendBodyStartCol, row, legendEndCol)
+
+          const symbolBase = { ...ensureCell(row, legendStartCol) }
+          upsertCell(row, legendStartCol, setPlainText(symbolBase, symbol, {
+            bg: '#FFFFFF',
+            bl: 1,
+            ht: 0,
+            vt: 0,
+            fc: '#111111',
+          }))
+
+          const labelBase = { ...ensureCell(row, legendBodyStartCol) }
+          upsertCell(row, legendBodyStartCol, setPlainText(labelBase, label, {
+            bg: '#FFFFFF',
+            ht: 1,
+            vt: 0,
+            fc: '#111111',
+          }))
+        })
+
+        addLegendBorder(startRow, rows.length)
+      }
+
+      legendBlocks.forEach(({ startRow, title, rows, titleOverrides }) => writeLegendBlock(startRow, title, rows, titleOverrides))
+
+      const visibleOwnerColumns = ownerColumnIndexes.slice(0, visibleOwnerCount)
+      const ownerBlockStartCol = ownerPriorityHeaderCell?.c ?? visibleOwnerColumns[0]
+      const ownerHeaderEndCol = ownerPriorityHeaderCell
+        ? ownerPriorityHeaderCell.c + ((ownerPriorityHeaderCell?.mc?.cs ?? 1) - 1)
+        : ownerBlockStartCol
+      const ownerBlockEndCol = Math.max(
+        ownerHeaderEndCol ?? ownerBlockStartCol ?? 0,
+        visibleOwnerColumns[visibleOwnerColumns.length - 1] ?? ownerHeaderEndCol ?? ownerBlockStartCol ?? 0,
+      )
+      const ownerBlockStartRow = ownerPriorityHeaderCell?.r ?? taskHeaderRow
+      // Extend the borders all the way down to include the vertical ownership names at the bottom
+      const lowestOwnerHeaderRow = ownerHeaderCells.reduce((maxRow, { cell }) => Math.max(maxRow, cell.r ?? 0), 0)
+      const ownerBlockEndRow = Math.max(
+        taskStartRow + taskSectionRowCount - 1,
+        lowestOwnerHeaderRow,
+      )
+
+      // Re-draw the Owner/Priority block borders using ONLY the visible owner columns.
+      // ownerBlockEndCol (from the template header merge span) may point to hidden columns, so
+      // we do NOT use it here. Instead we derive the column list from visibleOwnerColumns, which
+      // is already the set of un-hidden owner columns. Every cell gets b+r so internal grid lines
+      // are automatic; l is only on the first column and t is only on the first row.
+      const ownerColsForBorder: number[] =
+        visibleOwnerColumns.length > 0
+          ? visibleOwnerColumns
+          : typeof ownerBlockStartCol === 'number'
+            ? [ownerBlockStartCol]
+            : []
+
+      if (ownerColsForBorder.length > 0 && typeof ownerBlockStartRow === 'number') {
+        for (let row = ownerBlockStartRow; row <= ownerBlockEndRow; row += 1) {
+          for (let ci = 0; ci < ownerColsForBorder.length; ci += 1) {
+            const col = ownerColsForBorder[ci]
+            addCellBorder(row, col, {
+              l: ci === 0 ? { color: '#000000', style: '1' } : undefined,
+              r: { color: '#000000', style: '1' },   // every col → internal dividers + outer right
+              t: row === ownerBlockStartRow ? { color: '#000000', style: '1' } : undefined,
+              b: { color: '#000000', style: '1' },   // every row → grid lines + outer bottom
+            })
+          }
+        }
+      }
+
+      const nextColumnlen: Record<string, number> = { ...(config.columnlen ?? {}) }
+      const nextColhidden: Record<string, number> = { ...(config.colhidden ?? {}) }
+      const nextRowlen: Record<string, number> = { ...(config.rowlen ?? {}) }
+      const nextCustomHeight: Record<string, number> = { ...(config.customHeight ?? {}) }
+
+      legendBlocks.forEach(({ startRow, rows }) => {
+        nextRowlen[String(startRow)] = PREVIEW_LEGEND_TITLE_ROW_HEIGHT
+        nextCustomHeight[String(startRow)] = 1
+        rows.forEach((_, index) => {
+          const row = startRow + index + 1
+          nextRowlen[String(row)] = PREVIEW_LEGEND_BODY_ROW_HEIGHT
+          nextCustomHeight[String(row)] = 1
+        })
+      })
+
+      ownerColumnIndexes.forEach((columnIndex, index) => {
+        nextColumnlen[String(columnIndex)] = PREVIEW_OWNER_COLUMN_WIDTH
+        if (index < visibleOwnerCount) delete nextColhidden[String(columnIndex)]
+        else nextColhidden[String(columnIndex)] = 0
+      })
 
       if (removedOwnerCount === 0) {
-        return {
-          ...sheet,
-          celldata,
-          config,
-          scrollTop: 0,
-          scrollLeft: 0,
-        }
+        ownerColumnIndexes.forEach((columnIndex) => delete nextColhidden[String(columnIndex)])
       }
 
-      const removedOwnerSet = new Set(removedOwnerColumns)
-      const firstRemovedOwnerColumn = removedOwnerColumns[0]
-      const lastRemovedOwnerColumn = removedOwnerColumns[removedOwnerColumns.length - 1]
-
-      const mergeAnchorOverrides = new Map<string, number>()
-      ;[config.merge, config.mergeCells].forEach((source) => {
-        Object.values(source ?? {}).forEach((merge: any) => {
-          const mergeRow = Number(merge?.r)
-          const startColumn = Number(merge?.c)
-          const columnSpan = Number(merge?.cs ?? 1)
-          if (Number.isNaN(mergeRow) || Number.isNaN(startColumn) || Number.isNaN(columnSpan)) return
-
-          const endColumn = startColumn + columnSpan - 1
-          if (startColumn >= firstRemovedOwnerColumn && endColumn > lastRemovedOwnerColumn) {
-            mergeAnchorOverrides.set(`${mergeRow},${startColumn}`, firstRemovedOwnerColumn)
-          }
-        })
+      legendColumns.forEach((columnIndex, index) => {
+        nextColumnlen[String(columnIndex)] = PREVIEW_LEGEND_COLUMN_WIDTHS[index] ?? FALLBACK_COLUMN_WIDTH
+        delete nextColhidden[String(columnIndex)]
       })
 
-      const compactColumnIndex = (columnIndex: number): number | null => {
-        if (removedOwnerSet.has(columnIndex)) return null
-        if (columnIndex > lastRemovedOwnerColumn) return columnIndex - removedOwnerCount
-        return columnIndex
-      }
-
-      // Remove the unused owner columns entirely and shift the sections on the
-      // right so the closing border, Priority box, and Project Identity Symbol
-      // box stay adjacent to the visible owner columns.
-      const compactedCelldata: any[] = []
-      const compactedIndex = new Map<string, number>()
-      celldata.forEach((cell: any) => {
-        const cellKey = `${cell.r},${cell.c}`
-        const preservedAnchorColumn = mergeAnchorOverrides.get(cellKey)
-        const nextColumn = preservedAnchorColumn
-          ?? (
-            removedOwnerSet.has(cell.c)
-              ? (getCellText(cell) && !ownerHeaderKeys.has(cellKey) ? cell.c : null)
-              : compactColumnIndex(cell.c)
-          )
-        if (nextColumn === null) return
-        const nextCell = nextColumn === cell.c ? cell : { ...cell, c: nextColumn }
-        const key = `${nextCell.r},${nextCell.c}`
-        if (!compactedIndex.has(key)) {
-          compactedIndex.set(key, compactedCelldata.length)
-          compactedCelldata.push(nextCell)
-          return
-        }
-
-        const existingIdx = compactedIndex.get(key)!
-        const existingCell = compactedCelldata[existingIdx]
-        const existingText = getCellText(existingCell)
-        const nextText = getCellText(nextCell)
-        if (!existingText && nextText) compactedCelldata[existingIdx] = nextCell
-      })
-
-      const remapColumnConfig = (source: Record<string, unknown> | undefined) => {
-        const remapped: Record<string, unknown> = {}
-        Object.entries(source ?? {}).forEach(([rawColumn, value]) => {
-          const columnIndex = Number(rawColumn)
-          if (Number.isNaN(columnIndex)) return
-          const nextColumn = compactColumnIndex(columnIndex)
-          if (nextColumn === null) return
-          remapped[String(nextColumn)] = value
-        })
-        return remapped
-      }
-
-      const remapMergeConfig = (source: Record<string, any> | undefined) => {
-        const remapped: Record<string, any> = {}
-        Object.values(source ?? {}).forEach((merge: any) => {
-          const startColumn = Number(merge?.c)
-          const columnSpan = Number(merge?.cs ?? 1)
-          if (Number.isNaN(startColumn) || Number.isNaN(columnSpan)) return
-          const endColumn = startColumn + columnSpan - 1
-          if (endColumn < firstRemovedOwnerColumn) {
-            remapped[`${merge.r}_${startColumn}`] = merge
-            return
-          }
-          if (startColumn > lastRemovedOwnerColumn) {
-            const nextMerge = { ...merge, c: startColumn - removedOwnerCount }
-            remapped[`${nextMerge.r}_${nextMerge.c}`] = nextMerge
-            return
-          }
-
-          const removedInside = removedOwnerColumns.filter((columnIndex) => columnIndex >= startColumn && columnIndex <= endColumn).length
-          const nextSpan = Math.max(1, columnSpan - removedInside)
-          const nextStart = startColumn >= firstRemovedOwnerColumn ? firstRemovedOwnerColumn : startColumn
-          const nextMerge = { ...merge, c: nextStart, cs: nextSpan }
-          remapped[`${nextMerge.r}_${nextMerge.c}`] = nextMerge
-        })
-        return remapped
-      }
-
-      const compactedConfig = {
+      const nextConfig = {
         ...config,
-        columnlen: remapColumnConfig(config.columnlen),
-        colhidden: remapColumnConfig(config.colhidden),
-        merge: remapMergeConfig(config.merge),
-        mergeCells: remapMergeConfig(config.mergeCells),
+        merge: nextMerge,
+        borderInfo: nextBorderInfo,
+        columnlen: nextColumnlen,
+        colhidden: nextColhidden,
+        rowlen: nextRowlen,
+        customHeight: nextCustomHeight,
       }
 
       return {
         ...sheet,
-        celldata: compactedCelldata,
-        config: compactedConfig,
+        celldata,
+        config: nextConfig,
         scrollTop: 0,
         scrollLeft: 0,
       }
@@ -725,6 +952,13 @@ export function OPPMView() {
     sheetDataRef.current = updated
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!sheetDataRef.current?.length || layoutNormalizedRef.current) return
+    layoutNormalizedRef.current = true
+    applyFillsToSheet({}, [], [])
+    setSheetKey(k => k + 1)
+  }, [applyFillsToSheet, sheetKey])
 
   // ── AI Fill callback ─────────────────────────────────────
   const handleAiFill = useCallback(async () => {

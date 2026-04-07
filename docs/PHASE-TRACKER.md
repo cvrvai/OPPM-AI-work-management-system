@@ -27,6 +27,9 @@ Fix the OPPM workbook layout so the Owner / Priority area, the Project Completed
 - `Completed` updated the preview to fill the Project Completed By header, owner A/B/C cells, and timeline identity symbols from live project data.
 - `Completed` updated export data assembly to include project-scoped members and saved OPPM header values.
 - `Completed` added an assignee-based fallback so Owner / Priority cells fill even when explicit `task_owners` A/B/C records do not exist yet.
+- `Completed` solved the missing borders around Project Identity Symbol and Owner / Priority by restricting the manual cell boundary push to only non-null sides instead of overwriting adjacent template borders with `null`.
+- `Completed` rebuilt the preview `addLegendBorder` engine to explicitly trace the four sides of every legend cell instead of relying on the unreliable `border-all` FortuneSheet range property on merged cells.
+- `Completed` extended the dynamic vertical borders for the Owner / Priority block all the way down to wrap the actual member name headers at the bottom of the sheet.
 - `Completed` added a task-status fallback so Project Identity Symbols use `□` for todo/start, `●` for in-progress, and `■` for completed when no timeline rows exist.
 - `Completed` changed Owner / Priority letters to render as plain text instead of colored A/B/C blocks in both the preview and export.
 - `Completed` minimized unused owner/member columns in the live OPPM preview so the Owner / Priority area scales down without disappearing.
@@ -34,6 +37,14 @@ Fix the OPPM workbook layout so the Owner / Priority area, the Project Completed
 - `Completed` replaced the preview-only width hack with real owner-column compaction so the black closing border, Priority box, and Project Identity Symbol box shift left cleanly.
 - `Completed` added explicit Left and Right controls in the OPPM top bar so users can horizontally move the FortuneSheet view without relying on the bottom scrollbar.
 - `Completed` adjusted preview compaction so non-owner legend text inside removed owner columns is preserved and remapped, restoring the missing Priority and Project Identity Symbol labels.
+- `Completed` replaced preview-side structural owner-column deletion with hidden empty owner columns plus width redistribution, keeping the right-side legend zone stable.
+- `Completed` updated the Excel export to reserve the same fixed right-side legend zone and render matching Priority and Project Identity Symbol blocks.
+- `Completed` restored the preview legend labels explicitly and shrank the owner columns back to a normal default-style size in both preview and export.
+- `Completed` normalized stored preview sheets on load so the smaller owner widths and legend labels appear even before running AI Fill again.
+- `Completed` changed the preview legend area to use merged, bordered right-side blocks so Priority and Project Identity Symbol render like the export instead of floating as loose text.
+- `Completed` assigned dedicated row heights to the preview legend blocks so the long Project Identity Symbol heading renders cleanly inside its box.
+- `Completed` removed stale template merge metadata that overlapped the preview legend zone, fixing the Project Identity Symbol title drifting into the wrong position.
+- `Completed` added explicit preview-side outer borders for the Owner / Priority block and tightened the Project Identity Symbol title styling so it stays inside the legend box.
 - `Completed` validated the touched frontend and backend files with the workspace diagnostics tool.
 
 ## Files Expected
@@ -67,3 +78,11 @@ Fix the OPPM workbook layout so the Owner / Priority area, the Project Completed
 - The live preview now removes extra owner columns structurally and remaps the right-side merged panels left, which avoids the cramped look from the earlier minimized-column approach.
 - The OPPM page now exposes explicit horizontal navigation buttons that call FortuneSheet's built-in scroll API, because the view previously relied only on the internal sheet scrollbar.
 - The preview compaction now keeps non-owner text cells that sit inside removed owner columns, which avoids deleting the static Priority and Project Identity Symbol legend labels during the left-shift.
+- The preview now keeps the right-side legend section fixed and hides unused owner columns instead of deleting them, which is closer to the classic template and avoids legend-cell drift.
+- The export now includes a dedicated right-side legend zone so the downloaded workbook matches the preview structure more closely.
+- The preview now writes the Priority and Project Identity Symbol labels directly into the fixed legend zone, and both preview and export use smaller owner-column widths instead of stretching them across the removed member space.
+- The preview now reapplies that layout normalization once after load, so previously saved sheet snapshots are upgraded in-place instead of requiring a fresh AI Fill to show the new legend labels and widths.
+- The preview now also rewrites the legend-zone merges and borders on each normalization pass, which keeps long labels like Project Identity Symbol inside a real boxed panel instead of overflowing across empty cells.
+- The preview now forces custom row heights for those legend titles and legend rows, which prevents the longer lower title from looking squeezed against the sheet grid.
+- The preview now also strips any pre-existing merge anchors that cross the legend area, which prevents leftover template merges from stealing the lower title row and dropping parts of the border.
+- The preview now force-draws the owner block's outer vertical borders and uses a smaller left-aligned lower legend title so the long Project Identity Symbol text stops appearing offset from its box.

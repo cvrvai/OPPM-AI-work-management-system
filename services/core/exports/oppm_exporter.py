@@ -76,6 +76,10 @@ NUM_TASK_COLS  = 14      # columns merged for task text
 MIN_TASK_ROWS  = 16      # pad task section to at least this many rows
 GANTT_ROWS     = 36      # rows in the gantt body
 BLANK_SEP_ROWS = 4       # blank rows between task list and gantt header
+MAX_OWNER_COLS = 6       # classic owner/member columns before the legend zone
+LEGEND_COLS    = 4       # fixed right-side legend zone columns
+OWNER_BLOCK_WIDTH = 18.0
+OWNER_COLUMN_WIDTH = 8.5
 
 
 # -- Helper functions (mirrors reference script) ---------------------
@@ -121,6 +125,64 @@ def _mg(ws, r1: int, c1: int, r2: int, c2: int):
     ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
 
 
+def _box(ws, r1: int, c1: int, r2: int, c2: int):
+    """Apply a medium outer border and thin inner grid to a box."""
+    _br(ws, r1, c1, r2, c2, _B_THIN)
+    for c in range(c1, c2 + 1):
+        ws.cell(row=r1, column=c).border = Border(
+            left=ws.cell(row=r1, column=c).border.left,
+            right=ws.cell(row=r1, column=c).border.right,
+            top=_MED_BLK,
+            bottom=ws.cell(row=r1, column=c).border.bottom,
+        )
+        ws.cell(row=r2, column=c).border = Border(
+            left=ws.cell(row=r2, column=c).border.left,
+            right=ws.cell(row=r2, column=c).border.right,
+            top=ws.cell(row=r2, column=c).border.top,
+            bottom=_MED_BLK,
+        )
+    for r in range(r1, r2 + 1):
+        ws.cell(row=r, column=c1).border = Border(
+            left=_MED_BLK,
+            right=ws.cell(row=r, column=c1).border.right,
+            top=ws.cell(row=r, column=c1).border.top,
+            bottom=ws.cell(row=r, column=c1).border.bottom,
+        )
+        ws.cell(row=r, column=c2).border = Border(
+            left=ws.cell(row=r, column=c2).border.left,
+            right=_MED_BLK,
+            top=ws.cell(row=r, column=c2).border.top,
+            bottom=ws.cell(row=r, column=c2).border.bottom,
+        )
+
+
+def _draw_right_legend_block(
+    ws,
+    *,
+    title: str,
+    rows: list[tuple[str, str]],
+    start_row: int,
+    start_col: int,
+    end_col: int,
+    title_font: Font,
+    body_font: Font,
+):
+    """Draw a fixed right-side legend block matching the preview layout."""
+    body_start_col = min(end_col, start_col + 1)
+
+    _mg(ws, start_row, start_col, start_row, end_col)
+    _sc(ws, start_row, start_col, title, font=title_font, align=_ALIGN_C, fill=_F_WHITE)
+
+    for offset, (symbol, label) in enumerate(rows, start=1):
+        row = start_row + offset
+        _sc(ws, row, start_col, symbol, font=body_font, align=_ALIGN_C, fill=_F_WHITE)
+        if body_start_col <= end_col:
+            _mg(ws, row, body_start_col, row, end_col)
+            _sc(ws, row, body_start_col, label, font=body_font, align=_ALIGN_L, fill=_F_WHITE)
+
+    _box(ws, start_row, start_col, start_row + len(rows), end_col)
+
+
 def _fmt_date(val) -> str:
     """Format a date value to M/D/YY string."""
     if not val:
@@ -161,7 +223,7 @@ def build_oppm_xlsx(data: dict) -> bytes:
     header       = data.get("header") or {}
     objectives   = data.get("objectives", [])
     sub_objs     = data.get("sub_objectives", [])
-    members      = (data.get("project_members") or data.get("members") or [])[:6]
+    members      = (data.get("project_members") or data.get("members") or [])[:MAX_OWNER_COLS]
     timeline     = data.get("timeline", [])
     weeks        = data.get("weeks", [])
     costs        = data.get("costs", {})
@@ -209,12 +271,15 @@ def build_oppm_xlsx(data: dict) -> bytes:
 
     date_cols = max(num_weeks, 1)
     mem_cols  = max(num_members, 1)
+    visible_owner_cols = max(num_members, 1)
 
     C_DATE_S = C_TASK_E + 1                             # 21
     C_DATE_E = C_DATE_S + date_cols - 1
-    C_MEM_S  = C_DATE_E + 1
-    C_MEM_E  = C_MEM_S + mem_cols - 1
-    LAST_COL = C_MEM_E
+    C_MEM_S        = C_DATE_E + 1
+    C_MEM_E        = C_MEM_S + MAX_OWNER_COLS - 1
+    C_LEGEND_S     = C_MEM_E + 1
+    C_LEGEND_E     = C_LEGEND_S + LEGEND_COLS - 1
+    LAST_COL       = C_LEGEND_E
 
     # -- Column widths ------------------------------------------------
     for c in range(C_SUBO_S, C_SUBO_E + 1):
@@ -224,9 +289,14 @@ def build_oppm_xlsx(data: dict) -> bytes:
     ws.column_dimensions[get_column_letter(C_TASK_S)].width = 8
     for c in range(C_DATE_S, C_DATE_E + 1):
         ws.column_dimensions[get_column_letter(c)].width = 5
-    owner_column_width = min(10, 6 * max(num_members, 3) / max(num_members, 1))
-    for c in range(C_MEM_S, C_MEM_E + 1):
-        ws.column_dimensions[get_column_letter(c)].width = owner_column_width
+    owner_column_width = OWNER_COLUMN_WIDTH
+    for i, c in enumerate(range(C_MEM_S, C_MEM_E + 1)):
+        dim = ws.column_dimensions[get_column_letter(c)]
+        dim.width = owner_column_width
+        dim.hidden = i >= visible_owner_cols
+    legend_widths = [5.5, 8.5, 8.5, 8.5]
+    for offset, c in enumerate(range(C_LEGEND_S, C_LEGEND_E + 1)):
+        ws.column_dimensions[get_column_letter(c)].width = legend_widths[offset] if offset < len(legend_widths) else 8.5
 
     # -- Font shortcuts -----------------------------------------------
     f_title      = Font(name="Calibri", size=14, bold=True)
@@ -319,6 +389,9 @@ def build_oppm_xlsx(data: dict) -> bytes:
     _sc(ws, r, C_MEM_S, "Owner / Priority",
         font=f_header, fill=_F_GREY, align=_ALIGN_C, border=_B_THIN)
     _fr(ws, r, C_MEM_S, r, C_MEM_E, _F_GREY)
+
+    for c in range(C_LEGEND_S, C_LEGEND_E + 1):
+        _sc(ws, r, c, None, fill=_F_GREY, border=_B_THIN)
 
     # =================================================================
     # ROWS 8+: Task rows (objectives + tasks)
@@ -458,7 +531,9 @@ def build_oppm_xlsx(data: dict) -> bytes:
                         font=style[0], fill=row_fill, align=_ALIGN_C, border=_B_HAIR)
                 else:
                     _sc(ws, r, col, None, fill=row_fill, border=_B_HAIR)
-            for c in range(C_MEM_S + num_members, C_MEM_E + 1):
+            for c in range(C_MEM_S + visible_owner_cols, C_MEM_E + 1):
+                _sc(ws, r, c, None, fill=row_fill, border=_B_HAIR)
+            for c in range(C_LEGEND_S, C_LEGEND_E + 1):
                 _sc(ws, r, c, None, fill=row_fill, border=_B_HAIR)
 
             r += 1
@@ -473,11 +548,46 @@ def build_oppm_xlsx(data: dict) -> bytes:
     # Thin border around entire task block
     _br(ws, task_start_row, C_SUBO_S, r - 1, LAST_COL, _B_THIN)
 
+    _draw_right_legend_block(
+        ws,
+        title="Priority",
+        rows=[
+            ("A", "Primary"),
+            ("B", "Secondary"),
+            ("C", "Support"),
+        ],
+        start_row=task_start_row + 1,
+        start_col=C_LEGEND_S,
+        end_col=C_LEGEND_E,
+        title_font=f_header,
+        body_font=f_task,
+    )
+
     # =================================================================
     # BLANK SEPARATOR ROWS
     # =================================================================
-    for _ in range(BLANK_SEP_ROWS):
-        r += 1
+    separator_start_row = r
+    separator_end_row = r + BLANK_SEP_ROWS - 1
+    for sep_row in range(separator_start_row, separator_end_row + 1):
+        for c in range(C_SUBO_S, LAST_COL + 1):
+            _sc(ws, sep_row, c, None, fill=_F_WHITE, border=_B_HAIR)
+
+    _draw_right_legend_block(
+        ws,
+        title="Project Identity Symbol",
+        rows=[
+            ("□", "Start"),
+            ("●", "In Progress"),
+            ("■", "Complete"),
+        ],
+        start_row=separator_start_row,
+        start_col=C_LEGEND_S,
+        end_col=C_LEGEND_E,
+        title_font=f_header,
+        body_font=f_task,
+    )
+
+    r = separator_end_row + 1
 
     # =================================================================
     # "# People working on the project"
@@ -522,7 +632,9 @@ def build_oppm_xlsx(data: dict) -> bytes:
         )[:12]
         _sc(ws, r, C_MEM_S + i, name,
             font=f_rotated, fill=_F_GREY, border=_B_THIN, rotation=90)
-    for c in range(C_MEM_S + num_members, C_MEM_E + 1):
+    for c in range(C_MEM_S + visible_owner_cols, C_MEM_E + 1):
+        _sc(ws, r, c, None, fill=_F_GREY, border=_B_THIN)
+    for c in range(C_LEGEND_S, C_LEGEND_E + 1):
         _sc(ws, r, c, None, fill=_F_GREY, border=_B_THIN)
 
     r += 1
@@ -576,6 +688,7 @@ def build_oppm_xlsx(data: dict) -> bytes:
 
     _br(ws, gantt_body_start, C_DATE_S, gantt_body_end, C_DATE_E, _B_HAIR)
     _br(ws, gantt_body_start, C_MEM_S,  gantt_body_end, C_MEM_E,  _B_HAIR)
+    _br(ws, gantt_body_start, C_LEGEND_S, gantt_body_end, C_LEGEND_E, _B_HAIR)
 
     _br(ws, gantt_hdr_row, C_SUBO_S, gantt_body_end, LAST_COL, _B_THIN)
 
