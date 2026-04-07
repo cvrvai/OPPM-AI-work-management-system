@@ -53,21 +53,18 @@ _ALIGN_L   = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
 # -- Timeline dot styles ---------------------------------------------
 _DOT_MAP: dict[str, tuple[str, Font]] = {
-    "planned":     ("\u25cb", Font(name="Calibri", size=10, color=_BLUE_700)),
-    "in_progress": ("\u25cf", Font(name="Calibri", size=10, bold=True, color=_BLUE_700)),
-    "completed":   ("\u25cf", Font(name="Calibri", size=10, bold=True, color=_GREEN_700)),
+    "planned":     ("\u25a1", Font(name="Calibri", size=10, color="111111")),
+    "in_progress": ("\u25cf", Font(name="Calibri", size=10, bold=True, color="111111")),
+    "completed":   ("\u25a0", Font(name="Calibri", size=10, bold=True, color="111111")),
     "at_risk":     ("\u25cf", Font(name="Calibri", size=10, bold=True, color=_AMBER_600)),
     "blocked":     ("\u25cf", Font(name="Calibri", size=10, bold=True, color=_RED_600)),
 }
 
 # -- Owner priority styles -------------------------------------------
 _OWNER_STYLES: dict[str, tuple[Font, PatternFill]] = {
-    "A": (Font(name="Calibri", size=9, bold=True, color=_WHITE),
-          PatternFill("solid", fgColor=_BLUE_700)),
-    "B": (Font(name="Calibri", size=9, bold=True, color=_WHITE),
-          PatternFill("solid", fgColor="60A5FA")),
-    "C": (Font(name="Calibri", size=9, bold=True, color=_BLUE_700),
-          PatternFill("solid", fgColor="BFDBFE")),
+    "A": (Font(name="Calibri", size=9, color="111111"), _F_WHITE),
+    "B": (Font(name="Calibri", size=9, color="111111"), _F_WHITE),
+    "C": (Font(name="Calibri", size=9, color="111111"), _F_WHITE),
 }
 
 _OBJ_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -227,8 +224,9 @@ def build_oppm_xlsx(data: dict) -> bytes:
     ws.column_dimensions[get_column_letter(C_TASK_S)].width = 8
     for c in range(C_DATE_S, C_DATE_E + 1):
         ws.column_dimensions[get_column_letter(c)].width = 5
+    owner_column_width = min(10, 6 * max(num_members, 3) / max(num_members, 1))
     for c in range(C_MEM_S, C_MEM_E + 1):
-        ws.column_dimensions[get_column_letter(c)].width = 6
+        ws.column_dimensions[get_column_letter(c)].width = owner_column_width
 
     # -- Font shortcuts -----------------------------------------------
     f_title      = Font(name="Calibri", size=14, bold=True)
@@ -410,8 +408,25 @@ def build_oppm_xlsx(data: dict) -> bytes:
                 f"{indent}{label}  {task_text}",
                 font=row_font, fill=row_fill, align=_ALIGN_L, border=_B_HAIR)
 
-            # Timeline dots
+            # Timeline dots / project identity symbols
             task_tl = tl_map.get(task_id, {})
+            fallback_status = str(task.get("status", "planned") or "planned")
+            if fallback_status == "todo":
+                fallback_status = "planned"
+            fallback_dot = _DOT_MAP.get(fallback_status, _DOT_MAP["planned"])
+            fallback_col: int | None = None
+            if not task_tl and task.get("due_date"):
+                try:
+                    due_date = date.fromisoformat(str(task.get("due_date"))[:10])
+                    best_diff = None
+                    for i, week in enumerate(weeks):
+                        week_start = date.fromisoformat(str(week.get("start", ""))[:10])
+                        diff = abs((week_start - due_date).days)
+                        if best_diff is None or diff < best_diff:
+                            best_diff = diff
+                            fallback_col = C_DATE_S + i
+                except (TypeError, ValueError):
+                    fallback_col = None
             for i, week in enumerate(weeks):
                 col = C_DATE_S + i
                 ws_date = week.get("start", "")
@@ -422,6 +437,11 @@ def build_oppm_xlsx(data: dict) -> bytes:
                     symbol, dot_font = dot_info
                     _sc(ws, r, col, symbol,
                         font=dot_font, fill=row_fill, align=_ALIGN_C, border=_B_HAIR)
+                elif fallback_col == col:
+                    if fallback_col is not None:
+                        symbol, dot_font = fallback_dot
+                        _sc(ws, r, col, symbol,
+                            font=dot_font, fill=row_fill, align=_ALIGN_C, border=_B_HAIR)
                 else:
                     _sc(ws, r, col, None, fill=row_fill, border=_B_HAIR)
             for c in range(C_DATE_S + num_weeks, C_DATE_E + 1):
@@ -435,7 +455,7 @@ def build_oppm_xlsx(data: dict) -> bytes:
                 style = _OWNER_STYLES.get(priority)
                 if style:
                     _sc(ws, r, col, priority,
-                        font=style[0], fill=style[1], align=_ALIGN_C, border=_B_HAIR)
+                        font=style[0], fill=row_fill, align=_ALIGN_C, border=_B_HAIR)
                 else:
                     _sc(ws, r, col, None, fill=row_fill, border=_B_HAIR)
             for c in range(C_MEM_S + num_members, C_MEM_E + 1):

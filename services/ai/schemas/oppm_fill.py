@@ -13,6 +13,7 @@ class OPPMFillTaskItem(BaseModel):
     index: str           # e.g. "1.1" or "1.1.2"
     title: str
     deadline: Optional[str] = None  # ISO date or None
+    status: Optional[str] = None
     is_sub: bool
     owners: list["OPPMFillTaskOwnerItem"] = []
     timeline: list["OPPMFillTimelineItem"] = []

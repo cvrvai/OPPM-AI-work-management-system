@@ -16,7 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import {
-  ArrowLeft, Loader2, Download, X, AlertTriangle, RotateCcw, Sparkles, Info, ChevronDown, ChevronUp,
+  ArrowLeft, Loader2, Download, X, AlertTriangle, RotateCcw, Sparkles, Info, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { useChatContext } from '@/hooks/useChatContext'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
@@ -46,6 +46,7 @@ type OPPMFillTask = {
   index: string
   title: string
   deadline: string | null
+  status?: string | null
   is_sub: boolean
   owners?: OPPMFillOwner[]
   timeline?: OPPMFillTimeline[]
@@ -61,12 +62,6 @@ type OPPMFillPayload = {
   fills: OPPMFillMap
   tasks?: OPPMFillTask[]
   members?: OPPMFillMember[]
-}
-
-const OWNER_PRIORITY_STYLE: Record<OPPMFillPriority, { bg: string; fc: string }> = {
-  A: { bg: '#1E40AF', fc: '#FFFFFF' },
-  B: { bg: '#60A5FA', fc: '#FFFFFF' },
-  C: { bg: '#BFDBFE', fc: '#1E40AF' },
 }
 
 const TIMELINE_STATUS_SYMBOL: Record<OPPMFillTimelineStatus, string> = {
@@ -90,6 +85,8 @@ const TIMELINE_QUALITY_COLOR: Record<OPPMFillTimelineQuality, string> = {
   average: '#D97706',
   bad: '#DC2626',
 }
+
+const HORIZONTAL_SCROLL_STEP = 420
 
 // ══════════════════════════════════════════════════════════════
 // OPPMView
@@ -346,6 +343,7 @@ export function OPPMView() {
         if (ownerColRe.test(getCellText(cell).trim())) ownerHeaderCells.push({ idx, cell })
       })
       ownerHeaderCells.sort((a, b) => (a.cell.c ?? 0) - (b.cell.c ?? 0))
+      const ownerColumnIndexes = Array.from(new Set(ownerHeaderCells.map(({ cell }) => cell.c))).sort((a, b) => a - b)
 
       // Build mutable copy of celldata
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -473,6 +471,7 @@ export function OPPMView() {
       // labels directly so the same columns can also be reused for task A/B/C fills.
       const leaderName = (fills.project_leader ?? '').trim()
       const leaderMemberId = (fills.project_leader_member_id ?? '').trim()
+      const namedMembers = members.filter((member) => (member.name ?? '').trim())
       const memberPool = members.filter((mb) => {
         const name = (mb.name ?? '').trim()
         return !!name && mb.id !== leaderMemberId
@@ -515,18 +514,29 @@ export function OPPMView() {
         }
       })
 
+      const ownerHeaderKeys = new Set(ownerHeaderCells.map(({ cell }) => `${cell.r},${cell.c}`))
+
+      // ── Compact unused owner/member columns in the preview sheet ─────
+      const visibleOwnerCount = Math.max(
+        1,
+        Math.min(
+          ownerColumnIndexes.length,
+          Math.max(namedMembers.length, leaderName ? 1 : 0),
+        ),
+      )
+      const removedOwnerColumns = ownerColumnIndexes.slice(visibleOwnerCount)
+      const removedOwnerCount = removedOwnerColumns.length
+
       // ── Fill task owner priorities (A/B/C) by mapped member columns ─────
       tasks.forEach((task, i) => {
         const r = taskHeaderRow + 1 + i
         ;(task.owners ?? []).forEach((owner) => {
           const col = ownerColumns.get(owner.member_id)
-          const style = OWNER_PRIORITY_STYLE[owner.priority]
-          if (col === undefined || !style) return
+          if (col === undefined) return
           const existingIdx = posIndex.get(`${r},${col}`)
           const baseCell = existingIdx !== undefined ? celldata[existingIdx] : { r, c: col, v: {} }
           upsertCell(r, col, setPlainText(baseCell, owner.priority, {
-            bg: style.bg,
-            fc: style.fc,
+            fc: '#111111',
             bl: 1,
             ht: 0,
             vt: 0,
@@ -573,6 +583,13 @@ export function OPPMView() {
           const taskDeadline = parseISODate(task.deadline)
           if (!taskDeadline) return
 
+          const fallbackStatus: OPPMFillTimelineStatus =
+            task.status === 'completed'
+              ? 'completed'
+              : task.status === 'in_progress'
+                ? 'in_progress'
+                : 'planned'
+
           let bestCol = TL_COL_START
           let bestDiff = Infinity
           colToDate.forEach((d, c) => {
@@ -580,11 +597,130 @@ export function OPPMView() {
             if (diff < bestDiff) { bestDiff = diff; bestCol = c }
           })
 
-          placeTimelineMarker(r, bestCol, 'completed', null)
+          placeTimelineMarker(r, bestCol, fallbackStatus, null)
         })
       }
 
-      return { ...sheet, celldata, scrollTop: 0, scrollLeft: 0 }
+      const config = { ...(sheet.config ?? {}) }
+
+      if (removedOwnerCount === 0) {
+        return {
+          ...sheet,
+          celldata,
+          config,
+          scrollTop: 0,
+          scrollLeft: 0,
+        }
+      }
+
+      const removedOwnerSet = new Set(removedOwnerColumns)
+      const firstRemovedOwnerColumn = removedOwnerColumns[0]
+      const lastRemovedOwnerColumn = removedOwnerColumns[removedOwnerColumns.length - 1]
+
+      const mergeAnchorOverrides = new Map<string, number>()
+      ;[config.merge, config.mergeCells].forEach((source) => {
+        Object.values(source ?? {}).forEach((merge: any) => {
+          const mergeRow = Number(merge?.r)
+          const startColumn = Number(merge?.c)
+          const columnSpan = Number(merge?.cs ?? 1)
+          if (Number.isNaN(mergeRow) || Number.isNaN(startColumn) || Number.isNaN(columnSpan)) return
+
+          const endColumn = startColumn + columnSpan - 1
+          if (startColumn >= firstRemovedOwnerColumn && endColumn > lastRemovedOwnerColumn) {
+            mergeAnchorOverrides.set(`${mergeRow},${startColumn}`, firstRemovedOwnerColumn)
+          }
+        })
+      })
+
+      const compactColumnIndex = (columnIndex: number): number | null => {
+        if (removedOwnerSet.has(columnIndex)) return null
+        if (columnIndex > lastRemovedOwnerColumn) return columnIndex - removedOwnerCount
+        return columnIndex
+      }
+
+      // Remove the unused owner columns entirely and shift the sections on the
+      // right so the closing border, Priority box, and Project Identity Symbol
+      // box stay adjacent to the visible owner columns.
+      const compactedCelldata: any[] = []
+      const compactedIndex = new Map<string, number>()
+      celldata.forEach((cell: any) => {
+        const cellKey = `${cell.r},${cell.c}`
+        const preservedAnchorColumn = mergeAnchorOverrides.get(cellKey)
+        const nextColumn = preservedAnchorColumn
+          ?? (
+            removedOwnerSet.has(cell.c)
+              ? (getCellText(cell) && !ownerHeaderKeys.has(cellKey) ? cell.c : null)
+              : compactColumnIndex(cell.c)
+          )
+        if (nextColumn === null) return
+        const nextCell = nextColumn === cell.c ? cell : { ...cell, c: nextColumn }
+        const key = `${nextCell.r},${nextCell.c}`
+        if (!compactedIndex.has(key)) {
+          compactedIndex.set(key, compactedCelldata.length)
+          compactedCelldata.push(nextCell)
+          return
+        }
+
+        const existingIdx = compactedIndex.get(key)!
+        const existingCell = compactedCelldata[existingIdx]
+        const existingText = getCellText(existingCell)
+        const nextText = getCellText(nextCell)
+        if (!existingText && nextText) compactedCelldata[existingIdx] = nextCell
+      })
+
+      const remapColumnConfig = (source: Record<string, unknown> | undefined) => {
+        const remapped: Record<string, unknown> = {}
+        Object.entries(source ?? {}).forEach(([rawColumn, value]) => {
+          const columnIndex = Number(rawColumn)
+          if (Number.isNaN(columnIndex)) return
+          const nextColumn = compactColumnIndex(columnIndex)
+          if (nextColumn === null) return
+          remapped[String(nextColumn)] = value
+        })
+        return remapped
+      }
+
+      const remapMergeConfig = (source: Record<string, any> | undefined) => {
+        const remapped: Record<string, any> = {}
+        Object.values(source ?? {}).forEach((merge: any) => {
+          const startColumn = Number(merge?.c)
+          const columnSpan = Number(merge?.cs ?? 1)
+          if (Number.isNaN(startColumn) || Number.isNaN(columnSpan)) return
+          const endColumn = startColumn + columnSpan - 1
+          if (endColumn < firstRemovedOwnerColumn) {
+            remapped[`${merge.r}_${startColumn}`] = merge
+            return
+          }
+          if (startColumn > lastRemovedOwnerColumn) {
+            const nextMerge = { ...merge, c: startColumn - removedOwnerCount }
+            remapped[`${nextMerge.r}_${nextMerge.c}`] = nextMerge
+            return
+          }
+
+          const removedInside = removedOwnerColumns.filter((columnIndex) => columnIndex >= startColumn && columnIndex <= endColumn).length
+          const nextSpan = Math.max(1, columnSpan - removedInside)
+          const nextStart = startColumn >= firstRemovedOwnerColumn ? firstRemovedOwnerColumn : startColumn
+          const nextMerge = { ...merge, c: nextStart, cs: nextSpan }
+          remapped[`${nextMerge.r}_${nextMerge.c}`] = nextMerge
+        })
+        return remapped
+      }
+
+      const compactedConfig = {
+        ...config,
+        columnlen: remapColumnConfig(config.columnlen),
+        colhidden: remapColumnConfig(config.colhidden),
+        merge: remapMergeConfig(config.merge),
+        mergeCells: remapMergeConfig(config.mergeCells),
+      }
+
+      return {
+        ...sheet,
+        celldata: compactedCelldata,
+        config: compactedConfig,
+        scrollTop: 0,
+        scrollLeft: 0,
+      }
     })
     sheetDataRef.current = updated
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -662,6 +798,19 @@ export function OPPMView() {
     } catch { /* intentional */ }
   }
 
+  const handleHorizontalScroll = useCallback((direction: 'left' | 'right') => {
+    const workbookApi = sheetRef.current
+    if (!workbookApi?.scroll || !workbookApi?.getSheet) return
+
+    const activeSheet = workbookApi.getSheet()
+    const currentScrollLeft = Number(activeSheet?.scrollLeft ?? 0)
+    const nextScrollLeft = direction === 'left'
+      ? Math.max(0, currentScrollLeft - HORIZONTAL_SCROLL_STEP)
+      : currentScrollLeft + HORIZONTAL_SCROLL_STEP
+
+    workbookApi.scroll({ scrollLeft: nextScrollLeft })
+  }, [])
+
   // ── Derived ─────────────────────────────────────────────
   const hasSheet    = !!(sheetDataRef.current && sheetDataRef.current.length > 0)
   const isResolving = ssLoading || autoLoading
@@ -690,6 +839,27 @@ export function OPPMView() {
           </div>
 
           {/* Reset to blank template */}
+          {hasSheet && (
+            <div className="inline-flex items-center rounded-lg border border-gray-300 bg-white shadow-sm overflow-hidden">
+              <button
+                onClick={() => handleHorizontalScroll('left')}
+                className="inline-flex items-center gap-1 border-r border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
+                title="Scroll the OPPM sheet to the left"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Left
+              </button>
+              <button
+                onClick={() => handleHorizontalScroll('right')}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
+                title="Scroll the OPPM sheet to the right"
+              >
+                Right
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           {hasSheet && (
             <button
               onClick={handleReset}
@@ -760,7 +930,7 @@ export function OPPMView() {
           <div className="mt-1 rounded-lg border border-indigo-200 bg-white px-4 py-3 space-y-3">
             <div>
               <p className="text-xs font-bold text-indigo-800 mb-1">�️ This is a read-only OPPM overview</p>
-              <p className="text-[11px] text-gray-600">Scroll horizontally and vertically to explore the full OPPM layout. Use <strong>AI Fill</strong> to populate the template from your project data, then <strong>Download OPPM</strong> to get the full auto-generated report.</p>
+              <p className="text-[11px] text-gray-600">Scroll horizontally and vertically to explore the full OPPM layout. You can use the new <strong>Left</strong> and <strong>Right</strong> buttons in the top bar to move across the sheet faster. Use <strong>AI Fill</strong> to populate the template from your project data, then <strong>Download OPPM</strong> to get the full auto-generated report.</p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-lg bg-violet-50 border border-violet-200 p-3">
