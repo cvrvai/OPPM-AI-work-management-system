@@ -261,6 +261,36 @@ async def fill_oppm(
                 return [fallback_owner]
         return []
 
+    # Fallback behavior:
+    # - If objective-linked tasks are missing, pull from project tasks that are not linked
+    #   to any objective (common in board-only task management).
+    # - If there are fewer than 4 objectives, synthesize remaining "Task Group" rows
+    #   so tasks still appear instead of leaving template placeholders.
+    objective_ids = {str(obj.id) for obj in objectives}
+    unassigned_root_tasks = sorted(
+        [
+            task
+            for task in all_tasks
+            if task.parent_task_id is None
+            and (
+                task.oppm_objective_id is None
+                or str(task.oppm_objective_id) not in objective_ids
+            )
+        ],
+        key=lambda task: (task.sort_order or 0, str(task.created_at)),
+    )
+    unassigned_cursor = 0
+
+    def _take_unassigned(limit: int) -> list[Task]:
+        nonlocal unassigned_cursor
+        taken: list[Task] = []
+        while unassigned_cursor < len(unassigned_root_tasks) and len(taken) < limit:
+            taken.append(unassigned_root_tasks[unassigned_cursor])
+            unassigned_cursor += 1
+        return taken
+
+    rendered_main_rows = 0
+
     for obj_idx, obj in enumerate(objectives[:4]):
         # Main task row: the objective itself
         task_items.append({
@@ -272,38 +302,63 @@ async def fill_oppm(
             "owners": [],
             "timeline": [],
         })
+        rendered_main_rows += 1
+
         # Sub-task rows: first 3 root tasks of this objective (template has 3 sub-rows per main-task slot)
         obj_root = sorted(
-            [t for t in all_tasks
-             if str(t.oppm_objective_id) == str(obj.id) and t.parent_task_id is None],
-            key=lambda t: (t.sort_order or 0, str(t.created_at)),
+            [
+                task
+                for task in all_tasks
+                if str(task.oppm_objective_id) == str(obj.id) and task.parent_task_id is None
+            ],
+            key=lambda task: (task.sort_order or 0, str(task.created_at)),
         )[:3]
-        for sub_idx, mt in enumerate(obj_root, 1):
+
+        selected_sub_tasks: list[Task] = list(obj_root)
+        if not selected_sub_tasks:
+            flat_tasks = sorted(
+                [task for task in all_tasks if str(task.oppm_objective_id) == str(obj.id)],
+                key=lambda task: (task.sort_order or 0, str(task.created_at)),
+            )[:3]
+            selected_sub_tasks = list(flat_tasks)
+
+        if len(selected_sub_tasks) < 3:
+            selected_sub_tasks.extend(_take_unassigned(3 - len(selected_sub_tasks)))
+
+        for sub_idx, task in enumerate(selected_sub_tasks[:3], 1):
             task_items.append({
                 "index": f"{obj_idx + 1}.{sub_idx}",
-                "title": mt.title,
-                "deadline": _fmt(mt.due_date),
-                "status": mt.status,
+                "title": task.title,
+                "deadline": _fmt(task.due_date),
+                "status": task.status,
                 "is_sub": True,
-                "owners": _get_task_owners(mt),
-                "timeline": timeline_by_task.get(str(mt.id), []),
+                "owners": _get_task_owners(task),
+                "timeline": timeline_by_task.get(str(task.id), []),
             })
 
-        if not obj_root:
-            flat_tasks = sorted(
-                [t for t in all_tasks if str(t.oppm_objective_id) == str(obj.id)],
-                key=lambda t: (t.sort_order or 0, str(t.created_at)),
-            )[:3]
-            for flat_idx, task in enumerate(flat_tasks, 1):
-                task_items.append({
-                    "index": f"{obj_idx + 1}.{flat_idx}",
-                    "title": task.title,
-                    "deadline": _fmt(task.due_date),
-                    "status": task.status,
-                    "is_sub": True,
-                    "owners": _get_task_owners(task),
-                    "timeline": timeline_by_task.get(str(task.id), []),
-                })
+    while rendered_main_rows < 4 and unassigned_cursor < len(unassigned_root_tasks):
+        main_idx = rendered_main_rows + 1
+        task_items.append({
+            "index": str(main_idx),
+            "title": f"Task Group {main_idx}",
+            "deadline": None,
+            "status": None,
+            "is_sub": False,
+            "owners": [],
+            "timeline": [],
+        })
+        rendered_main_rows += 1
+
+        for sub_idx, task in enumerate(_take_unassigned(3), 1):
+            task_items.append({
+                "index": f"{main_idx}.{sub_idx}",
+                "title": task.title,
+                "deadline": _fmt(task.due_date),
+                "status": task.status,
+                "is_sub": True,
+                "owners": _get_task_owners(task),
+                "timeline": timeline_by_task.get(str(task.id), []),
+            })
 
     # If both text fields already have content, skip the LLM call
     if fills["project_objective"] and fills["deliverable_output"]:
