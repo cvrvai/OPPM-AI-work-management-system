@@ -1,6 +1,6 @@
 # Microservices Reference
 
-Last updated: 2026-04-06
+Last updated: 2026-04-09
 
 ## Purpose
 
@@ -125,27 +125,53 @@ Important folders:
 - `main.py`
   App factory and route registration.
 - `routers/v1/`
-  AI model config, chat, plan suggestion, reindex, RAG endpoint.
+  AI model config, chat, plan suggestion, reindex, RAG endpoint, feedback routes.
 - `routers/internal.py`
   Internal commit-analysis endpoint protected by `X-Internal-API-Key`.
 - `services/`
   Chat, analyzer, RAG orchestration, indexing logic.
 - `repositories/`
-  Data access for AI flows.
-- `infrastructure/`
-  LLM adapters, RAG pipeline, tool execution helpers.
+  Data access for AI flows. `oppm_repo.py` owns all OPPM-domain reads used by tools.
+- `infrastructure/rag/`
+  RAG pipeline components:
+  - `agent_loop.py` — multi-turn agentic tool execution loop (max 5 iterations)
+  - `query_rewriter.py` — LLM-based query expansion before retrieval
+  - `guardrails.py` — input injection detection and output sensitive-data scrub
+  - `semantic_cache.py` — Redis embedding cache (cosine ≥ 0.92, TTL 300 s)
+  - `classifier.py`, `retriever.py`, `reranker.py` — core pipeline stages
+- `infrastructure/tools/`
+  AI-callable tool registry:
+  - `registry.py` — global `ToolRegistry` singleton with `register`, `execute`, and schema methods
+  - `base.py` — `ToolDefinition`, `ToolParam`, `ToolResult` data classes
+  - `oppm_tools.py` — 5 OPPM tools (create/update/delete objectives, set timeline status)
+  - `task_tools.py` — 5 task tools (create/update/delete/assign/dependency)
+  - `cost_tools.py` — 5 cost tools (costs, risks, deliverables, project update)
+  - `read_tools.py` — 6 read tools (summary, task details, search, risks, costs, team workload)
+- `infrastructure/llm/`
+  LLM adapter layer:
+  - `base.py` — `LLMAdapter` with `call_with_tools()` default
+  - `openai.py`, `anthropic.py` — native tool-calling implementations
+  - `ollama.py`, `kimi.py` — XML-prompt-based tool calling
+  - `tool_parser.py` — unified parser for native and XML tool-call formats
 - `schemas/`
-  AI request and response contracts.
+  AI request and response contracts. `ChatResponse` includes `iterations: int` and `updated_entities`.
 
 Current functional ownership:
 
-- workspace AI chat
-- project AI chat
+- workspace AI chat (RAG only, no tools)
+- project AI chat with agentic tool loop (up to 5 iterations)
+- input guardrails and output guardrails
+- LLM query rewriting
+- semantic cache (Redis-backed)
+- tool registry with 21 tools (oppm × 5, task × 5, cost × 5, read × 6)
+- native LLM function calling for OpenAI and Anthropic
+- XML-prompt tool calling for Ollama and Kimi
 - weekly summary
 - AI plan suggestion and commit
 - AI model configuration
 - workspace reindexing
 - RAG retrieval
+- user feedback (logged to `audit_log`)
 - internal analyze-commits endpoint
 
 Start here when changing:
@@ -153,6 +179,7 @@ Start here when changing:
 - LLM provider support
 - retrieval pipeline behavior
 - prompt orchestration
+- tool addition or parameter changes
 - AI response shapes
 
 ### `services/git/`

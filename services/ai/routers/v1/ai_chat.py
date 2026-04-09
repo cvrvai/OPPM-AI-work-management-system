@@ -7,11 +7,13 @@ from shared.auth import WorkspaceContext, get_workspace_context, require_write, 
 from shared.database import get_session
 from schemas.ai_chat import (
     ChatRequest, ChatResponse, SuggestPlanRequest, SuggestPlanResponse,
-    CommitPlanRequest, CapabilitiesResponse, ReindexResponse,
+    CommitPlanRequest, CapabilitiesResponse, ReindexResponse, FeedbackRequest,
 )
 from services.ai_chat_service import chat, suggest_plan, commit_plan, weekly_summary, workspace_chat
 from services.document_indexer import reindex_workspace
 from repositories.vector_repo import VectorRepository
+from repositories.notification_repo import AuditRepository
+from shared.database import get_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -127,3 +129,55 @@ async def weekly_summary_route(
         workspace_id=ws.workspace_id,
         user_id=ws.user.id,
     )
+
+
+# ── User feedback (thumbs up/down) ──
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/ai/feedback", status_code=201)
+async def project_feedback_route(
+    project_id: str,
+    data: FeedbackRequest,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    """Record a thumbs-up or thumbs-down rating on an AI response."""
+    audit_repo = AuditRepository(session)
+    await audit_repo.log(
+        ws.workspace_id,
+        ws.user.id,
+        "ai_feedback",
+        "project_chat",
+        new_data={
+            "project_id": project_id,
+            "rating": data.rating,
+            "user_message": data.user_message[:500] if data.user_message else "",
+            "ai_message": data.message_content[:500] if data.message_content else "",
+            "comment": data.comment,
+            "model_id": data.model_id,
+        },
+    )
+    return {"ok": True}
+
+
+@router.post("/workspaces/{workspace_id}/ai/feedback", status_code=201)
+async def workspace_feedback_route(
+    data: FeedbackRequest,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    """Record a thumbs-up or thumbs-down rating on a workspace-level AI response."""
+    audit_repo = AuditRepository(session)
+    await audit_repo.log(
+        ws.workspace_id,
+        ws.user.id,
+        "ai_feedback",
+        "workspace_chat",
+        new_data={
+            "rating": data.rating,
+            "user_message": data.user_message[:500] if data.user_message else "",
+            "ai_message": data.message_content[:500] if data.message_content else "",
+            "comment": data.comment,
+            "model_id": data.model_id,
+        },
+    )
+    return {"ok": True}

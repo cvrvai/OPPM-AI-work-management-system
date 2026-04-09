@@ -27,6 +27,7 @@ class ChatResponse(BaseModel):
     message: str
     tool_calls: list[ToolCallResult] = []
     updated_entities: list[str] = []
+    iterations: int = 1
 
 
 class SuggestPlanRequest(BaseModel):
@@ -46,6 +47,19 @@ class SuggestPlanResponse(BaseModel):
 
 class CommitPlanRequest(BaseModel):
     commit_token: str
+
+
+class FeedbackRequest(BaseModel):
+    """User rating for an AI response — enables future quality improvement."""
+    model_config = {"protected_namespaces": ()}
+    rating: Literal["up", "down"]
+    message_content: str = Field(default="", max_length=2000,
+                                 description="The AI message being rated (for context)")
+    user_message: str = Field(default="", max_length=2000,
+                              description="The user message that prompted the response")
+    comment: Optional[str] = Field(default=None, max_length=500,
+                                   description="Optional freeform comment")
+    model_id: Optional[str] = None
 
 
 class WeeklySummaryResponse(BaseModel):

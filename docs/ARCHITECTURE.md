@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: 2026-04-06
+Last updated: 2026-04-09
 
 ## Purpose
 
@@ -16,6 +16,8 @@ Use this file for system-level orientation. Use the supporting docs for detail:
 - [MICROSERVICES-REFERENCE.md](MICROSERVICES-REFERENCE.md)
 - [MICROSERVICES-REVIEW.md](MICROSERVICES-REVIEW.md)
 - [AI-SYSTEM-CONTEXT.md](AI-SYSTEM-CONTEXT.md)
+- [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md)
+- [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md)
 - [SRS.md](SRS.md)
 - [TESTING-GUIDE.md](TESTING-GUIDE.md)
 
@@ -98,13 +100,21 @@ It owns:
 
 It provides:
 
-- workspace and project chat
+- workspace and project chat with an agentic tool loop (max 5 iterations)
+- input guardrails (injection detection) and output guardrails (sensitive data scrub)
+- LLM-based query rewriting before retrieval
+- semantic similarity cache (Redis, cosine ≥ 0.92, TTL 5 min) for RAG results
+- tool registry with 21 tools across four categories (oppm, task, cost, read)
+- native LLM function calling for OpenAI and Anthropic; XML-prompt fallback for Ollama and Kimi
 - weekly summaries
 - AI model configuration per workspace
 - project plan suggestion and commit of suggested plans
 - workspace reindexing for retrieval
 - RAG query endpoint
 - internal commit analysis endpoint called by the git service
+- user feedback endpoint (rating + comment logged to `audit_log`)
+
+See [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md) and [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for component-level detail.
 
 ### Git Service
 
@@ -155,7 +165,7 @@ Important facts:
 
 - the ORM models live in `shared/models/`
 - migrations live in `services/core/alembic/`
-- 23 tables across 7 domain groups (see [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) and [ERD.md](ERD.md))
+- 29 tables across 7 domain groups (see [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) and [ERD.md](ERD.md))
 - RAG embeddings are stored in the same database
 - audit and notification data are part of the same application database
 
@@ -173,7 +183,7 @@ Current roles in code:
 |---|---|---|
 | Token blacklist | `auth_service.signout()` | On signout, current access token hash is stored with a TTL equal to the remaining token lifetime. Subsequent requests check this key before accepting the token. |
 | Rate limiting | `middleware/` | Request count per user/IP stored as a Redis key with a sliding window TTL. Returns `429` when limit exceeded. |
-| Cache (planned) | Not yet active in routes | Workspace membership lookups are the intended first cache target. |
+| Semantic cache | `services/ai/infrastructure/rag/semantic_cache.py` | Embedding similarity cache for RAG results. Cosine threshold ≥ 0.92, TTL 300 s. Keys prefixed `ai:sem_cache:`. Fail-safe — returns `None` if Redis is unavailable. |
 
 If Redis is unavailable, the app can still start, but:
 - signed-out access tokens may still work until they expire naturally

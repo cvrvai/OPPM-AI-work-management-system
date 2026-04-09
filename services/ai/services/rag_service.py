@@ -3,7 +3,8 @@ RAG service — retrieves relevant context from vector store for LLM prompts.
 
 Provides two pipelines:
 1. Legacy: simple embedding → vector search → format (backwards-compatible)
-2. Full RAG: classify query → multi-retriever → RRF rerank → memory → format
+2. Full RAG: rewrite query → classify → multi-retriever → RRF rerank → memory → format
+             with optional semantic cache bypass
 """
 
 import asyncio
@@ -15,6 +16,8 @@ from infrastructure.embedding import generate_embedding
 from infrastructure.rag.agent import classify_query
 from infrastructure.rag.memory import load_memory
 from infrastructure.rag.reranker import rerank
+from infrastructure.rag.query_rewriter import rewrite_query
+from infrastructure.rag.semantic_cache import get_semantic_cache
 from infrastructure.rag.retrievers import (
     VectorRetriever,
     KeywordRetriever,
@@ -54,8 +57,11 @@ async def retrieve_with_rag_pipeline(
     user_id: str | None = None,
     project_id: str | None = None,
     top_k: int = 10,
+    models: list[dict] | None = None,
+    project_title: str = "",
 ) -> RAGResult:
-    """Full RAG pipeline: classify → retrieve → rerank → memory → format."""
+    """Full RAG pipeline: rewrite → embed → cache? → classify → retrieve → RRF → memory → format."""
+
     # 1. Load conversation memory (if user_id provided)
     memory_context = ""
     if user_id:
@@ -64,10 +70,41 @@ async def retrieve_with_rag_pipeline(
         except Exception as e:
             logger.warning("Memory loading failed: %s", e)
 
-    # 2. Classify query to select retrievers
-    retriever_names = classify_query(query)
+    # 2. Query rewriting — expand vague queries for better recall
+    effective_query = query
+    if models:
+        try:
+            effective_query = await rewrite_query(query, models, project_title=project_title)
+        except Exception as e:
+            logger.debug("Query rewriting skipped: %s", e)
 
-    # 3. Run selected retrievers in parallel
+    # 3. Generate embedding for cache lookup and vector retrieval
+    query_embedding: list[float] | None = None
+    try:
+        query_embedding = await generate_embedding(effective_query)
+    except Exception as e:
+        logger.debug("Embedding generation failed (continuing without): %s", e)
+
+    # 4. Semantic cache lookup
+    if query_embedding:
+        cache = get_semantic_cache()
+        cached_context = await cache.lookup(
+            query_embedding,
+            workspace_id=workspace_id,
+            project_id=project_id,
+        )
+        if cached_context is not None:
+            return RAGResult(
+                context=cached_context,
+                sources=[],
+                memory_context=memory_context,
+                chunks=[],
+            )
+
+    # 5. Classify query to select retrievers
+    retriever_names = classify_query(effective_query)
+
+    # 6. Run selected retrievers in parallel
     filters = {}
     if project_id:
         filters["project_id"] = project_id
@@ -77,7 +114,7 @@ async def retrieve_with_rag_pipeline(
         retriever_cls = _RETRIEVER_CLASSES.get(name)
         if retriever_cls:
             retriever = retriever_cls(session)
-            tasks.append(retriever.retrieve(query, workspace_id, top_k=top_k, **filters))
+            tasks.append(retriever.retrieve(effective_query, workspace_id, top_k=top_k, **filters))
 
     ranked_lists: list[list[RetrievedChunk]] = []
     if tasks:
@@ -88,10 +125,10 @@ async def retrieve_with_rag_pipeline(
             elif isinstance(r, Exception):
                 logger.warning("Retriever failed: %s", r)
 
-    # 4. Rerank with RRF
+    # 7. Rerank with RRF
     reranked = rerank(ranked_lists, top_k=top_k) if ranked_lists else []
 
-    # 5. If project_id provided, boost project-specific results
+    # 8. Boost project-specific results to the top
     if project_id and reranked:
         project_chunks = []
         other_chunks = []
@@ -102,7 +139,7 @@ async def retrieve_with_rag_pipeline(
                 other_chunks.append(chunk)
         reranked = project_chunks + other_chunks[:3]
 
-    # 6. Format results
+    # 9. Format results
     context = _format_chunks(reranked)
     sources = [
         {
@@ -115,12 +152,24 @@ async def retrieve_with_rag_pipeline(
         for c in reranked
     ]
 
-    return RAGResult(
+    result = RAGResult(
         context=context,
         sources=sources,
         memory_context=memory_context,
         chunks=reranked,
     )
+
+    # 10. Store in semantic cache for future similar queries
+    if query_embedding and context:
+        cache = get_semantic_cache()
+        await cache.store(
+            query_embedding,
+            context,
+            workspace_id=workspace_id,
+            project_id=project_id,
+        )
+
+    return result
 
 
 def _format_chunks(chunks: list[RetrievedChunk]) -> str:

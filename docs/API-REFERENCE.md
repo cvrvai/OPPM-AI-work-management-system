@@ -1,6 +1,6 @@
 # API Reference
 
-Last updated: 2026-04-06
+Last updated: 2026-04-09
 
 ## Purpose
 
@@ -336,10 +336,31 @@ User-scoped, not workspace-scoped.
 | `POST` | `/api/v1/workspaces/{workspace_id}/ai/chat` | Yes | Member | Workspace-level chat. |
 | `GET` | `/api/v1/workspaces/{workspace_id}/ai/chat/capabilities` | Yes | Member | Returns indexed-document count and chat capability flags. |
 | `POST` | `/api/v1/workspaces/{workspace_id}/ai/reindex` | Yes | Admin | Reindexes workspace data for RAG. |
-| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat` | Yes | Write | Project-scoped assistant chat. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat` | Yes | Write | Project-scoped assistant chat. Response includes `iterations` (int) indicating how many agentic tool-loop iterations ran. |
 | `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan` | Yes | Write | Generates a suggested OPPM plan. |
 | `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan/commit` | Yes | Write | Commits a previously suggested plan. |
 | `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/weekly-summary` | Yes | Member | Generates a project weekly summary. |
+
+### Feedback
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/feedback` | Yes | Member | Submits thumbs-up/down feedback for an AI response. Logged to `audit_log` with `action = "ai_feedback"`. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/ai/feedback` | Yes | Member | Workspace-level AI feedback. Same logging contract as project feedback. |
+
+#### Feedback Request Body
+
+```json
+{
+  "rating": "up",
+  "message_content": "The AI response text being rated",
+  "user_message": "The user message that prompted the response",
+  "comment": "Optional free-text comment",
+  "model_id": "uuid of the ai_model record used"
+}
+```
+
+`rating` must be `"up"` or `"down"`.
 
 ### RAG
 

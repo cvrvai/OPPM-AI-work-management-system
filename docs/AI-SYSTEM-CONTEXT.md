@@ -1,6 +1,6 @@
 # AI System Context
 
-Last verified: 2026-04-07
+Last verified: 2026-04-09
 
 ## Purpose
 
@@ -30,13 +30,12 @@ Read this file first when you need to understand how the current system works, w
 
 ## Verified Drift To Keep In Mind
 
-- `CLAUDE.md` still says the system has 23 tables.
-- `docs/DATABASE-SCHEMA.md` says the system has 29 tables.
-- The current ORM model files define 32 table classes.
-- `shared/models/__init__.py` does not list every OPPM model even though importing `shared.models.oppm` still registers them.
+- `CLAUDE.md` still says the system has 23 tables; the canonical count is 29 tables across 7 domains.
+- `docs/DATABASE-SCHEMA.md` documents 29 tables, which is consistent with the active ORM models.
 - The project-member add payload uses the field name `user_id`, but the working value is a `workspace_members.id` that becomes `project_members.member_id`.
 - Workspace responses currently expose `current_user_role`; some frontend code still falls back to `role`.
 - The current frontend includes an `Invitations` page and sidebar entry in addition to the invite-accept flow.
+- `shared/models/__init__.py` does not list every OPPM table class, but importing `shared.models.oppm` still registers them with SQLAlchemy metadata.
 
 ## Feature Reference
 
@@ -347,24 +346,38 @@ Update notes:
 
 What it does:
 
-- Workspace chat
-- Project chat
-- Tool-backed project changes from AI responses
-- Suggested project plans
+- Workspace chat (RAG only, no tool execution)
+- Project chat with agentic tool loop — up to 5 LLM iterations, executing registry tools to read or write project data
+- Input guardrails (injection detection, length limit) and output guardrails (sensitive data scrub)
+- LLM-based query rewriting before retrieval for better recall
+- Semantic cache (Redis, cosine ≥ 0.92, TTL 300 s) to skip re-retrieval on repeated questions
+- Tool registry with 21 tools across four categories: oppm (5), task (5), cost (5), read (6)
+- Native LLM function calling for OpenAI and Anthropic; XML-prompt-based tool execution for Ollama and Kimi
+- Suggested project plans (generate + commit)
 - Weekly project summaries
+- OPPM fill assistance
 - Workspace reindexing for retrieval
 - RAG query endpoint
 - Per-workspace AI model configuration
+- User feedback (thumbs up/down) logged to `audit_log`
 
 How it works:
 
 1. `frontend/src/components/ChatPanel.tsx` opens in workspace or project context.
-2. Workspace chat posts to `/ai/chat` and is intended for cross-project questions without tool execution.
-3. Project chat posts to `/projects/{project_id}/ai/chat` and may return `tool_calls` plus `updated_entities` so the frontend can invalidate affected queries.
-4. Project quick actions call `suggest-plan`, `suggest-plan/commit`, and `weekly-summary`.
-5. Admins manage `ai_models` from `frontend/src/pages/Settings.tsx`.
-6. `POST /ai/reindex` rebuilds retrieval data for the workspace.
-7. `POST /rag/query` runs the RAG pipeline against workspace data and memory context.
+2. Workspace chat posts to `/ai/chat` — RAG only, no tool loop.
+3. Project chat posts to `/projects/{project_id}/ai/chat`:
+   - Input guardrail checks message for injection patterns and length.
+   - Query rewriting expands vague queries into richer search terms (skipped for queries > 300 chars or ≤ 2 words).
+   - RAG pipeline: semantic cache lookup → classify → parallel vector + keyword + structured retrieval → RRF rerank → project boost → cache store.
+   - Full project context (objectives, tasks, risks, costs, team, commits) is loaded using tiered windowing.
+   - Agentic tool loop runs up to 5 iterations: LLM call → parse tool_calls → execute via registry → inject results as next user turn → repeat until no tools or max iterations.
+   - Output guardrail scrubs sensitive patterns before the response is returned.
+   - Response includes `message`, `tool_calls`, `updated_entities`, and `iterations`.
+4. Users can submit feedback via `POST /projects/{id}/ai/feedback` or `POST /workspaces/{ws}/ai/feedback`.
+5. Project quick actions call `suggest-plan`, `suggest-plan/commit`, and `weekly-summary`.
+6. Admins manage `ai_models` from `frontend/src/pages/Settings.tsx`.
+7. `POST /ai/reindex` rebuilds retrieval data for the workspace.
+8. `POST /rag/query` runs the RAG pipeline against workspace data and memory context.
 
 Frontend files:
 
@@ -379,6 +392,16 @@ Backend files:
 - `services/ai/services/ai_chat_service.py`
 - `services/ai/services/rag_service.py`
 - `services/ai/services/document_indexer.py`
+- `services/ai/infrastructure/rag/agent_loop.py`
+- `services/ai/infrastructure/rag/query_rewriter.py`
+- `services/ai/infrastructure/rag/guardrails.py`
+- `services/ai/infrastructure/rag/semantic_cache.py`
+- `services/ai/infrastructure/tools/registry.py`
+- `services/ai/infrastructure/tools/oppm_tools.py`
+- `services/ai/infrastructure/tools/task_tools.py`
+- `services/ai/infrastructure/tools/cost_tools.py`
+- `services/ai/infrastructure/tools/read_tools.py`
+- `services/ai/infrastructure/llm/tool_parser.py`
 - `shared/models/ai_model.py`
 - `shared/models/embedding.py`
 
@@ -386,12 +409,15 @@ Primary tables:
 
 - `ai_models`
 - `document_embeddings`
-- `audit_log` for memory/history context
+- `audit_log` — feedback and memory context
 
 Update notes:
 
 - AI model configuration is workspace-scoped.
 - RAG and chat behavior depend on indexed workspace data, not just live tables.
+- See [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md) for the full pipeline step sequence.
+- See [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for the tool registry and all 21 tools.
+- Feedback is written to `audit_log` with `action = "ai_feedback"` and `metadata` containing rating, comment, and related message content.
 
 ### 9. GitHub Integration, Commits, And Commit Analysis
 
@@ -510,6 +536,58 @@ Update notes:
 
 - MCP tools are externally callable summaries over existing data, not a second source of truth.
 
+### 12. Tool Registry And Agentic Loop
+
+What it does:
+
+- Registers all AI-callable tools with metadata, parameter schemas, and async handlers
+- Exposes tools to LLMs via native function-calling APIs (OpenAI, Anthropic) or via XML-prompt injection (Ollama, Kimi)
+- Runs a multi-turn agentic loop so the LLM can chain tool calls before returning a final answer
+
+How it works:
+
+1. `services/ai/infrastructure/tools/registry.py` owns the global `ToolRegistry` singleton.
+2. On first call to `get_registry()`, all four tool modules are auto-imported and their tools are registered.
+3. For OpenAI and Anthropic, `to_openai_schema()` and `to_anthropic_schema()` serialize the registry to native tool descriptors.
+4. For Ollama and Kimi, `to_prompt_text()` converts the registry into an XML tool section injected into the system prompt.
+5. `services/ai/infrastructure/rag/agent_loop.py` runs the loop:
+   - Calls the LLM with the current message history and tool schemas.
+   - Parses `tool_calls` from the response (native JSON for OpenAI/Anthropic, `<tool>` XML tags for others).
+   - Executes each requested tool via `registry.execute()`.
+   - Injects the text results as a new user turn.
+   - Repeats up to 5 times or until the response contains no tool calls.
+   - If the max is hit, makes a final summary call without tools.
+6. `AgentLoopResult` carries `final_text`, `all_tool_results`, `updated_entities`, and `iterations`.
+
+Tool categories:
+
+| Category | Count | Key tools |
+|---|---|---|
+| `oppm` | 5 | `create_objective`, `update_objective`, `delete_objective`, `set_timeline_status`, `bulk_set_timeline` |
+| `task` | 5 | `create_task`, `update_task`, `delete_task`, `assign_task`, `set_task_dependency` |
+| `cost` | 5 | `update_project_costs`, `create_risk`, `update_risk`, `create_deliverable`, `update_project` |
+| `read` | 6 | `get_project_summary`, `get_task_details`, `search_tasks`, `get_risk_status`, `get_cost_breakdown`, `get_team_workload` |
+
+Backend files:
+
+- `services/ai/infrastructure/tools/__init__.py`
+- `services/ai/infrastructure/tools/base.py`
+- `services/ai/infrastructure/tools/registry.py`
+- `services/ai/infrastructure/tools/oppm_tools.py`
+- `services/ai/infrastructure/tools/task_tools.py`
+- `services/ai/infrastructure/tools/cost_tools.py`
+- `services/ai/infrastructure/tools/read_tools.py`
+- `services/ai/infrastructure/rag/agent_loop.py`
+- `services/ai/infrastructure/llm/tool_parser.py`
+- `services/ai/infrastructure/llm/__init__.py`
+
+Update notes:
+
+- To add a new tool, add its `ToolDefinition` to the appropriate module and the registry will pick it up automatically on next import.
+- `NATIVE_TOOL_PROVIDERS = {"openai", "anthropic"}` controls which providers use native calling.
+- Tool results are always injected as plain-text user messages to stay provider-agnostic.
+- See [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for full tool parameter schemas and handler contracts.
+
 ## Database Schema Design
 
 ## Design Principles
@@ -524,7 +602,7 @@ Update notes:
 
 ## Current ORM Table Map
 
-The current ORM model files define 32 table classes across 7 functional domains.
+The current ORM model files define 29 active tables across 7 functional domains.
 
 ### Identity And Auth
 
@@ -620,7 +698,7 @@ The current ORM model files define 32 table classes across 7 functional domains.
 - Tasks and reports: `frontend/src/pages/ProjectDetail.tsx`, `services/core/routers/v1/tasks.py`, `services/core/services/task_service.py`, `shared/models/task.py`
 - Structured OPPM: `frontend/src/pages/ProjectDetail.tsx`, `services/core/routers/v1/oppm.py`, `services/core/services/oppm_service.py`, `shared/models/oppm.py`, `shared/models/task.py`
 - OPPM spreadsheet and export: `frontend/src/pages/OPPMView.tsx`, `services/core/routers/v1/oppm.py`, `services/core/services/export_service.py`, `services/ai/routers/v1/oppm_fill.py`, `services/ai/services/oppm_fill_service.py`, `shared/models/oppm.py`
-- AI chat and RAG: `frontend/src/components/ChatPanel.tsx`, `frontend/src/pages/Settings.tsx`, `services/ai/routers/v1/ai_chat.py`, `services/ai/routers/v1/ai.py`, `services/ai/routers/v1/rag.py`, `services/ai/services/ai_chat_service.py`, `services/ai/services/rag_service.py`, `shared/models/ai_model.py`, `shared/models/embedding.py`
+- AI chat and RAG: `frontend/src/components/ChatPanel.tsx`, `frontend/src/pages/Settings.tsx`, `services/ai/routers/v1/ai_chat.py`, `services/ai/routers/v1/ai.py`, `services/ai/routers/v1/rag.py`, `services/ai/services/ai_chat_service.py`, `services/ai/services/rag_service.py`, `services/ai/infrastructure/rag/`, `services/ai/infrastructure/tools/`, `services/ai/infrastructure/llm/`, `shared/models/ai_model.py`, `shared/models/embedding.py`
 - GitHub and commits: `frontend/src/pages/Settings.tsx`, `frontend/src/pages/Commits.tsx`, `frontend/src/pages/Dashboard.tsx`, `services/git/routers/v1/git.py`, `services/git/services/git_service.py`, `services/ai/services/ai_analyzer.py`, `shared/models/git.py`
 - Dashboard and notifications: `frontend/src/pages/Dashboard.tsx`, `frontend/src/components/layout/Header.tsx`, `services/core/routers/v1/dashboard.py`, `services/core/services/dashboard_service.py`, `services/core/routers/v1/notifications.py`, `services/core/services/notification_service.py`, `shared/models/notification.py`
 - MCP tools: `services/mcp/routers/v1/mcp.py`, `services/mcp/infrastructure/mcp/tools/`

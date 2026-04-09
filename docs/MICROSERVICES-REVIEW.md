@@ -1,6 +1,6 @@
 # Microservices Review
 
-Last updated: 2026-04-06
+Last updated: 2026-04-09
 
 ## Executive Summary
 
@@ -59,17 +59,24 @@ Why:
 
 ### AI Service
 
-Assessment: strong but integration-heavy
+Assessment: structured and production-ready
 
 Why:
 
-- AI responsibilities are sensibly isolated
-- chat, plan generation, reindexing, and retrieval belong together
-- the service already contains a real internal-only route for commit analysis
+- the service now has a clearly layered infrastructure sub-structure: `rag/`, `tools/`, `llm/`
+- an agentic tool loop with a bounded iteration limit (5) prevents runaway LLM calls
+- a tool registry with 21 tools across 4 categories replaces hardcoded tool dispatch
+- input guardrails block prompt injection at the service boundary before any model call
+- output guardrails scrub sensitive patterns before responses leave the service
+- a Redis semantic cache reduces redundant retrieval for repeated or similar questions
+- query rewriting improves recall for vague or underspecified questions
+- native function calling for OpenAI and Anthropic; XML-prompt fallback for Ollama and Kimi
+- user feedback is logged to `audit_log` for future model improvement
 
 Risk area:
 
-- this service touches many cross-cutting concepts, so schema or prompt drift can surface here first
+- the service still touches many cross-cutting concepts; schema or prompt drift can surface here quickly
+- adding new tools requires only a module edit but must also be reflected in documentation and tests
 
 ### Git Service
 
@@ -193,6 +200,17 @@ Priority order:
 3. decide whether `task_assignees` is still strategic or should be retired from the live path
 4. add automated tests around invites, project membership, task reports/approvals, and webhook-to-analysis flow
 5. keep Python gateway and nginx gateway routing rules synchronized whenever routes change
+
+## Recent Improvements (2026-04-09)
+
+- agentic tool loop: multi-turn LLM execution with 5-iteration cap and max-iterations fallback summary
+- tool registry: 21 tools across oppm/task/cost/read categories; native calling for OpenAI/Anthropic, XML-prompt for Ollama/Kimi
+- input guardrails: 9 injection-pattern checks, 4000-char limit on incoming messages
+- output guardrails: API key, password, JWT, and ENV variable patterns redacted from responses
+- query rewriting: LLM-based expansion for 3-to-300-char queries before retrieval
+- semantic cache: Redis cosine similarity cache (threshold 0.92, TTL 300 s) on RAG results
+- user feedback endpoints: `POST /projects/{id}/ai/feedback` and `POST /workspaces/{ws}/ai/feedback`
+- `ChatResponse` schema now carries an `iterations` field
 
 ## Recent Improvements (2026-04-06)
 
