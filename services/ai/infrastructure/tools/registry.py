@@ -196,7 +196,8 @@ def get_registry() -> ToolRegistry:
 
 def _register_all_tools(registry: ToolRegistry) -> None:
     """Import and register all tool modules."""
-    from infrastructure.tools import oppm_tools  # noqa: F401
-    from infrastructure.tools import task_tools   # noqa: F401
-    from infrastructure.tools import cost_tools   # noqa: F401
-    from infrastructure.tools import read_tools   # noqa: F401
+    from infrastructure.tools import oppm_tools    # noqa: F401
+    from infrastructure.tools import task_tools    # noqa: F401
+    from infrastructure.tools import cost_tools    # noqa: F401
+    from infrastructure.tools import read_tools    # noqa: F401
+    from infrastructure.tools import project_tools # noqa: F401

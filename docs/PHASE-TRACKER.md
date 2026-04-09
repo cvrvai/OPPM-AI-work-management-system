@@ -1,16 +1,37 @@
 # Current Phase Tracker
 
 ## Task
-Comprehensive Documentation Refresh — All docs in `docs/` updated to reflect AI pipeline upgrades and new architecture components
+Chat Panel Enhancement — File upload support (multi-type), persistent chat history per context
 
 ## Goal
-Update every markdown doc in `docs/` to match the current codebase (2026-04-09):
-- Reflect agentic tool loop, query rewriting, guardrails, semantic cache, tool registry, feedback endpoints
-- Fix stale table counts and Redis usage description
-- Create new detailed per-component reference docs (AI Pipeline, Tool Registry)
-- Expand FLOWCHARTS.md with new diagrams per architecture component
+Allow users to attach files (text/image/binary) to chat messages and persist chat history per workspace/project context across sessions.
 
-## Status: Complete
+## Plan
+- [x] Update `chatStore.ts`: add `FileAttachment` type, `getContextKey` export, `contextHistories` with persist middleware, `clearContextHistory` action
+- [x] Rewrite `ChatPanel.tsx`: file attachment state + handlers, pending attachment chips UI, paperclip button, file content embedded in API messages, attachment display in message bubbles, clear history button in header, history restored indicator (divider + count)
+
+## Status: Complete ✅
+
+## Files Changed
+- `frontend/src/stores/chatStore.ts` — fully rewritten, now exports `FileAttachment`, `ChatMessage`, `getContextKey`; uses Zustand `persist` to store `contextHistories` in localStorage (`oppm-chat-history`)
+- `frontend/src/components/ChatPanel.tsx` — fully rewritten with file upload, history UI, attachment chips
+
+## Key Design Decisions
+- File types: `.txt/.md/.csv/.json/.xml/.yaml/.yml/.log/.html/.py/.js/.ts` etc. → text extraction (client-side FileReader); `image/*` → data URL; pdf/docx/binary → filename chip only
+- Text cap: 10,000 chars per file (truncated with notice)
+- Max 5 files per message
+- File content embedded only in the CURRENT API message; history messages use display content only
+- Images stored as data URL in `FileAttachment.content` (for inline preview); text attachments store `content: ''` to save localStorage space
+- History divider shown at `sessionStartIdx` (restored message count captured when context key changes)
+
+## Verification
+- No TypeScript errors in either file
+- `chatStore` exports verified: `FileAttachment`, `ChatMessage`, `getContextKey`, `useChatStore`
+- `ChatPanel` single `export function ChatPanel()` confirmed
+
+## Notes
+- Old PHASE-TRACKER archived to `docs/phase-history/2026-04-09-120000-comprehensive-docs-refresh.md`
+
 
 ## Plan
 - [x] Archive old tracker → `docs/phase-history/2026-04-09-000000-rag-architecture-upgrade.md`

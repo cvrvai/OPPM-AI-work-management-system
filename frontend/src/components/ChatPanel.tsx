@@ -5,22 +5,34 @@
  * - Reads context from chatStore (workspace or project level)
  * - Workspace-level: cross-project questions, no tool execution
  * - Project-level: conversational AI + tool calls + suggest plan + weekly summary
+ * - File upload: .txt .md .csv .json .xml .yaml image/* .pdf .docx (text extracted client-side)
+ * - Chat history persisted to localStorage per workspace/project context
  * - Auto-refreshes queries when AI makes changes
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { api, parseFile } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { useChatStore } from '@/stores/chatStore'
+import { useChatStore, getContextKey, type FileAttachment } from '@/stores/chatStore'
 import {
   X, Send, Loader2, Bot, User, Sparkles,
   AlertTriangle, CheckCircle2, Lightbulb,
-  FolderKanban, Building2,
+  FolderKanban, Building2, Paperclip, FileText,
+  ImageIcon, File, Trash2, Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // ── Types ──
+
+interface PendingAttachment {
+  name: string
+  type: 'text' | 'image' | 'binary'
+  content: string   // text: raw text; image: data URL; binary: ''
+  size: number
+}
 
 interface ToolCallResult {
   tool: string
@@ -34,6 +46,8 @@ interface ChatResponse {
   message: string
   tool_calls: ToolCallResult[]
   updated_entities: string[]
+  low_confidence?: boolean
+  iterations?: number
 }
 
 interface SuggestPlanResponse {
@@ -50,7 +64,8 @@ interface WeeklySummaryResponse {
   suggested_actions: string[]
 }
 
-// ── Entity → query key mapping ──
+// ── Constants ──
+
 const ENTITY_QUERY_MAP: Record<string, string> = {
   oppm_objectives: 'oppm-objectives',
   oppm_timeline_entries: 'oppm-timeline',
@@ -59,14 +74,68 @@ const ENTITY_QUERY_MAP: Record<string, string> = {
   projects: 'project',
 }
 
+/** File extensions whose text content is extracted client-side */
+const TEXT_EXTENSIONS = new Set([
+  '.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.yml', '.log',
+  '.html', '.htm', '.py', '.js', '.ts', '.tsx', '.jsx', '.css', '.sh', '.sql',
+])
+
+const MAX_TEXT_CHARS = 10_000
+const MAX_FILES_PER_MSG = 5
+const MAX_FILE_BYTES = 10 * 1024 * 1024  // 10 MB
+
+/** Binary extensions that the backend can extract text from */
+const SERVER_PARSE_EXTENSIONS = new Set(['.xlsx', '.xls', '.pdf', '.docx', '.doc'])
+
+// ── Helpers ──
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1048576).toFixed(1)} MB`
+}
+
+function fileExt(name: string): string {
+  const idx = name.lastIndexOf('.')
+  return idx >= 0 ? name.slice(idx).toLowerCase() : ''
+}
+
+function readAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = (e) => resolve(e.target?.result as string)
+    r.onerror = () => reject(new Error(`Cannot read ${file.name}`))
+    r.readAsText(file)
+  })
+}
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = (e) => resolve(e.target?.result as string)
+    r.onerror = () => reject(new Error(`Cannot read ${file.name}`))
+    r.readAsDataURL(file)
+  })
+}
+
+// ── Component ──
+
 export function ChatPanel() {
   const [input, setInput] = useState('')
   const [pendingPlan, setPendingPlan] = useState<SuggestPlanResponse | null>(null)
   const [showPlanInput, setShowPlanInput] = useState(false)
   const [planGoal, setPlanGoal] = useState('')
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
+
+  // Track how many messages were restored from history when this context was opened
+  const [sessionStartIdx, setSessionStartIdx] = useState(0)
+  const prevContextKeyRef = useRef('')
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const planInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isOpen = useChatStore((s) => s.isOpen)
   const messages = useChatStore((s) => s.messages)
@@ -74,6 +143,7 @@ export function ChatPanel() {
   const projectId = useChatStore((s) => s.projectId)
   const projectTitle = useChatStore((s) => s.projectTitle)
   const addMessage = useChatStore((s) => s.addMessage)
+  const clearContextHistory = useChatStore((s) => s.clearContextHistory)
   const close = useChatStore((s) => s.close)
 
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
@@ -81,6 +151,18 @@ export function ChatPanel() {
   const queryClient = useQueryClient()
 
   const isProjectContext = contextType === 'project' && !!projectId
+  const contextKey = getContextKey(contextType, projectId)
+
+  // Capture session start index when context key changes (to mark restored history)
+  useEffect(() => {
+    if (contextKey !== prevContextKeyRef.current) {
+      prevContextKeyRef.current = contextKey
+      setSessionStartIdx(messages.length)
+      setAttachments([])
+      setFileError(null)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextKey])
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -110,7 +192,69 @@ export function ChatPanel() {
     [queryClient, projectId],
   )
 
+  // ── File handling ──
+
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? [])
+      e.target.value = ''
+      setFileError(null)
+
+      const remaining = MAX_FILES_PER_MSG - attachments.length
+      if (remaining <= 0) {
+        setFileError(`Maximum ${MAX_FILES_PER_MSG} files per message.`)
+        return
+      }
+      const toProcess = files.slice(0, remaining)
+      if (files.length > remaining) {
+        setFileError(`Only the first ${remaining} file(s) added (max ${MAX_FILES_PER_MSG}).`)
+      }
+
+      const results: PendingAttachment[] = []
+      for (const file of toProcess) {
+        const ext = fileExt(file.name)
+        try {
+          if (file.size > MAX_FILE_BYTES) {
+            setFileError(`${file.name} exceeds 10 MB limit.`)
+            continue
+          }
+          if (file.type.startsWith('image/')) {
+            const dataUrl = await readAsDataURL(file)
+            results.push({ name: file.name, type: 'image', content: dataUrl, size: file.size })
+          } else if (TEXT_EXTENSIONS.has(ext) || file.type.startsWith('text/')) {
+            const text = await readAsText(file)
+            results.push({ name: file.name, type: 'text', content: text, size: file.size })
+          } else if (SERVER_PARSE_EXTENSIONS.has(ext) && ws) {
+            // Send binary file to backend for text extraction
+            const parsed = await parseFile(ws.id, file)
+            if (parsed.error) {
+              setFileError(`${file.name}: ${parsed.error}`)
+              continue
+            }
+            results.push({ name: file.name, type: 'text', content: parsed.extracted_text, size: file.size })
+            if (parsed.truncated) {
+              setFileError(`${file.name} was truncated due to size.`)
+            }
+          } else {
+            // Unsupported binary — store stub
+            results.push({ name: file.name, type: 'binary', content: '', size: file.size })
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unknown error'
+          setFileError(`Failed to process ${file.name}: ${msg}`)
+        }
+      }
+      setAttachments((prev) => [...prev, ...results])
+    },
+    [attachments.length, ws],
+  )
+
+  const removeAttachment = useCallback((idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx))
+  }, [])
+
   // ── Chat mutation ──
+
   const chatMutation = useMutation({
     mutationFn: (msgs: { role: string; content: string }[]) => {
       const path = isProjectContext
@@ -124,6 +268,7 @@ export function ChatPanel() {
         content: data.message,
         toolCalls: data.tool_calls,
         updatedEntities: data.updated_entities,
+        lowConfidence: data.low_confidence ?? false,
       })
       if (data.updated_entities.length > 0) {
         invalidateEntities(data.updated_entities)
@@ -134,13 +279,19 @@ export function ChatPanel() {
     },
   })
 
-  // ── Suggest plan mutation (project-only) ──
+  // ── Suggest plan mutation ──
+
   const suggestPlanMutation = useMutation({
     mutationFn: (description: string) =>
-      api.post<SuggestPlanResponse>(`${wsPath}/projects/${projectId}/ai/suggest-plan`, { description }),
+      api.post<SuggestPlanResponse>(
+        `${wsPath}/projects/${projectId}/ai/suggest-plan`,
+        { description },
+      ),
     onSuccess: (data) => {
       setPendingPlan(data)
-      const objList = data.suggested_objectives.map((o, i) => `${i + 1}. ${o.title} (${o.suggested_weeks.join(', ')})`).join('\n')
+      const objList = data.suggested_objectives
+        .map((o, i) => `${i + 1}. ${o.title} (${o.suggested_weeks.join(', ')})`)
+        .join('\n')
       addMessage({
         role: 'assistant',
         content: `${data.explanation}\n\n**Suggested objectives:**\n${objList}\n\nClick "Apply Plan" to create these objectives, or "Discard" to cancel.`,
@@ -152,6 +303,7 @@ export function ChatPanel() {
   })
 
   // ── Commit plan mutation ──
+
   const commitPlanMutation = useMutation({
     mutationFn: (commitToken: string) =>
       api.post<{ created_objectives: unknown[]; count: number }>(
@@ -169,7 +321,8 @@ export function ChatPanel() {
     },
   })
 
-  // ── Weekly summary mutation (project-only) ──
+  // ── Weekly summary mutation ──
+
   const weeklySummaryMutation = useMutation({
     mutationFn: () =>
       api.get<WeeklySummaryResponse>(`${wsPath}/projects/${projectId}/ai/weekly-summary`),
@@ -190,18 +343,56 @@ export function ChatPanel() {
   })
 
   // ── Send message handler ──
+
   const handleSend = useCallback(() => {
     const text = input.trim()
-    if (!text || chatMutation.isPending) return
+    if ((!text && attachments.length === 0) || chatMutation.isPending) return
 
-    addMessage({ role: 'user', content: text })
+    // Build attachments saved to chatStore (images stored as data URL, text stored as empty to save space)
+    const storedAttachments: FileAttachment[] = attachments.map((a) => ({
+      name: a.name,
+      type: a.type,
+      content: a.type === 'image' ? a.content : '',
+    }))
+
+    // Display content is just what the user typed
+    addMessage({
+      role: 'user',
+      content: text || '(attached files)',
+      ...(storedAttachments.length > 0 ? { attachments: storedAttachments } : {}),
+    })
+
+    // Build API content — embed file contents only for this message
+    let apiContent = text
+    if (attachments.length > 0) {
+      const blocks = attachments.map((a) => {
+        if (a.type === 'text') {
+          const body = a.content.length > MAX_TEXT_CHARS
+            ? a.content.slice(0, MAX_TEXT_CHARS) + '\n… (truncated)'
+            : a.content
+          return `[File: ${a.name}]\n\`\`\`\n${body}\n\`\`\``
+        }
+        if (a.type === 'image') {
+          return `[Image attached: ${a.name}]`
+        }
+        return `[Attached: ${a.name} — binary file, content extraction not supported]`
+      })
+      apiContent = [text, '\n\n--- Attached Files ---', ...blocks]
+        .filter(Boolean)
+        .join('\n')
+    }
+
     setInput('')
+    setAttachments([])
+    setFileError(null)
 
-    const allMsgs = [...messages, { role: 'user' as const, content: text }]
-    chatMutation.mutate(
-      allMsgs.map((m) => ({ role: m.role, content: m.content })),
-    )
-  }, [input, messages, chatMutation, addMessage])
+    // Pass history messages + new user message to the API
+    const allMsgs = [
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      { role: 'user' as const, content: apiContent },
+    ]
+    chatMutation.mutate(allMsgs)
+  }, [input, attachments, messages, chatMutation, addMessage])
 
   const handleSuggestPlan = useCallback(() => {
     const goal = planGoal.trim()
@@ -222,15 +413,27 @@ export function ChatPanel() {
 
   return (
     <div className="fixed top-0 right-0 h-full w-[420px] bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col">
+
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-blue-600" />
           <span className="font-semibold text-sm text-gray-800">OPPM AI Assistant</span>
         </div>
-        <button onClick={close} className="text-gray-400 hover:text-gray-600">
-          <X className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button
+              onClick={() => clearContextHistory(contextKey)}
+              title="Clear chat history"
+              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+          <button onClick={close} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
       </div>
 
       {/* Context badge */}
@@ -275,6 +478,20 @@ export function ChatPanel() {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+
+        {/* History indicator */}
+        {sessionStartIdx > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0">
+              <Clock className="h-3 w-3" />
+              {sessionStartIdx} previous message{sessionStartIdx !== 1 ? 's' : ''}
+            </span>
+            <div className="flex-1 h-px bg-gray-200" />
+          </div>
+        )}
+
+        {/* Empty state */}
         {messages.length === 0 && (
           <div className="text-center text-gray-400 text-sm mt-12">
             <Bot className="h-10 w-10 mx-auto mb-3 text-gray-300" />
@@ -286,60 +503,32 @@ export function ChatPanel() {
                 ? 'I can update objectives, timelines, generate plans, and analyze progress.'
                 : 'I can answer questions across all projects, tasks, and team members.'}
             </p>
+            <p className="text-xs mt-2 text-gray-400">
+              Attach files with the <Paperclip className="inline h-3 w-3" /> button below.
+            </p>
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={cn(
-              'flex gap-2',
-              msg.role === 'user' ? 'justify-end' : 'justify-start',
-            )}
-          >
-            {msg.role === 'assistant' && (
-              <Bot className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
-            )}
-            <div
-              className={cn(
-                'max-w-[85%] rounded-xl px-3 py-2 text-sm',
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-800',
-              )}
-            >
-              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-
-              {/* Tool call results */}
-              {msg.toolCalls && msg.toolCalls.length > 0 && (
-                <div className="mt-2 space-y-1 border-t border-gray-200 pt-2">
-                  {msg.toolCalls.map((tc, j) => (
-                    <div
-                      key={j}
-                      className={cn(
-                        'flex items-center gap-1.5 text-xs rounded px-2 py-1',
-                        tc.success
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-red-50 text-red-700',
-                      )}
-                    >
-                      {tc.success ? (
-                        <CheckCircle2 className="h-3 w-3 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="h-3 w-3 shrink-0" />
-                      )}
-                      <span className="font-medium">{tc.tool}</span>
-                      {tc.error && <span className="ml-1">— {tc.error}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
+        {/* New session divider (when there is restored history) */}
+        {sessionStartIdx > 0 && messages.length > sessionStartIdx && (
+          <>
+            {messages.slice(0, sessionStartIdx).map((msg, i) => (
+              <MessageBubble key={`h-${i}`} msg={msg} />
+            ))}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-blue-100" />
+              <span className="text-xs text-blue-400 shrink-0">New session</span>
+              <div className="flex-1 h-px bg-blue-100" />
             </div>
-            {msg.role === 'user' && (
-              <User className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
-            )}
-          </div>
-        ))}
+            {messages.slice(sessionStartIdx).map((msg, i) => (
+              <MessageBubble key={`n-${i}`} msg={msg} />
+            ))}
+          </>
+        )}
+
+        {/* All messages when no divider needed */}
+        {(sessionStartIdx === 0 || messages.length <= sessionStartIdx) &&
+          messages.map((msg, i) => <MessageBubble key={i} msg={msg} />)}
 
         {/* Pending plan buttons */}
         {pendingPlan && (
@@ -375,7 +564,41 @@ export function ChatPanel() {
       </div>
 
       {/* Input area */}
-      <div className="border-t border-gray-200 px-4 py-3">
+      <div className="border-t border-gray-200 px-4 pt-2 pb-3">
+
+        {/* Pending attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachments.map((att, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 bg-gray-100 border border-gray-200 text-xs rounded-full px-2.5 py-1 max-w-[160px]"
+              >
+                {att.type === 'image' ? (
+                  <ImageIcon className="h-3 w-3 text-blue-500 shrink-0" />
+                ) : att.type === 'text' ? (
+                  <FileText className="h-3 w-3 text-green-600 shrink-0" />
+                ) : (
+                  <File className="h-3 w-3 text-orange-500 shrink-0" />
+                )}
+                <span className="truncate text-gray-700">{att.name}</span>
+                <span className="text-gray-400 shrink-0">({formatBytes(att.size)})</span>
+                <button
+                  onClick={() => removeAttachment(i)}
+                  className="text-gray-400 hover:text-gray-600 shrink-0 ml-0.5"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* File error */}
+        {fileError && (
+          <p className="text-xs text-orange-500 mb-1.5">{fileError}</p>
+        )}
+
         {showPlanInput ? (
           <div className="space-y-2">
             <p className="text-xs font-medium text-gray-600">Describe the project goals for AI plan generation:</p>
@@ -410,6 +633,19 @@ export function ChatPanel() {
           </div>
         ) : (
           <div className="flex items-end gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={attachments.length >= MAX_FILES_PER_MSG}
+              title="Attach files"
+              className={cn(
+                'rounded-xl border p-2 shrink-0 transition-colors',
+                attachments.length >= MAX_FILES_PER_MSG
+                  ? 'border-gray-100 text-gray-300 cursor-not-allowed'
+                  : 'border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-blue-600',
+              )}
+            >
+              <Paperclip className="h-4 w-4" />
+            </button>
             <textarea
               ref={inputRef}
               value={input}
@@ -431,14 +667,137 @@ export function ChatPanel() {
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isLoading}
-              className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={(!input.trim() && attachments.length === 0) || isLoading}
+              className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
               <Send className="h-4 w-4" />
             </button>
           </div>
         )}
+
+        {/* hidden multi-file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.html,.htm,.py,.js,.ts,.tsx,.jsx,.css,.sh,.sql,.pdf,.docx,.doc,.xlsx,.xls,.pptx,image/*"
+          onChange={handleFileChange}
+        />
       </div>
+    </div>
+  )
+}
+
+// ── MessageBubble sub-component ──
+
+function AttachmentChip({ att }: { att: FileAttachment }) {
+  if (att.type === 'image') {
+    return (
+      <img
+        src={att.content}
+        alt={att.name}
+        className="max-w-[200px] max-h-[140px] rounded-lg border border-white/30 object-cover mt-1"
+      />
+    )
+  }
+  return (
+    <div className="inline-flex items-center gap-1.5 bg-white/20 text-xs rounded-full px-2.5 py-1 mt-1">
+      {att.type === 'text' ? (
+        <FileText className="h-3 w-3 shrink-0" />
+      ) : (
+        <File className="h-3 w-3 shrink-0" />
+      )}
+      <span className="max-w-[140px] truncate">{att.name}</span>
+    </div>
+  )
+}
+
+function MessageBubble({ msg }: { msg: { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallResult[]; attachments?: FileAttachment[]; lowConfidence?: boolean } }) {
+  return (
+    <div
+      className={cn(
+        'flex gap-2',
+        msg.role === 'user' ? 'justify-end' : 'justify-start',
+      )}
+    >
+      {msg.role === 'assistant' && (
+        <Bot className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
+      )}
+      <div
+        className={cn(
+          'max-w-[85%] rounded-xl px-3 py-2 text-sm',
+          msg.role === 'user'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-100 text-gray-800',
+        )}
+      >
+        {/* Attachments (user messages) */}
+        {msg.role === 'user' && msg.attachments && msg.attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {msg.attachments.map((att, i) => (
+              <AttachmentChip key={i} att={att} />
+            ))}
+          </div>
+        )}
+
+        {/* Message content */}
+        {msg.role === 'assistant' ? (
+          <div className="prose prose-sm max-w-none break-words
+            prose-p:my-1 prose-p:leading-relaxed
+            prose-headings:font-semibold prose-headings:mt-2 prose-headings:mb-1
+            prose-h1:text-base prose-h2:text-sm prose-h3:text-sm
+            prose-strong:font-semibold prose-strong:text-gray-900
+            prose-ul:my-1 prose-ul:pl-4 prose-ol:my-1 prose-ol:pl-4
+            prose-li:my-0.5
+            prose-code:bg-gray-200 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono
+            prose-pre:bg-gray-200 prose-pre:rounded-lg prose-pre:p-2 prose-pre:text-xs prose-pre:overflow-x-auto
+            prose-blockquote:border-l-2 prose-blockquote:border-gray-400 prose-blockquote:pl-2 prose-blockquote:italic prose-blockquote:text-gray-600
+            prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {msg.content}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+        )}
+
+        {/* Low-confidence warning */}
+        {msg.role === 'assistant' && msg.lowConfidence && (
+          <div className="flex items-center gap-1.5 mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            <span>Low confidence — please verify this answer</span>
+          </div>
+        )}
+
+        {/* Tool call results (assistant) */}
+        {msg.toolCalls && msg.toolCalls.length > 0 && (
+          <div className="mt-2 space-y-1 border-t border-gray-200 pt-2">
+            {msg.toolCalls.map((tc, j) => (
+              <div
+                key={j}
+                className={cn(
+                  'flex items-center gap-1.5 text-xs rounded px-2 py-1',
+                  tc.success
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'bg-red-50 text-red-700',
+                )}
+              >
+                {tc.success ? (
+                  <CheckCircle2 className="h-3 w-3 shrink-0" />
+                ) : (
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                )}
+                <span className="font-medium">{tc.tool}</span>
+                {tc.error && <span className="ml-1">— {tc.error}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {msg.role === 'user' && (
+        <User className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
+      )}
     </div>
   )
 }

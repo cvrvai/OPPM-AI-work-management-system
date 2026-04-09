@@ -1,19 +1,21 @@
 """AI Chat routes — workspace-scoped chat with LLM for OPPM projects."""
 
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_write, require_admin
 from shared.database import get_session
 from schemas.ai_chat import (
     ChatRequest, ChatResponse, SuggestPlanRequest, SuggestPlanResponse,
     CommitPlanRequest, CapabilitiesResponse, ReindexResponse, FeedbackRequest,
+    FileParseResponse,
 )
 from services.ai_chat_service import chat, suggest_plan, commit_plan, weekly_summary, workspace_chat
 from services.document_indexer import reindex_workspace
 from repositories.vector_repo import VectorRepository
 from repositories.notification_repo import AuditRepository
 from shared.database import get_session
+from infrastructure.file_parser import parse_file, MAX_FILE_BYTES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -61,6 +63,27 @@ async def reindex_route(
     """Re-index all workspace data for RAG. Requires admin role."""
     result = await reindex_workspace(ws.workspace_id)
     return ReindexResponse(total_indexed=result["total_indexed"])
+
+
+# ── File parsing ──
+
+@router.post("/workspaces/{workspace_id}/ai/parse-file", response_model=FileParseResponse)
+async def parse_file_route(
+    file: UploadFile,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+):
+    """Extract text from an uploaded binary file (xlsx, pdf, docx, csv)."""
+    content = await file.read()
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (10 MB limit)")
+    result = parse_file(file.filename or "unknown", content)
+    return FileParseResponse(
+        filename=file.filename or "unknown",
+        content_type=file.content_type or "",
+        extracted_text=result.text,
+        truncated=result.truncated,
+        error=result.error,
+    )
 
 
 # ── Project-scoped chat ──

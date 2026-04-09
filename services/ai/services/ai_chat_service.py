@@ -25,7 +25,8 @@ from infrastructure.tools.registry import get_registry
 from infrastructure.rag.agent_loop import run_agent_loop
 from infrastructure.rag.guardrails import check_input, sanitize_output
 from shared.models.ai_model import AIModel
-from shared.models.workspace import WorkspaceMember, MemberSkill
+from shared.models.workspace import Workspace, WorkspaceMember, MemberSkill
+from shared.models.project import Project
 from shared.models.git import CommitEvent, CommitAnalysis
 from repositories.oppm_repo import (
     ObjectiveRepository, TimelineRepository, CostRepository,
@@ -87,6 +88,28 @@ The OPPM methodology applies to ANY industry — construction, architecture, fin
 
 {tool_section}
 
+## Methodology Selection Guide
+When the user describes a project or asks for a plan, first identify the best methodology fit:
+- **Agile / Scrum**: Iterative, time-boxed sprints (1-4 weeks). Best for: software, R&D, evolving requirements. Use Scrum roles (Product Owner, Scrum Master, Dev Team), artifacts (Product Backlog, Sprint Backlog, Increment), and ceremonies (Sprint Planning, Daily Standup, Sprint Review, Retrospective).
+- **Waterfall**: Sequential phases (Requirements → Design → Implementation → Testing → Deployment). Best for: construction, manufacturing, regulatory compliance, fixed-scope projects.
+- **Hybrid**: Combines Waterfall milestones with Agile sprints within phases. Best for: large-scale projects needing both predictability and flexibility.
+- **Kanban**: Continuous flow, WIP limits, visual board. Best for: operations, maintenance, support teams.
+
+Map the chosen methodology onto the OPPM grid:
+- Objectives = Milestones / Epics / Deliverables (by methodology)
+- Tasks = Work packages / User stories / Activities
+- Timeline weeks = Sprint periods / Phase durations
+
+## Structured Response Format
+When proposing a new plan, follow this 5-point structure:
+1. **Methodology Rationale** — Why this methodology fits the project (1-2 sentences).
+2. **Objectives** — Numbered list of OPPM objectives with suggested week ranges.
+3. **Key Tasks** — Tasks grouped under each objective with owners, priorities, and dependencies.
+4. **Risk Assessment** — Top 3 risks with likelihood and mitigation strategies.
+5. **Budget Estimate** — Cost categories (labor, materials, tools) with rough estimates if data is available.
+
+When answering questions (not proposing plans), respond conversationally without this structure.
+
 ## Rules
 1. Keep responses concise — max 3 sentences unless explaining a plan.
 2. Always reference specific objective IDs and week dates when making changes.
@@ -96,6 +119,7 @@ The OPPM methodology applies to ANY industry — construction, architecture, fin
 6. Adapt terminology to the project's domain — use industry-appropriate language when relevant.
 7. You have read tools (get_task_details, search_tasks, get_risk_status, etc.) — use them when you need more data than what's in the context.
 8. You can manage risks (create_risk, update_risk), deliverables (create_deliverable), assign tasks (assign_task), and set dependencies (set_task_dependency).
+9. When the user uploads a file (Excel, PDF, Word), analyze its content and provide actionable insights. Suggest how the data maps to OPPM objectives, tasks, or costs.
 """
 
 # ── Context budget: max ~8K tokens ≈ 32K chars ──
@@ -441,7 +465,17 @@ async def _chat_async(
     openai_tools = registry.to_openai_schema() if use_native_tools else None
     anthropic_tools = registry.to_anthropic_schema() if use_native_tools else None
 
-    # ── Agentic tool loop (multi-turn, max 5 iterations) ──
+    # Closure that re-runs RAG for a knowledge gap phrase mid-loop
+    async def _rag_requery(gap_phrase: str) -> str:
+        return await rag_service.requery(
+            session,
+            workspace_id,
+            gap_phrase,
+            project_id=project_id,
+            user_id=user_id,
+        )
+
+    # ── TAOR agentic loop (Think → Act → Observe → Retry) ──
     try:
         loop_result = await run_agent_loop(
             models,
@@ -453,6 +487,7 @@ async def _chat_async(
             user_id=user_id,
             openai_tools=openai_tools,
             anthropic_tools=anthropic_tools,
+            rag_requery=_rag_requery,
         )
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable: %s", e)
@@ -481,6 +516,7 @@ async def _chat_async(
         "tool_calls": loop_result.all_tool_results,
         "updated_entities": loop_result.updated_entities,
         "iterations": loop_result.iterations,
+        "low_confidence": loop_result.low_confidence,
     }
 
 
@@ -661,21 +697,26 @@ Return ONLY valid JSON:
 
 # ── Workspace-level chat (no project context, no tools) ──
 
-WORKSPACE_SYSTEM_PROMPT = """You are OPPM AI, a project management assistant for the workspace.
+WORKSPACE_SYSTEM_PROMPT = """You are OPPM AI, a project management assistant for the workspace "{workspace_name}".
 
 The OPPM methodology applies universally — to architecture, construction, finance, healthcare, IT, manufacturing, research, education, and any other field. Objectives, tasks, timelines, and budgets are universal project concepts.
 
 You can answer questions about projects, tasks, objectives, costs, and team members
 across the entire workspace.
 
+## Projects in this workspace
+{project_list}
+
 {rag_context}
 
 ## Rules
 1. Keep responses concise — max 3 sentences unless explaining analysis.
-2. You do NOT have access to tools. You cannot make changes.
-3. For modification requests, tell the user to open the specific project page.
-4. Provide data-driven answers using the retrieved context above.
-5. Adapt to the domain/industry of the projects being discussed.
+2. You CAN create projects, objectives, and tasks using the available tools.
+3. After creating a project, immediately use the returned project ID to create objectives and tasks from the uploaded document. Pass the project ID as `project_id` in each `create_objective` and `create_task` call.
+4. When creating from a document, extract ALL objectives and key tasks — do not stop at the project shell.
+5. Provide data-driven answers using the retrieved context above.
+6. Adapt to the domain/industry of the projects being discussed.
+7. When comparing projects, reference their names and key metrics (objectives count, status, budget).
 """
 
 
@@ -687,12 +728,27 @@ async def workspace_chat(
     model_id: str | None = None,
 ) -> dict:
     """
-    Workspace-level chat — answers cross-project questions using RAG.
-    No tool execution (tools are project-scoped).
+    Workspace-level chat — cross-project questions with workspace-scoped tool execution.
+    Supports creating/updating projects and listing workspace data via the TAOR loop.
     """
     models = await _get_models(session, workspace_id, model_id)
     if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured. Add one in Settings → AI Models.")
+
+    # Load workspace name and project list for prompt context
+    ws_row = await session.execute(
+        select(Workspace.name).where(Workspace.id == workspace_id)
+    )
+    workspace_name = ws_row.scalar_one_or_none() or "Workspace"
+
+    project_rows = await session.execute(
+        select(Project.title, Project.status).where(Project.workspace_id == workspace_id)
+    )
+    projects = project_rows.all()
+    if projects:
+        project_list = "\n".join(f"- {p.title} ({p.status})" for p in projects)
+    else:
+        project_list = "(No projects yet)"
 
     # Retrieve RAG context via full pipeline
     last_user_msg = messages[-1]["content"] if messages else ""
@@ -711,37 +767,105 @@ async def workspace_chat(
     if memory_context:
         full_rag = f"{memory_context}\n\n{rag_context}"
 
-    system_prompt = WORKSPACE_SYSTEM_PROMPT.format(rag_context=full_rag)
+    # Build tool section — expose ALL tools so the AI can create projects, objectives, and tasks
+    registry = get_registry()
+    primary_provider = models[0]["provider"] if models else ""
+    use_native_tools = primary_provider in NATIVE_TOOL_PROVIDERS
 
-    conversation = f"System: {system_prompt}\n\n"
+    # Expose all tools (workspace + project-scoped) so the AI can populate a full project
+    all_tools = registry.get_tools()
+    if use_native_tools:
+        ws_tool_section = (
+            "## Tools\n"
+            "You have tools available via native function calling. "
+            "Use them to create projects, then use the returned project ID to create objectives and tasks."
+        )
+        openai_tools = registry.to_openai_schema()
+        anthropic_tools = registry.to_anthropic_schema()
+    else:
+        # Build prompt text for all tools
+        lines = [
+            "## Available Tools",
+            'To create or update projects/objectives/tasks, include a JSON tool_calls array at the END of your message inside <tool_calls>...</tool_calls> tags.',
+            "",
+            "Available tools:",
+        ]
+        for t in all_tools:
+            param_parts = []
+            for p in t.params:
+                if p.enum:
+                    val = f'"{"|".join(p.enum)}"'
+                elif p.type == "string":
+                    val = '"..."'
+                elif p.type in ("integer", "number"):
+                    val = "N"
+                else:
+                    val = "..."
+                marker = "" if p.required else " (optional)"
+                param_parts.append(f'"{p.name}": {val}{marker}')
+            params_str = ", ".join(param_parts)
+            lines.append(f"- {t.name}: {{{{{params_str}}}}}")
+            lines.append(f"  Description: {t.description}")
+        lines += ["", "Example:", "<tool_calls>", '[{{"tool": "create_project", "input": {{"title": "My Project"}}}}]', "</tool_calls>"]
+        ws_tool_section = "\n".join(lines)
+        openai_tools = None
+        anthropic_tools = None
+
+    system_prompt = WORKSPACE_SYSTEM_PROMPT.format(
+        workspace_name=workspace_name,
+        project_list=project_list,
+        rag_context=full_rag,
+    ) + f"\n\n{ws_tool_section}"
+
+    llm_messages = [{"role": "system", "content": system_prompt}]
     for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        conversation += f"{role.capitalize()}: {content}\n\n"
-    conversation += "Assistant: "
+        llm_messages.append({
+            "role": msg.get("role", "user"),
+            "content": msg.get("content", ""),
+        })
 
-    # Call LLM with fallback chain
+    async def _rag_requery(gap_phrase: str) -> str:
+        return await rag_service.requery(session, workspace_id, gap_phrase, user_id=user_id)
+
+    audit_repo = AuditRepository(session)
+
     try:
-        response = await call_with_fallback(models, conversation)
+        loop_result = await run_agent_loop(
+            models,
+            llm_messages,
+            registry,
+            session=session,
+            project_id="",   # No specific project at workspace level
+            workspace_id=workspace_id,
+            user_id=user_id,
+            openai_tools=openai_tools or None,
+            anthropic_tools=anthropic_tools or None,
+            rag_requery=_rag_requery,
+        )
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable: %s", e)
         raise HTTPException(status_code=502, detail="All AI models are currently unavailable. Please try again later.")
     except Exception as e:
-        logger.warning("LLM call failed: %s", e)
+        logger.warning("Workspace agent loop failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
 
-    audit_repo = AuditRepository(session)
+    clean_text = sanitize_output(loop_result.final_text)
+
     await audit_repo.log(
         workspace_id, user_id,
         "ai_chat", "workspace_chat",
         new_data={
             "user_message": last_user_msg[:200],
-            "ai_response": response.text[:500],
+            "ai_response": clean_text[:500],
+            "tool_calls_count": len(loop_result.all_tool_results),
+            "agent_iterations": loop_result.iterations,
         },
     )
 
     return {
-        "message": response.text.strip(),
-        "tool_calls": [],
-        "updated_entities": [],
+        "message": clean_text,
+        "tool_calls": loop_result.all_tool_results,
+        "updated_entities": loop_result.updated_entities,
+        "iterations": loop_result.iterations,
+        "low_confidence": loop_result.low_confidence,
     }

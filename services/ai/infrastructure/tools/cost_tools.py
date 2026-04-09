@@ -22,8 +22,8 @@ async def _update_project_costs(
     for field in ("category", "description", "planned_amount", "actual_amount", "period"):
         if field in tool_input:
             data[field] = tool_input[field]
-    result = await repo.create(data)
-    return ToolResult(success=True, result=result, updated_entities=["project_costs"])
+    cost = await repo.create(data)
+    return ToolResult(success=True, result={"id": str(cost.id), "category": cost.category}, updated_entities=["project_costs"])
 
 
 async def _create_risk(
@@ -40,8 +40,8 @@ async def _create_risk(
         "description": tool_input["description"],
         "rag": tool_input.get("rag", "amber"),
     }
-    result = await repo.create(data)
-    return ToolResult(success=True, result=result, updated_entities=["oppm_risks"])
+    risk = await repo.create(data)
+    return ToolResult(success=True, result={"id": str(risk.id), "description": risk.description, "rag": risk.rag}, updated_entities=["oppm_risks"])
 
 
 async def _update_risk(
@@ -56,8 +56,8 @@ async def _update_risk(
     if not risk_id:
         return ToolResult(success=False, error="risk_id required")
     updates = {k: v for k, v in tool_input.items() if k != "risk_id"}
-    result = await repo.update(risk_id, updates)
-    return ToolResult(success=True, result=result, updated_entities=["oppm_risks"])
+    risk = await repo.update(risk_id, updates)
+    return ToolResult(success=True, result={"id": risk_id, "updated": True}, updated_entities=["oppm_risks"])
 
 
 async def _create_deliverable(
@@ -74,8 +74,8 @@ async def _create_deliverable(
         "item_number": tool_input.get("item_number", 1),
         "description": tool_input["description"],
     }
-    result = await repo.create(data)
-    return ToolResult(success=True, result=result, updated_entities=["oppm_deliverables"])
+    deliv = await repo.create(data)
+    return ToolResult(success=True, result={"id": str(deliv.id), "description": deliv.description}, updated_entities=["oppm_deliverables"])
 
 
 async def _update_project(
@@ -152,8 +152,8 @@ _registry.register(ToolDefinition(
 ))
 
 _registry.register(ToolDefinition(
-    name="update_project",
-    description="Update project metadata such as status, priority, dates, or budget",
+    name="update_project_metadata",
+    description="Update project metadata such as status, priority, dates, or budget (project-scoped)",
     category="cost",
     params=[
         ToolParam("status", "string", "Project status", required=False, enum=["planning", "in_progress", "completed", "on_hold", "cancelled"]),

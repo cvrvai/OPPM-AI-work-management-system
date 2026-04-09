@@ -28,6 +28,7 @@ class ChatResponse(BaseModel):
     tool_calls: list[ToolCallResult] = []
     updated_entities: list[str] = []
     iterations: int = 1
+    low_confidence: bool = False
 
 
 class SuggestPlanRequest(BaseModel):
@@ -78,3 +79,12 @@ class CapabilitiesResponse(BaseModel):
 
 class ReindexResponse(BaseModel):
     total_indexed: int = 0
+
+
+class FileParseResponse(BaseModel):
+    """Response from server-side file parsing."""
+    filename: str
+    content_type: str = ""
+    extracted_text: str
+    truncated: bool = False
+    error: Optional[str] = None

@@ -80,3 +80,26 @@ export const api = {
     request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
+
+export interface FileParseResult {
+  filename: string
+  content_type: string
+  extracted_text: string
+  truncated: boolean
+  error: string | null
+}
+
+export async function parseFile(workspaceId: string, file: File): Promise<FileParseResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API_BASE}/v1/workspaces/${workspaceId}/ai/parse-file`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: form,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new ApiError(res.status, err.detail || 'File parse failed')
+  }
+  return res.json()
+}

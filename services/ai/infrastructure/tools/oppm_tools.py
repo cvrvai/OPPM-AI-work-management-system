@@ -18,15 +18,22 @@ async def _create_objective(
     user_id: str,
 ) -> ToolResult:
     repo = ObjectiveRepository(session)
+    resolved_project_id = tool_input.get("project_id") or project_id
+    if not resolved_project_id:
+        return ToolResult(success=False, error="project_id is required — create a project first")
     data = {
-        "project_id": project_id,
+        "project_id": resolved_project_id,
         "title": tool_input["title"],
         "sort_order": tool_input.get("sort_order", 999),
     }
     if tool_input.get("owner_id"):
         data["owner_id"] = tool_input["owner_id"]
-    result = await repo.create(data)
-    return ToolResult(success=True, result=result, updated_entities=["oppm_objectives"])
+    obj = await repo.create(data)
+    return ToolResult(
+        success=True,
+        result={"id": str(obj.id), "title": obj.title, "project_id": str(obj.project_id), "sort_order": obj.sort_order},
+        updated_entities=["oppm_objectives"],
+    )
 
 
 async def _update_objective(
@@ -41,8 +48,12 @@ async def _update_objective(
     if not obj_id:
         return ToolResult(success=False, error="objective_id required")
     updates = {k: v for k, v in tool_input.items() if k != "objective_id"}
-    result = await repo.update(obj_id, updates)
-    return ToolResult(success=True, result=result, updated_entities=["oppm_objectives"])
+    obj = await repo.update(obj_id, updates)
+    return ToolResult(
+        success=True,
+        result={"id": str(obj.id), "title": obj.title} if obj else {"updated": True},
+        updated_entities=["oppm_objectives"],
+    )
 
 
 async def _delete_objective(
@@ -76,8 +87,12 @@ async def _set_timeline_status(
     }
     if tool_input.get("notes"):
         entry_data["notes"] = tool_input["notes"]
-    result = await repo.upsert_entry(entry_data)
-    return ToolResult(success=True, result=result, updated_entities=["oppm_timeline_entries"])
+    entry = await repo.upsert_entry(entry_data)
+    return ToolResult(
+        success=True,
+        result={"id": str(entry.id), "status": entry.status} if entry else {"updated": True},
+        updated_entities=["oppm_timeline_entries"],
+    )
 
 
 async def _bulk_set_timeline(
@@ -101,7 +116,7 @@ async def _bulk_set_timeline(
         results.append(await repo.upsert_entry(entry_data))
     return ToolResult(
         success=True,
-        result={"count": len(results), "entries": results},
+        result={"count": len(results)},
         updated_entities=["oppm_timeline_entries"],
     )
 
@@ -112,10 +127,11 @@ _registry = get_registry()
 
 _registry.register(ToolDefinition(
     name="create_objective",
-    description="Create a new OPPM objective for the project",
+    description="Create a new OPPM objective for a project. In workspace context, pass the project_id returned by create_project.",
     category="oppm",
     params=[
         ToolParam("title", "string", "Objective title", required=True),
+        ToolParam("project_id", "string", "UUID of the target project (required in workspace chat, optional in project chat)", required=False),
         ToolParam("sort_order", "integer", "Display order (1-based)", required=False),
         ToolParam("owner_id", "string", "UUID of the workspace member who owns this objective", required=False),
     ],

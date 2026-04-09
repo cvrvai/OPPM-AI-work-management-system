@@ -66,7 +66,7 @@ async def retrieve_with_rag_pipeline(
     memory_context = ""
     if user_id:
         try:
-            memory_context = await load_memory(session, workspace_id, user_id)
+            memory_context = await load_memory(session, workspace_id, user_id, project_id=project_id)
         except Exception as e:
             logger.warning("Memory loading failed: %s", e)
 
@@ -170,6 +170,39 @@ async def retrieve_with_rag_pipeline(
         )
 
     return result
+
+
+async def requery(
+    session: AsyncSession,
+    workspace_id: str,
+    gap_phrase: str,
+    project_id: str | None = None,
+    user_id: str | None = None,
+    top_k: int = 8,
+) -> str:
+    """Lightweight mid-loop RAG re-query for a specific knowledge gap phrase.
+
+    Called by the TAOR agentic loop when the LLM's confidence is low and
+    it has identified a concrete gap in its knowledge. Returns a context
+    string (max 3000 chars) ready for injection into the conversation.
+    """
+    try:
+        result = await retrieve_with_rag_pipeline(
+            session,
+            workspace_id,
+            gap_phrase,
+            user_id=user_id,
+            project_id=project_id,
+            top_k=top_k,
+        )
+        # Trim to half the normal budget to avoid context overload mid-loop
+        ctx = result.context
+        if len(ctx) > 3000:
+            ctx = ctx[:3000] + "\n... [additional context truncated]"
+        return ctx
+    except Exception as exc:
+        logger.warning("requery failed for gap '%s': %s", gap_phrase[:80], exc)
+        return ""
 
 
 def _format_chunks(chunks: list[RetrievedChunk]) -> str:

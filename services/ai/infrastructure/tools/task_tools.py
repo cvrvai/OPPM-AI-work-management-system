@@ -18,8 +18,11 @@ async def _create_task(
     user_id: str,
 ) -> ToolResult:
     repo = TaskRepository(session)
+    resolved_project_id = tool_input.get("project_id") or project_id
+    if not resolved_project_id:
+        return ToolResult(success=False, error="project_id is required — create a project first")
     data = {
-        "project_id": project_id,
+        "project_id": resolved_project_id,
         "title": tool_input["title"],
         "created_by": user_id,
     }
@@ -27,8 +30,12 @@ async def _create_task(
                   "assignee_id", "project_contribution", "start_date"):
         if field in tool_input:
             data[field] = tool_input[field]
-    result = await repo.create(data)
-    return ToolResult(success=True, result=result, updated_entities=["tasks", "projects"])
+    task = await repo.create(data)
+    return ToolResult(
+        success=True,
+        result={"id": str(task.id), "title": task.title, "project_id": str(task.project_id), "status": task.status},
+        updated_entities=["tasks", "projects"],
+    )
 
 
 async def _update_task(
@@ -43,8 +50,12 @@ async def _update_task(
     if not task_id:
         return ToolResult(success=False, error="task_id required")
     updates = {k: v for k, v in tool_input.items() if k != "task_id"}
-    result = await repo.update(task_id, updates)
-    return ToolResult(success=True, result=result, updated_entities=["tasks", "projects"])
+    task = await repo.update(task_id, updates)
+    return ToolResult(
+        success=True,
+        result={"id": str(task.id), "title": task.title, "status": task.status} if task else {"updated": True},
+        updated_entities=["tasks", "projects"],
+    )
 
 
 async def _delete_task(
@@ -134,9 +145,10 @@ _registry = get_registry()
 
 _registry.register(ToolDefinition(
     name="create_task",
-    description="Create a new task under a project, optionally linked to an objective",
+    description="Create a new task under a project, optionally linked to an objective. In workspace context, pass project_id explicitly.",
     category="task",
     params=[
+        ToolParam("project_id", "string", "UUID of the target project (required in workspace chat, optional in project chat)", required=False),
         ToolParam("title", "string", "Task title", required=True),
         ToolParam("description", "string", "Task description", required=False),
         ToolParam("priority", "string", "Task priority", required=False, enum=["low", "medium", "high", "critical"]),
