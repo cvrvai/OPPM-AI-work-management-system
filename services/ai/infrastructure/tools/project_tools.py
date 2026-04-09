@@ -5,6 +5,7 @@ because projects are workspace-scoped (not project-scoped).
 """
 
 import logging
+from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,16 @@ from repositories.project_repo import ProjectRepository
 from shared.models.project import Project
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_date(value: str | None) -> date | None:
+    """Parse a date string (YYYY-MM-DD) to a datetime.date object."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
 
 
 async def _create_project(
@@ -32,9 +43,22 @@ async def _create_project(
         "workspace_id": workspace_id,
         "title": title,
     }
-    for field in ("description", "status", "priority", "budget", "start_date", "deadline"):
+    for field in ("description", "status", "priority", "budget"):
         if field in tool_input and tool_input[field]:
             data[field] = tool_input[field]
+
+    # Normalise legacy status value the LLM may still send
+    if data.get("status") == "active":
+        data["status"] = "in_progress"
+
+    # Parse date fields to datetime.date objects
+    for date_field in ("start_date", "deadline"):
+        if date_field in tool_input and tool_input[date_field]:
+            parsed = _parse_date(tool_input[date_field])
+            if parsed:
+                data[date_field] = parsed
+            else:
+                return ToolResult(success=False, error=f"Invalid {date_field} format. Use YYYY-MM-DD.")
 
     repo = ProjectRepository(session)
     project = await repo.create_project(data)
@@ -95,6 +119,19 @@ async def _update_project(
     if not updates:
         return ToolResult(success=False, error="No fields to update provided")
 
+    # Normalise legacy status value
+    if updates.get("status") == "active":
+        updates["status"] = "in_progress"
+
+    # Parse date fields to datetime.date objects
+    for date_field in ("start_date", "deadline"):
+        if date_field in updates and isinstance(updates[date_field], str):
+            parsed = _parse_date(updates[date_field])
+            if parsed:
+                updates[date_field] = parsed
+            else:
+                return ToolResult(success=False, error=f"Invalid {date_field} format. Use YYYY-MM-DD.")
+
     repo = ProjectRepository(session)
     updated = await repo.update(target_id, updates)
     if not updated:
@@ -124,7 +161,7 @@ _registry.register(ToolDefinition(
         ToolParam("title", "string", "Project name/title", required=True),
         ToolParam("description", "string", "Project description or objective summary", required=False),
         ToolParam("status", "string", "Initial status", required=False,
-                  enum=["planning", "active", "on_hold", "completed", "cancelled"]),
+                  enum=["planning", "in_progress", "on_hold", "completed", "cancelled"]),
         ToolParam("priority", "string", "Project priority", required=False,
                   enum=["low", "medium", "high", "critical"]),
         ToolParam("budget", "number", "Total budget in currency units", required=False),

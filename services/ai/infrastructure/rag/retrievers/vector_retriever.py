@@ -29,11 +29,14 @@ class VectorRetriever(BaseRetriever):
 
         query_embedding = await generate_embedding(query)
 
+        # VectorRepository.similarity_search accepts singular `entity_type`
+        entity_type = entity_types[0] if entity_types and len(entity_types) == 1 else None
+
         results = await self._repo.similarity_search(
             workspace_id=workspace_id,
             query_embedding=query_embedding,
             top_k=top_k,
-            entity_types=entity_types,
+            entity_type=entity_type,
         )
 
         return [

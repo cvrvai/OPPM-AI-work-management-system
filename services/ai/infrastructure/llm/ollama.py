@@ -45,9 +45,7 @@ class OllamaAdapter(LLMAdapter):
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             raise ProviderUnavailableError(self.provider, str(e)) from e
         except httpx.HTTPStatusError as e:
-            if e.response.status_code in (404, 502, 503):
-                raise ProviderUnavailableError(self.provider, f"HTTP {e.response.status_code}") from e
-            raise
+            raise ProviderUnavailableError(self.provider, f"HTTP {e.response.status_code}: {e.response.text[:200]}") from e
 
     async def call_json(self, model_id: str, prompt: str, **kwargs) -> dict | None:
         url = self._url(**kwargs)
@@ -73,9 +71,7 @@ class OllamaAdapter(LLMAdapter):
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             raise ProviderUnavailableError(self.provider, str(e)) from e
         except httpx.HTTPStatusError as e:
-            if e.response.status_code in (404, 502, 503):
-                raise ProviderUnavailableError(self.provider, f"HTTP {e.response.status_code}") from e
-            raise
+            raise ProviderUnavailableError(self.provider, f"HTTP {e.response.status_code}: {e.response.text[:200]}") from e
 
     async def call_vision_json(
         self, model_id: str, prompt: str, image_bytes: bytes, **kwargs

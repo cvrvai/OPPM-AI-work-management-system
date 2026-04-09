@@ -126,6 +126,11 @@ async def call_with_fallback_tools(
                            provider, model["model_id"], e.reason)
             last_error = e
             continue
+        except Exception as e:
+            logger.warning("Provider %s/%s error (tools), trying next: %s",
+                           provider, model["model_id"], e)
+            last_error = ProviderUnavailableError(provider, str(e))
+            continue
 
     raise ProviderUnavailableError(
         "all",

@@ -69,8 +69,25 @@ def check_input(text: str) -> tuple[bool, str]:
     return True, ""
 
 
+# Think block fields that should never appear in user-facing output
+_THINK_FIELD_PATTERN = re.compile(
+    r"^\s*(?:what_i_know|what_i_need|confidence|next_action):\s*.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Tagged think blocks
+_THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+
+
 def sanitize_output(text: str) -> str:
-    """Scrub sensitive data patterns from LLM output before returning to the client."""
+    """Scrub sensitive data patterns and internal reasoning from LLM output."""
+    # Strip tagged think blocks
+    text = _THINK_BLOCK_PATTERN.sub("", text)
+    # Strip naked think fields
+    text = _THINK_FIELD_PATTERN.sub("", text)
+    # Clean up excessive blank lines left behind
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    # Redact sensitive data
     for pattern, replacement in _SENSITIVE_OUTPUT_PATTERNS:
         text = pattern.sub(replacement, text)
     return text

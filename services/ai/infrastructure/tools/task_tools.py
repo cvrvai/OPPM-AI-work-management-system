@@ -1,6 +1,7 @@
 """Task management tools — create, update, delete, assign tasks."""
 
 import logging
+from datetime import date, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.tools.base import ToolDefinition, ToolParam, ToolResult
@@ -8,6 +9,16 @@ from infrastructure.tools.registry import get_registry
 from repositories.task_repo import TaskRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_date(value: str | None) -> date | None:
+    """Parse a date string (YYYY-MM-DD) to a datetime.date object."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
 
 
 async def _create_task(
@@ -26,10 +37,20 @@ async def _create_task(
         "title": tool_input["title"],
         "created_by": user_id,
     }
-    for field in ("description", "priority", "due_date", "oppm_objective_id",
-                  "assignee_id", "project_contribution", "start_date"):
+    for field in ("description", "priority", "oppm_objective_id",
+                  "assignee_id", "project_contribution", "parent_task_id"):
         if field in tool_input:
             data[field] = tool_input[field]
+
+    # Parse date fields to datetime.date objects
+    for date_field in ("due_date", "start_date"):
+        if date_field in tool_input and tool_input[date_field]:
+            parsed = _parse_date(tool_input[date_field])
+            if parsed:
+                data[date_field] = parsed
+            else:
+                return ToolResult(success=False, error=f"Invalid {date_field} format. Use YYYY-MM-DD.")
+
     task = await repo.create(data)
     return ToolResult(
         success=True,
@@ -50,6 +71,16 @@ async def _update_task(
     if not task_id:
         return ToolResult(success=False, error="task_id required")
     updates = {k: v for k, v in tool_input.items() if k != "task_id"}
+
+    # Parse date fields to datetime.date objects
+    for date_field in ("due_date", "start_date"):
+        if date_field in updates and isinstance(updates[date_field], str):
+            parsed = _parse_date(updates[date_field])
+            if parsed:
+                updates[date_field] = parsed
+            else:
+                return ToolResult(success=False, error=f"Invalid {date_field} format. Use YYYY-MM-DD.")
+
     task = await repo.update(task_id, updates)
     return ToolResult(
         success=True,
@@ -157,6 +188,7 @@ _registry.register(ToolDefinition(
         ToolParam("due_date", "string", "Due date (YYYY-MM-DD)", required=False),
         ToolParam("project_contribution", "integer", "How much this task contributes to project progress (0-100)", required=False),
         ToolParam("start_date", "string", "Start date (YYYY-MM-DD)", required=False),
+        ToolParam("parent_task_id", "string", "UUID of the parent task (set this to create a sub-task under an existing task)", required=False),
     ],
     handler=_create_task,
 ))

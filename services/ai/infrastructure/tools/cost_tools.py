@@ -1,6 +1,7 @@
 """Cost and risk management tools."""
 
 import logging
+from datetime import date, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.tools.base import ToolDefinition, ToolParam, ToolResult
@@ -8,6 +9,16 @@ from infrastructure.tools.registry import get_registry
 from repositories.oppm_repo import CostRepository, RiskRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_date(value: str | None) -> date | None:
+    """Parse a date string (YYYY-MM-DD) to a datetime.date object."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
 
 
 async def _update_project_costs(
@@ -94,6 +105,20 @@ async def _update_project(
     )}
     if not updates:
         return ToolResult(success=False, error="No valid fields to update")
+
+    # Parse date fields to datetime.date objects
+    for date_field in ("start_date", "deadline", "end_date"):
+        if date_field in updates and isinstance(updates[date_field], str):
+            parsed = _parse_date(updates[date_field])
+            if parsed:
+                updates[date_field] = parsed
+            else:
+                return ToolResult(success=False, error=f"Invalid {date_field} format. Use YYYY-MM-DD.")
+
+    # Normalise legacy status value
+    if updates.get("status") == "active":
+        updates["status"] = "in_progress"
+
     result = await repo.update(project_id, updates)
     return ToolResult(success=True, result=result, updated_entities=["projects"])
 

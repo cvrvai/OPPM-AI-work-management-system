@@ -5,6 +5,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.models.task import Task
+from shared.models.project import Project
 from shared.models.oppm import OPPMObjective
 from infrastructure.rag.retrievers.base_retriever import BaseRetriever, RetrievedChunk
 
@@ -30,11 +31,12 @@ class KeywordRetriever(BaseRetriever):
         project_id: str | None = filters.get("project_id")
         search_term = f"%{query}%"
 
-        # Search tasks
+        # Search tasks (tasks don't have workspace_id — join through projects)
         try:
             stmt = (
                 select(Task)
-                .where(Task.workspace_id == workspace_id)
+                .join(Project, Task.project_id == Project.id)
+                .where(Project.workspace_id == workspace_id)
                 .where(Task.title.ilike(search_term) | Task.description.ilike(search_term))
                 .limit(top_k)
             )

@@ -40,12 +40,19 @@ _THINK_DIRECTIVE = """\
 Before responding, output a reasoning block in this exact format (it will not be shown to the user):
 <think>
 what_i_know: [one sentence summary of what you have confirmed so far]
-what_i_need: [one sentence describing ANY missing data, or "nothing" if confident]
+what_i_need: [one sentence describing ANY missing data, ambiguity, or required fields — or "nothing" if fully confident]
 confidence: [integer 1-5 where 1=guessing, 5=fully certain]
-next_action: [call_tools | answer | requery]
+next_action: [call_tools | answer | clarify | requery]
 </think>
 
-Then either call the needed tools OR write your final answer (do NOT do both).\
+Rules for next_action:
+- clarify: write a friendly message asking the user for the specific missing details. Do NOT call tools.
+- call_tools: execute the tools. Do NOT write a final answer in the same turn.
+- answer: write your final response. Do NOT call tools.
+- requery: re-fetch context from RAG then continue.
+
+CRITICAL: NEVER guess required values (project title, deadline, task ID, member name).
+If what_i_need is NOT "nothing" and you cannot resolve it with tools, choose clarify and ask the user.\"
 """
 
 
@@ -68,36 +75,56 @@ class AgentLoopResult:
     low_confidence: bool = False
 
 
+# Regex to match think fields WITHOUT <think> tags (naked at start of response)
+_NAKED_THINK_RE = re.compile(
+    r"^\s*(?:what_i_know:.*\n?)+(?:what_i_need:.*\n?)?(?:confidence:.*\n?)?(?:next_action:.*\n?)?\s*",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def _extract_think_block(text: str) -> tuple[str, ThinkBlock]:
     """Strip <think>...</think> from response text and parse the fields.
 
-    Returns (cleaned_text, ThinkBlock). If no block found, returns original
-    text with a default ThinkBlock.
+    Also handles naked think fields (without tags) that the LLM may output.
+    Returns (cleaned_text, ThinkBlock).
     """
     tb = ThinkBlock()
+
+    # Try tagged form first: <think>...</think>
     match = re.search(r"<think>(.*?)</think>", text, re.DOTALL | re.IGNORECASE)
-    if not match:
-        return text.strip(), tb
+    if match:
+        block = match.group(1)
+        cleaned = (text[: match.start()] + text[match.end() :]).strip()
+        _parse_think_fields(block, tb)
+        return cleaned, tb
 
-    block = match.group(1)
-    cleaned = (text[: match.start()] + text[match.end() :]).strip()
+    # Fallback: naked think fields at the start of the response
+    naked = _NAKED_THINK_RE.match(text)
+    if naked:
+        block = naked.group(0)
+        cleaned = text[naked.end():].strip()
+        _parse_think_fields(block, tb)
+        return cleaned, tb
 
+    return text.strip(), tb
+
+
+def _parse_think_fields(block: str, tb: ThinkBlock) -> None:
+    """Parse what_i_know / what_i_need / confidence / next_action from a text block."""
     for line in block.splitlines():
         line = line.strip()
-        if line.startswith("what_i_know:"):
+        if line.lower().startswith("what_i_know:"):
             tb.what_i_know = line.split(":", 1)[1].strip()
-        elif line.startswith("what_i_need:"):
+        elif line.lower().startswith("what_i_need:"):
             tb.what_i_need = line.split(":", 1)[1].strip()
-        elif line.startswith("confidence:"):
+        elif line.lower().startswith("confidence:"):
             raw = line.split(":", 1)[1].strip()
             try:
                 tb.confidence = max(1, min(5, int(re.search(r"\d", raw).group())))  # type: ignore[union-attr]
             except (AttributeError, ValueError):
                 pass
-        elif line.startswith("next_action:"):
+        elif line.lower().startswith("next_action:"):
             tb.next_action = line.split(":", 1)[1].strip().lower()
-
-    return cleaned, tb
 
 
 def _call_hash(tool_name: str, tool_input: dict) -> str:

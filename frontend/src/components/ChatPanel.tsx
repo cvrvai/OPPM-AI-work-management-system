@@ -347,6 +347,7 @@ export function ChatPanel() {
   const handleSend = useCallback(() => {
     const text = input.trim()
     if ((!text && attachments.length === 0) || chatMutation.isPending) return
+    if (!ws) return
 
     // Build attachments saved to chatStore (images stored as data URL, text stored as empty to save space)
     const storedAttachments: FileAttachment[] = attachments.map((a) => ({
@@ -495,17 +496,26 @@ export function ChatPanel() {
         {messages.length === 0 && (
           <div className="text-center text-gray-400 text-sm mt-12">
             <Bot className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-            <p className="font-medium text-gray-500">
-              {isProjectContext ? 'Ask me about your project' : 'Ask me about your workspace'}
-            </p>
-            <p className="text-xs mt-1">
-              {isProjectContext
-                ? 'I can update objectives, timelines, generate plans, and analyze progress.'
-                : 'I can answer questions across all projects, tasks, and team members.'}
-            </p>
-            <p className="text-xs mt-2 text-gray-400">
-              Attach files with the <Paperclip className="inline h-3 w-3" /> button below.
-            </p>
+            {!ws ? (
+              <>
+                <p className="font-medium text-gray-500">No workspace selected</p>
+                <p className="text-xs mt-1">Select a workspace from the sidebar to start chatting with the AI assistant.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium text-gray-500">
+                  {isProjectContext ? 'Ask me about your project' : 'Ask me about your workspace'}
+                </p>
+                <p className="text-xs mt-1">
+                  {isProjectContext
+                    ? 'I can update objectives, timelines, generate plans, and analyze progress.'
+                    : 'I can answer questions across all projects, tasks, and team members.'}
+                </p>
+                <p className="text-xs mt-2 text-gray-400">
+                  Attach files with the <Paperclip className="inline h-3 w-3" /> button below.
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -657,7 +667,9 @@ export function ChatPanel() {
                 }
               }}
               placeholder={
-                isProjectContext
+                !ws
+                  ? 'Select a workspace to start chatting…'
+                  : isProjectContext
                   ? 'Ask about your project…'
                   : 'Ask about your workspace…'
               }
@@ -667,7 +679,7 @@ export function ChatPanel() {
             />
             <button
               onClick={handleSend}
-              disabled={(!input.trim() && attachments.length === 0) || isLoading}
+              disabled={(!input.trim() && attachments.length === 0) || isLoading || !ws}
               className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
               <Send className="h-4 w-4" />

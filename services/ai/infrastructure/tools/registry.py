@@ -73,6 +73,11 @@ class ToolRegistry:
             return result
         except Exception as e:
             logger.warning("Tool '%s' execution failed: %s", name, e)
+            # Rollback the session to prevent PendingRollbackError in subsequent calls
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             return ToolResult(success=False, error=str(e))
 
     # ── Schema generation for native LLM function calling ──
