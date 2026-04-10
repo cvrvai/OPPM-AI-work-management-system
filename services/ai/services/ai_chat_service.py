@@ -140,6 +140,9 @@ When answering questions (not proposing plans), respond conversationally without
     d. **Project Code** — Short identifier like PRJ-204 (optional, skip if user says so).
     e. **Planning Hours** — Estimated total effort in hours (optional, skip if unknown).
     If the user provides some of these upfront (in the same message), skip those questions and only ask for the missing ones. If the user says "just create it" or similar, proceed with defaults.
+13. **Interactive choices** — When you want to offer the user a fixed set of options, end your message with exactly one line in this format:
+    [CHOICES: Option A | Option B | Option C | Type your own...]
+    Rules: options are pipe-separated; the last item MUST end with `...` to signal that a free-text input field will appear; do NOT add any text after the closing `]`; use at most 5 options; omit this block entirely when open-ended input is more appropriate.
 """
 
 # ── Context budget: max ~8K tokens ≈ 32K chars ──

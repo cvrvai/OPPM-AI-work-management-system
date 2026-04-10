@@ -118,6 +118,16 @@ function readAsDataURL(file: File): Promise<string> {
   })
 }
 
+function parseChoices(content: string): { displayContent: string; choices: string[]; hasCustom: boolean } {
+  const match = content.match(/\[CHOICES:\s*([^\]]+)\]\s*$/)
+  if (!match) return { displayContent: content, choices: [], hasCustom: false }
+  const raw = match[1].split('|').map(s => s.trim()).filter(Boolean)
+  const hasCustom = raw.length > 0 && raw[raw.length - 1].endsWith('...')
+  const choices = hasCustom ? raw.slice(0, -1) : raw
+  const displayContent = content.slice(0, match.index).trimEnd()
+  return { displayContent, choices, hasCustom }
+}
+
 // ── Component ──
 
 export function ChatPanel() {
@@ -500,6 +510,16 @@ export function ChatPanel() {
     chatMutation.mutate(allMsgs)
   }, [input, attachments, messages, chatMutation, addMessage])
 
+  const handleQuickSend = useCallback((text: string) => {
+    if (!text.trim()) return
+    addMessage({ role: 'user', content: text })
+    const allMsgs = [
+      ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user' as const, content: text },
+    ]
+    chatMutation.mutate(allMsgs)
+  }, [messages, chatMutation, addMessage])
+
   const handleSuggestPlan = useCallback(() => {
     const goal = planGoal.trim()
     if (!goal) return
@@ -748,15 +768,25 @@ export function ChatPanel() {
               <span className="text-xs text-blue-400 shrink-0">New session</span>
               <div className="flex-1 h-px bg-blue-100" />
             </div>
-            {messages.slice(sessionStartIdx).map((msg, i) => (
-              <MessageBubble key={`n-${i}`} msg={msg} />
+            {messages.slice(sessionStartIdx).map((msg, i, arr) => (
+              <MessageBubble
+                key={`n-${i}`}
+                msg={msg}
+                onChoiceSelect={i === arr.length - 1 ? handleQuickSend : undefined}
+              />
             ))}
           </>
         )}
 
         {/* All messages when no divider needed */}
         {(sessionStartIdx === 0 || messages.length <= sessionStartIdx) &&
-          messages.map((msg, i) => <MessageBubble key={i} msg={msg} />)}
+          messages.map((msg, i, arr) => (
+            <MessageBubble
+              key={i}
+              msg={msg}
+              onChoiceSelect={i === arr.length - 1 ? handleQuickSend : undefined}
+            />
+          ))}
 
         {/* Pending plan buttons */}
         {pendingPlan && (
@@ -987,7 +1017,11 @@ function AttachmentChip({ att }: { att: FileAttachment }) {
   )
 }
 
-function MessageBubble({ msg }: { msg: { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallResult[]; attachments?: FileAttachment[]; lowConfidence?: boolean } }) {
+function MessageBubble({ msg, onChoiceSelect }: { msg: { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallResult[]; attachments?: FileAttachment[]; lowConfidence?: boolean }; onChoiceSelect?: (text: string) => void }) {
+  const [customInput, setCustomInput] = useState('')
+  const { displayContent, choices, hasCustom } = msg.role === 'assistant'
+    ? parseChoices(msg.content)
+    : { displayContent: msg.content, choices: [], hasCustom: false }
   return (
     <div
       className={cn(
@@ -998,6 +1032,7 @@ function MessageBubble({ msg }: { msg: { role: 'user' | 'assistant'; content: st
       {msg.role === 'assistant' && (
         <Bot className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
       )}
+      <div className="flex flex-col gap-2">
       <div
         className={cn(
           'max-w-[85%] rounded-xl px-3 py-2 text-sm',
@@ -1029,7 +1064,7 @@ function MessageBubble({ msg }: { msg: { role: 'user' | 'assistant'; content: st
             prose-blockquote:border-l-2 prose-blockquote:border-gray-400 prose-blockquote:pl-2 prose-blockquote:italic prose-blockquote:text-gray-600
             prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {msg.content}
+              {displayContent}
             </ReactMarkdown>
           </div>
         ) : (
@@ -1068,6 +1103,49 @@ function MessageBubble({ msg }: { msg: { role: 'user' | 'assistant'; content: st
             ))}
           </div>
         )}
+      </div>
+      {/* Choice buttons */}
+      {onChoiceSelect && choices.length > 0 && (
+        <div className="flex flex-wrap gap-2 max-w-[85%]">
+          {choices.map((c, ci) => (
+            <button
+              key={ci}
+              onClick={() => onChoiceSelect(c)}
+              className="px-3 py-1.5 text-xs rounded-full border border-blue-300 bg-white text-blue-700 hover:bg-blue-50 transition-colors"
+            >
+              {c}
+            </button>
+          ))}
+          {hasCustom && (
+            <div className="flex gap-1 w-full mt-1">
+              <input
+                type="text"
+                value={customInput}
+                onChange={e => setCustomInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && customInput.trim()) {
+                    onChoiceSelect(customInput.trim())
+                    setCustomInput('')
+                  }
+                }}
+                placeholder="Type your own..."
+                className="flex-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <button
+                onClick={() => {
+                  if (customInput.trim()) {
+                    onChoiceSelect(customInput.trim())
+                    setCustomInput('')
+                  }
+                }}
+                className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Send
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       </div>
       {msg.role === 'user' && (
         <User className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
