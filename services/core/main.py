@@ -7,6 +7,8 @@ import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from alembic.config import Config as AlembicConfig
+from alembic import command as alembic_command
 
 from config import get_settings
 from middleware.logging import RequestLoggingMiddleware
@@ -25,8 +27,23 @@ logging.basicConfig(
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 
+logger = logging.getLogger(__name__)
+
+
+def _run_migrations() -> None:
+    """Apply any pending Alembic migrations before the app starts accepting requests."""
+    try:
+        alembic_cfg = AlembicConfig("alembic.ini")
+        alembic_command.upgrade(alembic_cfg, "head")
+        logger.info("Database migrations applied successfully")
+    except Exception as exc:
+        logger.error("Failed to apply database migrations: %s", exc)
+        raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _run_migrations()
     await init_db()
     await init_redis()
     yield

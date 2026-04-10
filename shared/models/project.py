@@ -28,6 +28,7 @@ class Project(Base):
     deadline: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
     lead_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspace_members.id", ondelete="SET NULL"))
+    methodology: Mapped[str] = mapped_column(String(20), default="oppm", nullable=False)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -36,6 +37,7 @@ class Project(Base):
         CheckConstraint("status IN ('planning', 'in_progress', 'completed', 'on_hold', 'cancelled')", name="ck_projects_status"),
         CheckConstraint("priority IN ('low', 'medium', 'high', 'critical')", name="ck_projects_priority"),
         CheckConstraint("progress >= 0 AND progress <= 100", name="ck_projects_progress"),
+        CheckConstraint("methodology IN ('agile', 'waterfall', 'hybrid', 'oppm')", name="ck_projects_methodology"),
     )
 
 

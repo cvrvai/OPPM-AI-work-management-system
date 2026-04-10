@@ -22,6 +22,13 @@ class Priority(str, Enum):
     critical = "critical"
 
 
+class Methodology(str, Enum):
+    agile = "agile"
+    waterfall = "waterfall"
+    hybrid = "hybrid"
+    oppm = "oppm"
+
+
 class TaskStatus(str, Enum):
     todo = "todo"
     in_progress = "in_progress"

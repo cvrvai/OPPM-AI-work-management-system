@@ -54,6 +54,7 @@ ROUTES: list[tuple[re.Pattern, str, int]] = [
     (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/ai/"), "ai",  120),
     (re.compile(r"^/api/v1/workspaces/[^/]+/rag/"),                "ai",  120),
     (re.compile(r"^/api/v1/workspaces/[^/]+/ai/"),                 "ai",  120),
+    (re.compile(r"^/internal/analyze-commits$"),                   "ai",  120),
     (re.compile(r"^/api/v1/workspaces/[^/]+/mcp/"),                "mcp", 120),
     (re.compile(r"^/api/v1/workspaces/[^/]+/github-accounts"),     "git",  30),
     (re.compile(r"^/api/v1/workspaces/[^/]+/commits"),             "git",  30),

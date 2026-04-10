@@ -1,477 +1,217 @@
 # Tool Registry Reference
 
-Last updated: 2026-04-09
+Last updated: 2026-04-10
 
 ## Purpose
 
-This document describes the AI service tool registry in `services/ai/infrastructure/tools/`.
+This document describes the current AI tool registry in `services/ai/infrastructure/tools/`.
 
-Use this file when you need to add a tool, change a tool's parameters, understand what the agentic loop can call, or debug a tool execution failure.
+Use it when you add a tool, change a tool contract, or need to understand what the AI service can read or write during the TAOR loop.
 
 ## Overview
 
-The tool registry holds 21 tools across four categories. Each tool has:
+The registry currently exposes `24` tools across `5` categories:
 
-- a unique name
-- a description (shown to the LLM)
-- a typed parameter schema
-- an async handler function
-- a flag for whether it requires a `project_id`
+- `oppm` — 5 tools
+- `task` — 5 tools
+- `cost` — 5 tools
+- `read` — 6 tools
+- `project` — 3 tools
 
-Tools are registered once at startup. The registry exposes serialization methods so the same tool definitions can be sent to any LLM provider.
+The registry is a global singleton created by `get_registry()` in `registry.py`.
+
+On first access it auto-imports:
+
+- `oppm_tools.py`
+- `task_tools.py`
+- `cost_tools.py`
+- `read_tools.py`
+- `project_tools.py`
 
 ## Registry API
 
-**File:** `services/ai/infrastructure/tools/registry.py`
+File:
 
-**Class:** `ToolRegistry`
+- `services/ai/infrastructure/tools/registry.py`
 
-| Method | Description |
-|---|---|
-| `register(tool_def)` | Adds a `ToolDefinition` to the registry |
-| `get_tool(name)` | Returns the `ToolDefinition` by name, or `None` |
-| `get_tools(category)` | Returns all tools, optionally filtered by category |
-| `execute(name, args, project_id)` | Runs the handler and returns a `ToolResult` |
-| `to_openai_schema()` | Returns a `list[dict]` in OpenAI function-calling format |
-| `to_anthropic_schema()` | Returns a `list[dict]` in Anthropic tool-use format |
-| `to_prompt_text()` | Returns an XML block for injection into non-native prompts |
+Key methods:
 
-**Module-level:** `get_registry()` returns the singleton and auto-imports all tool modules on first call.
+- `register(tool)`
+- `get_tool(name)`
+- `get_tools(category=None, requires_project=None)`
+- `execute(name, tool_input, session, project_id, workspace_id, user_id)`
+- `to_openai_schema(category=None)`
+- `to_anthropic_schema(category=None)`
+- `to_prompt_text(category=None)`
 
----
+`execute()` always runs with explicit context:
+
+- `session`
+- `project_id`
+- `workspace_id`
+- `user_id`
 
 ## Base Types
 
-**File:** `services/ai/infrastructure/tools/base.py`
+File:
+
+- `services/ai/infrastructure/tools/base.py`
 
 ### `ToolParam`
 
-| Field | Type | Description |
-|---|---|---|
-| `name` | `str` | Parameter name |
-| `type` | `str` | JSON Schema type (`string`, `integer`, `boolean`, `array`, `object`) |
-| `description` | `str` | Description shown to the LLM |
-| `required` | `bool` | Whether the parameter is required |
-| `enum` | `list \| None` | Allowed values |
-| `items_type` | `str \| None` | Element type for array parameters |
+- `name: str`
+- `type: str`
+- `description: str`
+- `required: bool = True`
+- `enum: list[str] | None = None`
+- `items_type: str | None = None`
 
 ### `ToolDefinition`
 
-| Field | Type | Description |
-|---|---|---|
-| `name` | `str` | Unique tool name |
-| `description` | `str` | Tool purpose shown to the LLM |
-| `category` | `str` | One of `oppm`, `task`, `cost`, `read` |
-| `params` | `list[ToolParam]` | Input parameter schema |
-| `handler` | `async callable` | Async function that performs the work |
-| `requires_project` | `bool` | Whether a `project_id` must be injected |
+- `name: str`
+- `description: str`
+- `category: str`
+- `params: list[ToolParam]`
+- `handler: Callable[..., Awaitable[dict[str, Any]]]`
+- `requires_project: bool = True`
 
 ### `ToolResult`
 
-| Field | Type | Description |
+- `success: bool`
+- `result: Any = None`
+- `error: str | None = None`
+- `updated_entities: list[str]`
+
+`updated_entities` is a flat list of table/entity groups, for example:
+
+- `projects`
+- `tasks`
+- `oppm_objectives`
+- `oppm_timeline_entries`
+
+## Category: `oppm`
+
+File:
+
+- `services/ai/infrastructure/tools/oppm_tools.py`
+
+| Tool | Purpose | Key params | Updated entities |
+|---|---|---|---|
+| `create_objective` | Create an OPPM objective | `title`, optional `project_id`, `sort_order`, `owner_id` | `oppm_objectives` |
+| `update_objective` | Update title or sort order | `objective_id`, optional fields | `oppm_objectives` |
+| `delete_objective` | Delete an objective | `objective_id` | `oppm_objectives` |
+| `set_timeline_status` | Set one task-week status | `task_id`, `week_start`, `status`, `notes?` | `oppm_timeline_entries` |
+| `bulk_set_timeline` | Set many task-week statuses | `entries[]` | `oppm_timeline_entries` |
+
+## Category: `task`
+
+File:
+
+- `services/ai/infrastructure/tools/task_tools.py`
+
+| Tool | Purpose | Key params | Updated entities |
+|---|---|---|---|
+| `create_task` | Create a task or sub-task | optional `project_id`, `title`, `description?`, `priority?`, `oppm_objective_id?`, `assignee_id?`, `due_date?`, `project_contribution?`, `start_date?`, `parent_task_id?` | `tasks`, `projects` |
+| `update_task` | Update task fields | `task_id`, optional `status`, `progress`, `title`, `priority`, `description`, `due_date` | `tasks`, `projects` |
+| `delete_task` | Delete a task | `task_id` | `tasks`, `projects` |
+| `assign_task` | Assign a workspace member to a task | `task_id`, `member_id` | `task_assignees`, `tasks` |
+| `set_task_dependency` | Create a dependency edge | `task_id`, `depends_on_task_id` | `task_dependencies`, `tasks` |
+
+## Category: `cost`
+
+File:
+
+- `services/ai/infrastructure/tools/cost_tools.py`
+
+| Tool | Purpose | Key params | Updated entities |
+|---|---|---|---|
+| `update_project_costs` | Add a project cost entry | `category`, `planned_amount?`, `actual_amount?`, `description?`, `period?` | `project_costs` |
+| `create_risk` | Create a project risk | `description`, `rag?`, `item_number?` | `oppm_risks` |
+| `update_risk` | Update an existing risk | `risk_id`, optional `description`, `rag` | `oppm_risks` |
+| `create_deliverable` | Create a deliverable | `description`, `item_number?` | `oppm_deliverables` |
+| `update_project_metadata` | Update project fields from the cost module | optional `status`, `priority`, `title`, `description`, `start_date`, `deadline`, `budget` | `projects` |
+
+## Category: `read`
+
+File:
+
+- `services/ai/infrastructure/tools/read_tools.py`
+
+These tools are read-only and usually return an empty `updated_entities` list.
+
+| Tool | Purpose | Key params |
 |---|---|---|
-| `success` | `bool` | Whether the tool completed without error |
-| `result` | `any` | The return value (serializable) |
-| `error` | `str \| None` | Error message if `success` is `False` |
-| `updated_entities` | `dict` | Entity types modified (e.g., `{"tasks": ["uuid"]}`) |
+| `get_project_summary` | Return full project metadata | none |
+| `get_task_details` | Return detailed task data including assignees, owners, dependencies, and recent reports | `task_id` |
+| `search_tasks` | Filter tasks by status, priority, objective, or keyword | optional `status`, `priority`, `objective_id`, `keyword` |
+| `get_risk_status` | Return risks and RAG counts | none |
+| `get_cost_breakdown` | Return planned vs actual by category | none |
+| `get_team_workload` | Return task count and average progress per member | none |
 
----
+## Category: `project`
 
-## Tool Catalogue
+File:
 
-### Category: `oppm` — OPPM Objective And Timeline Tools
+- `services/ai/infrastructure/tools/project_tools.py`
 
-**File:** `services/ai/infrastructure/tools/oppm_tools.py`
+These tools set `requires_project = False` so they can run without an existing project context.
 
-#### `create_objective`
-
-Creates a new OPPM objective for the project.
-
-| Parameter | Type | Required | Notes |
+| Tool | Purpose | Key params | Updated entities |
 |---|---|---|---|
-| `project_id` | `string` | yes | Injected from context |
-| `title` | `string` | yes | Objective text |
-| `owner_id` | `string` | no | Workspace member UUID |
-| `priority` | `string` | no | `A`, `B`, or `C` |
-| `sort_order` | `integer` | no | Display position |
+| `create_project` | Create a new project in the workspace | `title`, optional `description`, `status`, `priority`, `budget`, `start_date`, `deadline` | `projects` |
+| `list_workspace_projects` | List workspace projects | none | none |
+| `update_project` | Update an existing project | optional `project_id`, `title`, `description`, `status`, `priority`, `budget`, `start_date`, `deadline`, `objective_summary` | `projects` |
 
-Returns: `{ "id": "uuid", "title": "..." }`
+## Provider Integration
 
-Updated entities: `{ "objectives": ["new_uuid"] }`
+### Native Providers
 
----
+OpenAI and Anthropic consume:
 
-#### `update_objective`
+- `to_openai_schema()`
+- `to_anthropic_schema()`
 
-Updates an existing OPPM objective.
+### Prompt-Based Providers
 
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `objective_id` | `string` | yes | UUID of the objective |
-| `title` | `string` | no | New title |
-| `owner_id` | `string` | no | New owner member UUID |
-| `priority` | `string` | no | `A`, `B`, or `C` |
+Ollama and Kimi consume:
 
-Updated entities: `{ "objectives": ["objective_id"] }`
+- `to_prompt_text()`
 
----
+Prompt-based usage tells the model to emit a JSON array inside `<tool_calls>...</tool_calls>`.
 
-#### `delete_objective`
+## Execution Notes
 
-Deletes an OPPM objective.
+- The registry itself does not enforce authorization. Route dependencies and workspace/project context do that.
+- Tool handlers execute directly against the shared database through AI-side repositories.
+- Workspace chat currently exposes the full registry.
+- Project chat uses the same registry but automatically injects the active `project_id` when a tool does not supply one.
 
-| Parameter | Type | Required |
-|---|---|---|
-| `objective_id` | `string` | yes |
+## Adding A New Tool
 
-Updated entities: `{ "objectives": ["deleted"] }`
-
----
-
-#### `set_timeline_status`
-
-Sets the status for a single task in a specific week.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `task_id` | `string` | yes | Task UUID |
-| `week_start` | `string` | yes | ISO date (Monday of the week) |
-| `status` | `string` | yes | `planned`, `in_progress`, `completed`, `at_risk`, `blocked` |
-| `quality` | `string` | no | `good`, `average`, `bad` |
-| `notes` | `string` | no | |
-
-Updated entities: `{ "timeline": ["task_id"] }`
-
----
-
-#### `bulk_set_timeline`
-
-Sets the timeline status for multiple task-week combinations in one call.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `entries` | `array` | yes | List of `{ task_id, week_start, status, quality? }` objects |
-
-Updated entities: `{ "timeline": [affected_task_ids] }`
-
----
-
-### Category: `task` — Task Management Tools
-
-**File:** `services/ai/infrastructure/tools/task_tools.py`
-
-#### `create_task`
-
-Creates a new task within the project.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `project_id` | `string` | yes | Injected from context |
-| `title` | `string` | yes | |
-| `description` | `string` | no | |
-| `priority` | `string` | no | `low`, `medium`, `high`, `critical` |
-| `assignee_id` | `string` | no | User UUID |
-| `oppm_objective_id` | `string` | no | Links task to an OPPM objective |
-| `due_date` | `string` | no | ISO date |
-| `parent_task_id` | `string` | no | Makes this a sub-task |
-
-Updated entities: `{ "tasks": ["new_uuid"] }`
-
----
-
-#### `update_task`
-
-Updates an existing task.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `task_id` | `string` | yes | |
-| `title` | `string` | no | |
-| `status` | `string` | no | `todo`, `in_progress`, `completed` |
-| `priority` | `string` | no | |
-| `progress` | `integer` | no | 0–100 |
-| `due_date` | `string` | no | ISO date |
-
-Updated entities: `{ "tasks": ["task_id"] }`
-
----
-
-#### `delete_task`
-
-Deletes a task.
-
-| Parameter | Type | Required |
-|---|---|---|
-| `task_id` | `string` | yes |
-
-Updated entities: `{ "tasks": ["deleted"] }`
-
----
-
-#### `assign_task`
-
-Assigns a user to a task.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `task_id` | `string` | yes | |
-| `assignee_id` | `string` | yes | User UUID |
-
-Updated entities: `{ "tasks": ["task_id"] }`
-
----
-
-#### `set_task_dependency`
-
-Adds or removes a dependency between two tasks.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `task_id` | `string` | yes | The dependent task |
-| `depends_on_task_id` | `string` | yes | The prerequisite task |
-| `action` | `string` | yes | `add` or `remove` |
-
-Updated entities: `{ "tasks": ["task_id"] }`
-
----
-
-### Category: `cost` — Project Cost And Risk Tools
-
-**File:** `services/ai/infrastructure/tools/cost_tools.py`
-
-#### `update_project_costs`
-
-Creates or updates a project cost line item.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `project_id` | `string` | yes | Injected from context |
-| `category` | `string` | yes | Cost category label |
-| `planned_amount` | `number` | no | |
-| `actual_amount` | `number` | no | |
-| `description` | `string` | no | |
-| `period` | `string` | no | Time period label |
-
-Updated entities: `{ "costs": ["project_id"] }`
-
----
-
-#### `create_risk`
-
-Creates a new risk entry for the project.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `project_id` | `string` | yes | Injected from context |
-| `description` | `string` | yes | |
-| `impact` | `string` | no | `low`, `medium`, `high` |
-| `likelihood` | `string` | no | `low`, `medium`, `high` |
-| `mitigation` | `string` | no | |
-
-Updated entities: `{ "risks": ["new_uuid"] }`
-
----
-
-#### `update_risk`
-
-Updates an existing risk.
-
-| Parameter | Type | Required |
-|---|---|---|
-| `risk_id` | `string` | yes |
-| `description` | `string` | no |
-| `impact` | `string` | no |
-| `likelihood` | `string` | no |
-| `mitigation` | `string` | no |
-
-Updated entities: `{ "risks": ["risk_id"] }`
-
----
-
-#### `create_deliverable`
-
-Creates a deliverable entry for the project.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `project_id` | `string` | yes | Injected from context |
-| `description` | `string` | yes | |
-| `item_number` | `integer` | no | Display order |
-
-Updated entities: `{ "deliverables": ["new_uuid"] }`
-
----
-
-#### `update_project`
-
-Updates top-level project fields.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `project_id` | `string` | yes | Injected from context |
-| `status` | `string` | no | `planning`, `in_progress`, `completed`, `on_hold`, `cancelled` |
-| `priority` | `string` | no | `low`, `medium`, `high`, `critical` |
-| `progress` | `integer` | no | 0–100 |
-| `description` | `string` | no | |
-
-Updated entities: `{ "project": ["project_id"] }`
-
----
-
-### Category: `read` — Read-Only Query Tools
-
-**File:** `services/ai/infrastructure/tools/read_tools.py`
-
-These tools never write to the database. Updated entities will always be `{}`.
-
-#### `get_project_summary`
-
-Returns a structured summary of the project: title, status, progress, budget, lead, active objectives, overdue tasks.
-
-| Parameter | Type | Required |
-|---|---|---|
-| `project_id` | `string` | yes |
-
----
-
-#### `get_task_details`
-
-Returns full detail for a single task: title, status, assignee, sub-tasks, dependencies, progress, timeline entries.
-
-| Parameter | Type | Required |
-|---|---|---|
-| `task_id` | `string` | yes |
-
----
-
-#### `search_tasks`
-
-Searches tasks by title or description substring.
-
-| Parameter | Type | Required | Notes |
-|---|---|---|---|
-| `project_id` | `string` | yes | Injected from context |
-| `query` | `string` | yes | Search term |
-| `status` | `string` | no | Filter by status |
-
-Returns a list of matching tasks with title, status, assignee, and due date.
-
----
-
-#### `get_risk_status`
-
-Returns all risks for the project with impact, likelihood, and mitigation.
-
-| Parameter | Type | Required |
-|---|---|---|
-| `project_id` | `string` | yes |
-
----
-
-#### `get_cost_breakdown`
-
-Returns the cost breakdown for the project: all line items with planned vs actual.
-
-| Parameter | Type | Required |
-|---|---|---|
-| `project_id` | `string` | yes |
-
----
-
-#### `get_team_workload`
-
-Returns all team members assigned to the project with their tasks, assigned hours, and skill tags.
-
-| Parameter | Type | Required |
-|---|---|---|
-| `project_id` | `string` | yes |
-
----
-
-## How To Add A New Tool
-
-1. Choose the appropriate module (`oppm_tools.py`, `task_tools.py`, `cost_tools.py`, `read_tools.py`) or create a new category module.
-
-2. Define a `ToolDefinition`:
+1. Choose the correct tool module, or add a new one if a new category is justified.
+2. Implement an async handler with the standard signature:
 
 ```python
-from services.ai.infrastructure.tools.base import ToolDefinition, ToolParam, ToolResult
-from services.ai.infrastructure.tools.registry import get_registry
-
-async def _my_tool_handler(project_id: str, param_a: str) -> ToolResult:
-    # ... implementation ...
-    return ToolResult(success=True, result={"key": "value"}, updated_entities={"tasks": []})
-
-MY_TOOL = ToolDefinition(
-    name="my_tool",
-    description="Brief description shown to the LLM",
-    category="task",
-    params=[
-        ToolParam(name="param_a", type="string", description="...", required=True),
-    ],
-    handler=_my_tool_handler,
-    requires_project=True,
-)
+async def _my_tool(
+    session: AsyncSession,
+    tool_input: dict,
+    project_id: str,
+    workspace_id: str,
+    user_id: str,
+) -> ToolResult:
+    ...
 ```
 
-3. Register it at the bottom of the module:
+3. Register it with `get_registry().register(ToolDefinition(...))`.
+4. Update this document and the high-level architecture docs if the public AI surface changed.
 
-```python
-get_registry().register(MY_TOOL)
-```
+## Related Files
 
-4. The registry auto-imports all tool modules on first `get_registry()` call, so no further wiring is needed.
-
-5. Update this document with the new tool's parameter table.
-
----
-
-## Schema Serialization Examples
-
-### OpenAI Format
-
-```json
-{
-  "type": "function",
-  "function": {
-    "name": "create_task",
-    "description": "Creates a new task within the project.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "title": { "type": "string", "description": "..." },
-        "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] }
-      },
-      "required": ["title"]
-    }
-  }
-}
-```
-
-### Anthropic Format
-
-```json
-{
-  "name": "create_task",
-  "description": "Creates a new task within the project.",
-  "input_schema": {
-    "type": "object",
-    "properties": { ... },
-    "required": ["title"]
-  }
-}
-```
-
-### XML Prompt Format (Ollama / Kimi)
-
-```xml
-<tools>
-  <tool>
-    <name>create_task</name>
-    <description>Creates a new task within the project.</description>
-    <parameters>
-      <parameter name="title" type="string" required="true">Task title</parameter>
-    </parameters>
-  </tool>
-</tools>
-```
+- `services/ai/infrastructure/tools/base.py`
+- `services/ai/infrastructure/tools/registry.py`
+- `services/ai/infrastructure/tools/oppm_tools.py`
+- `services/ai/infrastructure/tools/task_tools.py`
+- `services/ai/infrastructure/tools/cost_tools.py`
+- `services/ai/infrastructure/tools/read_tools.py`
+- `services/ai/infrastructure/tools/project_tools.py`
+- `services/ai/infrastructure/rag/agent_loop.py`

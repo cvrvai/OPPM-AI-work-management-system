@@ -117,7 +117,7 @@ flowchart TD
     M --> N[Build system prompt\ncontext + RAG + tool section]
     I --> N
 
-    N --> O[Agentic Tool Loop\nmax 5 iterations]
+    N --> O[Agentic Tool Loop\nmax 7 iterations]
     O --> P[LLM call\nnative tools or XML prompt]
     P --> Q{Tool calls\nin response?}
     Q -- No --> R[Final answer]
@@ -170,6 +170,7 @@ flowchart TD
 - Docker deployments use nginx rules in `gateway/nginx.conf`.
 - Those routing rules must stay aligned.
 - The internal AI analysis route is not part of the public frontend API surface.
+- The exact-match route `/internal/analyze-commits` is forwarded to the AI service for service-to-service use.
 
 ---
 
@@ -202,7 +203,7 @@ flowchart TD
     C -- Yes --> E[Parse tool_calls\nvia tool_parser.py]
     E --> F[Execute each tool\nvia registry.execute]
     F --> G[Collect tool results\nToolResult objects]
-    G --> H{Iteration count\n< max 5?}
+    G --> H{Iteration count\n< max 7?}
     H -- No --> I[Final summary call\nno tools included]
     I --> J[Return AgentLoopResult\nfinal_text + iterations + updated_entities]
     H -- Yes --> K[Inject results\nas next user turn text]
@@ -215,14 +216,14 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[AI service calls get_registry] --> B{Registry initialized?}
-    B -- No --> C[Auto-import oppm_tools\ntask_tools cost_tools read_tools]
-    C --> D[All 21 tools registered]
+    B -- No --> C[Auto-import oppm_tools\ntask_tools cost_tools\nread_tools project_tools]
+    C --> D[All 24 tools registered]
     B -- Yes --> D
-    D --> E{LLM provider\nnative or XML?}
+    D --> E{LLM provider\nnative or prompt-based?}
     E -- OpenAI / Anthropic --> F[to_openai_schema or\nto_anthropic_schema]
-    E -- Ollama / Kimi --> G[to_prompt_text\nXML tool section in prompt]
+    E -- Ollama / Kimi --> G[to_prompt_text\nprompt-text tool section]
     F --> H[LLM returns native tool_calls JSON]
-    G --> I[LLM returns XML tool tags in text]
+    G --> I[LLM returns JSON inside\n<tool_calls> tags]
     H --> J[parse_openai_tool_calls or\nparse_anthropic_tool_calls]
     I --> K[parse_xml_tool_calls]
     J --> L[registry.execute tool_name + args]

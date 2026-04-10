@@ -1,6 +1,6 @@
 # AI System Context
 
-Last verified: 2026-04-09
+Last verified: 2026-04-10
 
 ## Purpose
 
@@ -346,16 +346,17 @@ Update notes:
 
 What it does:
 
-- Workspace chat (RAG only, no tool execution)
-- Project chat with agentic tool loop — up to 5 LLM iterations, executing registry tools to read or write project data
+- Workspace chat with RAG plus workspace-scoped tool execution for write-capable members
+- Project chat with agentic tool loop — up to 7 LLM iterations, executing registry tools to read or write project data
 - Input guardrails (injection detection, length limit) and output guardrails (sensitive data scrub)
 - LLM-based query rewriting before retrieval for better recall
 - Semantic cache (Redis, cosine ≥ 0.92, TTL 300 s) to skip re-retrieval on repeated questions
-- Tool registry with 21 tools across four categories: oppm (5), task (5), cost (5), read (6)
+- Tool registry with 24 tools across five categories: oppm (5), task (5), cost (5), read (6), project (3)
 - Native LLM function calling for OpenAI and Anthropic; XML-prompt-based tool execution for Ollama and Kimi
 - Suggested project plans (generate + commit)
 - Weekly project summaries
 - OPPM fill assistance
+- Server-side file parsing and OPPM image extraction
 - Workspace reindexing for retrieval
 - RAG query endpoint
 - Per-workspace AI model configuration
@@ -364,20 +365,24 @@ What it does:
 How it works:
 
 1. `frontend/src/components/ChatPanel.tsx` opens in workspace or project context.
-2. Workspace chat posts to `/ai/chat` — RAG only, no tool loop.
+2. Workspace chat posts to `/ai/chat`:
+   - The route now requires write access because the implementation can execute tools.
+   - RAG context and memory are loaded across the workspace.
+   - The full tool registry is exposed so the assistant can create or update workspace/project data, including creating a project before adding objectives or tasks.
 3. Project chat posts to `/projects/{project_id}/ai/chat`:
    - Input guardrail checks message for injection patterns and length.
    - Query rewriting expands vague queries into richer search terms (skipped for queries > 300 chars or ≤ 2 words).
    - RAG pipeline: semantic cache lookup → classify → parallel vector + keyword + structured retrieval → RRF rerank → project boost → cache store.
    - Full project context (objectives, tasks, risks, costs, team, commits) is loaded using tiered windowing.
-   - Agentic tool loop runs up to 5 iterations: LLM call → parse tool_calls → execute via registry → inject results as next user turn → repeat until no tools or max iterations.
+   - Agentic tool loop runs up to 7 iterations: LLM call → parse tool calls → execute via registry → inject results as next user turn → optionally requery on low confidence → repeat until confident answer or max iterations.
    - Output guardrail scrubs sensitive patterns before the response is returned.
-   - Response includes `message`, `tool_calls`, `updated_entities`, and `iterations`.
+   - Response includes `message`, `tool_calls`, `updated_entities`, `iterations`, and `low_confidence`.
 4. Users can submit feedback via `POST /projects/{id}/ai/feedback` or `POST /workspaces/{ws}/ai/feedback`.
-5. Project quick actions call `suggest-plan`, `suggest-plan/commit`, and `weekly-summary`.
-6. Admins manage `ai_models` from `frontend/src/pages/Settings.tsx`.
-7. `POST /ai/reindex` rebuilds retrieval data for the workspace.
-8. `POST /rag/query` runs the RAG pipeline against workspace data and memory context.
+5. Project quick actions call `suggest-plan`, `suggest-plan/commit`, `weekly-summary`, and `oppm-fill`.
+6. File and image helpers call `parse-file` and `oppm-extract` on the AI service.
+7. Admins manage `ai_models` from `frontend/src/pages/Settings.tsx`.
+8. `POST /ai/reindex` rebuilds retrieval data for the workspace.
+9. `POST /rag/query` runs the RAG pipeline against workspace data and memory context.
 
 Frontend files:
 
@@ -401,7 +406,9 @@ Backend files:
 - `services/ai/infrastructure/tools/task_tools.py`
 - `services/ai/infrastructure/tools/cost_tools.py`
 - `services/ai/infrastructure/tools/read_tools.py`
+- `services/ai/infrastructure/tools/project_tools.py`
 - `services/ai/infrastructure/llm/tool_parser.py`
+- `services/ai/infrastructure/file_parser.py`
 - `shared/models/ai_model.py`
 - `shared/models/embedding.py`
 
@@ -415,8 +422,9 @@ Update notes:
 
 - AI model configuration is workspace-scoped.
 - RAG and chat behavior depend on indexed workspace data, not just live tables.
+- `GET /ai/chat/capabilities` now reflects write-capable tool access via `can_execute_tools` based on the caller's workspace role.
 - See [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md) for the full pipeline step sequence.
-- See [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for the tool registry and all 21 tools.
+- See [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for the tool registry and all 24 tools.
 - Feedback is written to `audit_log` with `action = "ai_feedback"` and `metadata` containing rating, comment, and related message content.
 
 ### 9. GitHub Integration, Commits, And Commit Analysis
@@ -547,17 +555,18 @@ What it does:
 How it works:
 
 1. `services/ai/infrastructure/tools/registry.py` owns the global `ToolRegistry` singleton.
-2. On first call to `get_registry()`, all four tool modules are auto-imported and their tools are registered.
+2. On first call to `get_registry()`, all five tool modules are auto-imported and their tools are registered.
 3. For OpenAI and Anthropic, `to_openai_schema()` and `to_anthropic_schema()` serialize the registry to native tool descriptors.
-4. For Ollama and Kimi, `to_prompt_text()` converts the registry into an XML tool section injected into the system prompt.
+4. For Ollama and Kimi, `to_prompt_text()` converts the registry into a prompt-text tool section that instructs the model to emit `<tool_calls>...</tool_calls>` JSON.
 5. `services/ai/infrastructure/rag/agent_loop.py` runs the loop:
    - Calls the LLM with the current message history and tool schemas.
-   - Parses `tool_calls` from the response (native JSON for OpenAI/Anthropic, `<tool>` XML tags for others).
+   - Parses `tool_calls` from the response (native JSON for OpenAI/Anthropic, JSON inside `<tool_calls>` tags for others).
    - Executes each requested tool via `registry.execute()`.
    - Injects the text results as a new user turn.
-   - Repeats up to 5 times or until the response contains no tool calls.
+   - Deduplicates identical tool retries and can trigger an extra RAG requery when confidence is low.
+   - Repeats up to 7 times or until the response contains a confident answer with no tool calls.
    - If the max is hit, makes a final summary call without tools.
-6. `AgentLoopResult` carries `final_text`, `all_tool_results`, `updated_entities`, and `iterations`.
+6. `AgentLoopResult` carries `final_text`, `all_tool_results`, `updated_entities`, `iterations`, and `low_confidence`.
 
 Tool categories:
 
@@ -565,8 +574,9 @@ Tool categories:
 |---|---|---|
 | `oppm` | 5 | `create_objective`, `update_objective`, `delete_objective`, `set_timeline_status`, `bulk_set_timeline` |
 | `task` | 5 | `create_task`, `update_task`, `delete_task`, `assign_task`, `set_task_dependency` |
-| `cost` | 5 | `update_project_costs`, `create_risk`, `update_risk`, `create_deliverable`, `update_project` |
+| `cost` | 5 | `update_project_costs`, `create_risk`, `update_risk`, `create_deliverable`, `update_project_metadata` |
 | `read` | 6 | `get_project_summary`, `get_task_details`, `search_tasks`, `get_risk_status`, `get_cost_breakdown`, `get_team_workload` |
+| `project` | 3 | `create_project`, `list_workspace_projects`, `update_project` |
 
 Backend files:
 
@@ -577,6 +587,7 @@ Backend files:
 - `services/ai/infrastructure/tools/task_tools.py`
 - `services/ai/infrastructure/tools/cost_tools.py`
 - `services/ai/infrastructure/tools/read_tools.py`
+- `services/ai/infrastructure/tools/project_tools.py`
 - `services/ai/infrastructure/rag/agent_loop.py`
 - `services/ai/infrastructure/llm/tool_parser.py`
 - `services/ai/infrastructure/llm/__init__.py`

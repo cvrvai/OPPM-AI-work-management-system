@@ -10,6 +10,8 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Projects } from '@/pages/Projects'
 import { ProjectDetail } from '@/pages/ProjectDetail'
 import { OPPMView } from '@/pages/OPPMView'
+import { AgileBoard } from '@/pages/AgileBoard'
+import { WaterfallView } from '@/pages/WaterfallView'
 import { Commits } from '@/pages/Commits'
 import { Settings } from '@/pages/Settings'
 import { AcceptInvite } from '@/pages/AcceptInvite'
@@ -81,6 +83,8 @@ export default function App() {
             <Route path="projects" element={<Projects />} />
             <Route path="projects/:id" element={<ProjectDetail />} />
             <Route path="projects/:id/oppm" element={<OPPMView />} />
+            <Route path="projects/:id/agile" element={<AgileBoard />} />
+            <Route path="projects/:id/waterfall" element={<WaterfallView />} />
             <Route path="team" element={<Team />} />
             <Route path="invitations" element={<Invitations />} />
             <Route path="commits" element={<Commits />} />

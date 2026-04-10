@@ -70,6 +70,7 @@ export interface PaginatedResponse<T> {
 // ── Project ──
 export type ProjectStatus = 'planning' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled'
 export type Priority = 'low' | 'medium' | 'high' | 'critical'
+export type Methodology = 'agile' | 'waterfall' | 'hybrid' | 'oppm'
 
 export interface Project {
   id: string
@@ -88,6 +89,7 @@ export interface Project {
   deadline: string | null
   end_date: string | null
   metadata?: Record<string, unknown>
+  methodology: Methodology
   lead_id: string | null
   lead?: WorkspaceMember
   created_at: string

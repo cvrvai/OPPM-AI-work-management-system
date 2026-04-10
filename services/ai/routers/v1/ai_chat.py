@@ -26,10 +26,10 @@ router = APIRouter()
 @router.post("/workspaces/{workspace_id}/ai/chat", response_model=ChatResponse)
 async def workspace_chat_route(
     data: ChatRequest,
-    ws: WorkspaceContext = Depends(get_workspace_context),
+    ws: WorkspaceContext = Depends(require_write),
     session: AsyncSession = Depends(get_session),
 ):
-    """Workspace-level AI chat — cross-project questions, no tool execution."""
+    """Workspace-level AI chat — cross-project questions with workspace-scoped tool execution."""
     return await workspace_chat(
         session=session,
         workspace_id=ws.workspace_id,
@@ -49,7 +49,7 @@ async def capabilities_route(
     count = await vector_repo.count_by_workspace(ws.workspace_id)
     return CapabilitiesResponse(
         has_project=False,
-        can_execute_tools=False,
+        can_execute_tools=ws.can_write,
         indexed_documents=count,
     )
 

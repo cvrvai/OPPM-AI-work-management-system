@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
-from shared.schemas.common import ProjectStatus, Priority
+from shared.schemas.common import ProjectStatus, Priority, Methodology
 
 
 class ProjectCreate(BaseModel):
@@ -19,6 +19,7 @@ class ProjectCreate(BaseModel):
     end_date: Optional[str] = None
     lead_id: Optional[str] = None
     status: ProjectStatus = ProjectStatus.planning
+    methodology: Methodology = Methodology.oppm
 
     @field_validator('description', mode='before')
     @classmethod
@@ -41,6 +42,7 @@ class ProjectUpdate(BaseModel):
     deadline: Optional[str] = None
     end_date: Optional[str] = None
     lead_id: Optional[str] = None
+    methodology: Optional[Methodology] = None
     metadata: Optional[dict] = None
 
 

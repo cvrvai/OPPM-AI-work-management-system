@@ -328,18 +328,21 @@ User-scoped, not workspace-scoped.
 | `POST` | `/api/v1/workspaces/{workspace_id}/ai/models` | Yes | Admin | Adds a model. Allowed providers: `ollama`, `anthropic`, `openai`, `kimi`, `custom`. |
 | `PUT` | `/api/v1/workspaces/{workspace_id}/ai/models/{model_id}/toggle` | Yes | Admin | Toggles `is_active`. |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/ai/models/{model_id}` | Yes | Admin | Deletes a model config. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/ai/oppm-extract` | Yes | Member | Extracts OPPM JSON from an uploaded image without saving it. |
 
 ### Chat And Planning
 
 | Method | Path | Auth | Role | Notes |
 |---|---|---|---|---|
-| `POST` | `/api/v1/workspaces/{workspace_id}/ai/chat` | Yes | Member | Workspace-level chat. |
-| `GET` | `/api/v1/workspaces/{workspace_id}/ai/chat/capabilities` | Yes | Member | Returns indexed-document count and chat capability flags. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/ai/chat` | Yes | Write | Workspace-level chat. The current implementation can execute workspace-scoped tools. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/ai/chat/capabilities` | Yes | Member | Returns indexed-document count and capability flags. `can_execute_tools` depends on the caller's workspace role. |
 | `POST` | `/api/v1/workspaces/{workspace_id}/ai/reindex` | Yes | Admin | Reindexes workspace data for RAG. |
-| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat` | Yes | Write | Project-scoped assistant chat. Response includes `iterations` (int) indicating how many agentic tool-loop iterations ran. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/ai/parse-file` | Yes | Member | Extracts text from supported uploaded files. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat` | Yes | Write | Project-scoped assistant chat. Response includes `iterations` and `low_confidence` for the TAOR loop result. |
 | `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan` | Yes | Write | Generates a suggested OPPM plan. |
 | `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/suggest-plan/commit` | Yes | Write | Commits a previously suggested plan. |
 | `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/weekly-summary` | Yes | Member | Generates a project weekly summary. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/oppm-fill` | Yes | Member | Returns AI-assisted OPPM spreadsheet fill suggestions. |
 
 ### Feedback
 

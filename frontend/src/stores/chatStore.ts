@@ -31,6 +31,17 @@ export function getContextKey(
 }
 
 const MAX_HISTORY = 120
+const MAX_PAST_SESSIONS = 20
+
+export interface PanelPosition { x: number; y: number }
+export interface PanelSize { width: number; height: number }
+
+export const DEFAULT_PANEL_SIZE: PanelSize = { width: 420, height: 600 }
+
+export interface PastSession {
+  messages: ChatMessage[]
+  savedAt: string   // ISO timestamp
+}
 
 interface ChatState {
   isOpen: boolean
@@ -41,6 +52,12 @@ interface ChatState {
   unreadCount: number
   /** Persisted per-context message histories keyed by getContextKey() */
   contextHistories: Record<string, ChatMessage[]>
+  /** Persisted past sessions per context key (max MAX_PAST_SESSIONS each) */
+  pastSessions: Record<string, PastSession[]>
+  /** Persisted floating panel position (null = use default right-edge on first mount) */
+  panelPosition: PanelPosition | null
+  /** Persisted floating panel size */
+  panelSize: PanelSize
 
   toggle: () => void
   open: () => void
@@ -56,6 +73,13 @@ interface ChatState {
   clearContextHistory: (key: string) => void
   incrementUnread: () => void
   resetUnread: () => void
+  setPanelGeometry: (pos: PanelPosition, size: PanelSize) => void
+  /** Save current messages as a past session and start a new empty chat */
+  saveAndNewChat: () => void
+  /** Restore a past session by index into the current active messages */
+  restoreSession: (contextKey: string, index: number) => void
+  /** Delete a specific past session */
+  deleteSession: (contextKey: string, index: number) => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -68,6 +92,9 @@ export const useChatStore = create<ChatState>()(
       projectTitle: null,
       unreadCount: 0,
       contextHistories: {},
+      pastSessions: {},
+      panelPosition: null,
+      panelSize: DEFAULT_PANEL_SIZE,
 
       toggle: () => {
         const wasOpen = get().isOpen
@@ -147,11 +174,55 @@ export const useChatStore = create<ChatState>()(
       incrementUnread: () =>
         set((s) => ({ unreadCount: s.unreadCount + 1 })),
       resetUnread: () => set({ unreadCount: 0 }),
+
+      setPanelGeometry: (pos, size) => set({ panelPosition: pos, panelSize: size }),
+
+      saveAndNewChat: () => {
+        set((s) => {
+          const key = getContextKey(s.contextType, s.projectId)
+          if (s.messages.length === 0) return {}
+          const existing = s.pastSessions[key] ?? []
+          const updated = [
+            { messages: s.messages.slice(-MAX_HISTORY), savedAt: new Date().toISOString() },
+            ...existing,
+          ].slice(0, MAX_PAST_SESSIONS)
+          const histories = { ...s.contextHistories }
+          delete histories[key]
+          return {
+            messages: [],
+            unreadCount: 0,
+            contextHistories: histories,
+            pastSessions: { ...s.pastSessions, [key]: updated },
+          }
+        })
+      },
+
+      restoreSession: (contextKey, index) => {
+        set((s) => {
+          const sessions = s.pastSessions[contextKey] ?? []
+          const session = sessions[index]
+          if (!session) return {}
+          return { messages: session.messages }
+        })
+      },
+
+      deleteSession: (contextKey, index) => {
+        set((s) => {
+          const sessions = [...(s.pastSessions[contextKey] ?? [])]
+          sessions.splice(index, 1)
+          return { pastSessions: { ...s.pastSessions, [contextKey]: sessions } }
+        })
+      },
     }),
     {
       name: 'oppm-chat-history',
-      // Only persist conversation histories — not transient UI state
-      partialize: (s) => ({ contextHistories: s.contextHistories }),
+      // Only persist conversation histories + panel geometry — not transient UI state
+      partialize: (s) => ({
+        contextHistories: s.contextHistories,
+        pastSessions: s.pastSessions,
+        panelPosition: s.panelPosition,
+        panelSize: s.panelSize,
+      }),
       // Restore messages for the active context after hydration from localStorage
       onRehydrateStorage: () => (state) => {
         if (state) {

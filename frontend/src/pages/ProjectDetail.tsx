@@ -283,12 +283,32 @@ export function ProjectDetail() {
             )}
           </div>
         </div>
-        <Link
-          to={`/projects/${id}/oppm`}
-          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark transition-colors whitespace-nowrap"
-        >
-          <LayoutGrid className="h-4 w-4" /> OPPM View
-        </Link>
+        <div className="flex items-center gap-2">
+          {(!p.methodology || p.methodology === 'oppm' || p.methodology === 'hybrid') && (
+            <Link
+              to={`/projects/${id}/oppm`}
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark transition-colors whitespace-nowrap"
+            >
+              <LayoutGrid className="h-4 w-4" /> OPPM View
+            </Link>
+          )}
+          {(p.methodology === 'agile' || p.methodology === 'hybrid') && (
+            <Link
+              to={`/projects/${id}/agile`}
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors whitespace-nowrap"
+            >
+              <LayoutGrid className="h-4 w-4" /> Agile Board
+            </Link>
+          )}
+          {(p.methodology === 'waterfall' || p.methodology === 'hybrid') && (
+            <Link
+              to={`/projects/${id}/waterfall`}
+              className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 transition-colors whitespace-nowrap"
+            >
+              <LayoutGrid className="h-4 w-4" /> Waterfall Phases
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* -- KPI cards -- */}

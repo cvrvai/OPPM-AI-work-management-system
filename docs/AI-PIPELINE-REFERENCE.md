@@ -1,342 +1,350 @@
 # AI Pipeline Reference
 
-Last updated: 2026-04-09
+Last updated: 2026-04-10
 
 ## Purpose
 
-This document describes every component of the AI service pipeline in `services/ai/`.
+This document describes the current AI-service execution pipeline in `services/ai/`.
 
-Use this file when you need to understand, change, or extend any part of the AI chat flow, the RAG retrieval stages, the agentic loop, or the supporting infrastructure (guardrails, cache, rewriting).
+Use it when changing chat behavior, RAG retrieval, tool execution, provider adapters, or the boundaries between workspace chat, project chat, and commit analysis.
 
-## System Diagram
+## Runtime Shape
 
-```
+The AI service is a FastAPI microservice with two main chat modes plus one internal analysis path:
+
+- Project chat: full project context plus TAOR tool loop
+- Workspace chat: workspace context plus TAOR tool loop with workspace-scoped/project-creation tools
+- Internal commit analysis: git service calls `/internal/analyze-commits` with `X-Internal-API-Key`
+
+## End-To-End Flow
+
+```text
 User message
-    │
-    ▼
-[Input Guardrail]          guardrails.py — check_input()
-    │ safe
-    ▼
-[Query Rewriting]          query_rewriter.py — rewrite_query()
-    │ expanded query
-    ▼
-[Embed Query]              LLM embed call
-    │ embedding vector
-    ▼
-[Semantic Cache Lookup]    semantic_cache.py — SemanticCache.lookup()
-    │ MISS                    └── HIT → skip to system prompt build
-    ▼
-[Query Classifier]         classifier.py
-    │ retriever labels
-    ▼
-[Parallel Retrieval]       retriever.py
-  ├── vector retriever      pgvector cosine search
-  ├── keyword retriever     full-text search
-  └── structured retriever  direct DB queries
-    │ candidate sets
-    ▼
-[RRF Reranker]             reranker.py — Reciprocal Rank Fusion
-    │ merged ranked list
-    ▼
-[Project Boost]            up-rank results matching project_id
-    │ boosted context
-    ▼
-[Semantic Cache Store]     semantic_cache.py — SemanticCache.store()
-    │ context string
-    ▼
-[Build System Prompt]      ai_chat_service.py
-  ├── project context       _build_project_context() — tiered windowing
-  ├── RAG context           from retrieval above
-  └── tool section          registry.to_*_schema() or registry.to_prompt_text()
-    │ populated prompt
-    ▼
-[Agentic Tool Loop]        agent_loop.py — run_agent_loop()
-  ├── LLM call
-  ├── Parse tool_calls      tool_parser.py
-  ├── Execute tools         registry.execute()
-  └── Inject results → repeat (max 5 iterations)
-    │ final_text
-    ▼
-[Output Guardrail]         guardrails.py — sanitize_output()
-    │ scrubbed text
-    ▼
-[Audit Log]                AuditRepository — chat entry + iterations
-    │
-    ▼
-Response: message + tool_calls + updated_entities + iterations
+  -> Input guardrail                    guardrails.py
+  -> Conversation memory load          memory.py
+  -> Query rewriting                   query_rewriter.py
+  -> Query embedding                   embedding.py
+  -> Semantic cache lookup             semantic_cache.py
+      -> HIT  -> reuse cached context
+      -> MISS -> continue
+  -> Query classification              agent.py
+  -> Parallel retrievers               retrievers/
+      -> vector
+      -> keyword
+      -> structured
+  -> RRF rerank                        reranker.py
+  -> Project boost                     rag_service.py
+  -> Context formatting                rag_service.py
+  -> Semantic cache store              semantic_cache.py
+  -> Prompt construction               ai_chat_service.py
+  -> TAOR agent loop                   agent_loop.py
+      -> LLM call
+      -> parse tool calls
+      -> execute tools
+      -> inject observations
+      -> optional requery
+  -> Output guardrail                  guardrails.py
+  -> Audit log                         AuditRepository
+  -> Response                          message + tool_calls + updated_entities + iterations + low_confidence
 ```
 
----
+## Chat Modes
 
-## Component Reference
+### Project Chat
 
-### Input Guardrail
+Entry route:
 
-**File:** `services/ai/infrastructure/rag/guardrails.py`
+- `POST /api/v1/workspaces/{workspace_id}/projects/{project_id}/ai/chat`
 
-**Function:** `check_input(text: str) -> tuple[bool, str]`
+Project chat builds:
 
-Returns `(True, "")` if the message passes, or `(False, reason)` if it is blocked.
+- full project context from objectives, tasks, costs, risks, deliverables, forecasts, team, and recent commits
+- RAG context from retrieval
+- tool definitions from the registry
 
-Blocked conditions:
+Project chat passes the current `project_id` into tool execution automatically.
 
-| Condition | Detail |
-|---|---|
-| Message length | > 4000 characters |
-| Injection patterns | `<\|token\|>`, `[INST]`, `<<SYS>>`, `ignore previous instructions`, `disregard`, `jailbreak`, `roleplay as`, `pretend you are`, `bypass restrictions` |
+### Workspace Chat
 
-If the check fails, the route returns HTTP 400 with the reason string.
+Entry route:
 
----
+- `POST /api/v1/workspaces/{workspace_id}/ai/chat`
 
-### Query Rewriting
+Workspace chat builds:
 
-**File:** `services/ai/infrastructure/rag/query_rewriter.py`
+- workspace name and project list
+- workspace-scoped RAG context
+- the full tool registry
 
-**Function:** `rewrite_query(query: str, models: list, project_title: str = "") -> str`
+Workspace chat uses the same TAOR loop, but without an implicit current `project_id`. Tools that need a project can still run when the model supplies a `project_id` explicitly, which is why the route now requires write access.
 
-Skipped if:
+### Internal Commit Analysis
 
-- query is longer than 300 characters (already specific enough)
-- query is 2 words or fewer (likely a lookup term)
-- no models are provided
+Entry route:
 
-When used, it calls the LLM with `_REWRITE_PROMPT` to expand the query into multiple related search phrases. Returns the original query on any failure.
+- `POST /internal/analyze-commits`
 
----
+This path is protected by `X-Internal-API-Key` and is called by the git service after webhook ingestion.
 
-### Embedding
+## RAG Pipeline
 
-Performed by `rag_service.py` using the first available LLM model's embed endpoint.
+Primary entry point:
 
-The resulting vector is stored as a 1536-dimensional float array and used for both:
-- vector retrieval (cosine similarity against `document_embeddings`)
-- semantic cache lookup and storage
+- `services/ai/services/rag_service.py` -> `retrieve_with_rag_pipeline()`
 
----
+Return type:
 
-### Semantic Cache
+- `RAGResult(context, sources, memory_context, chunks)`
 
-**File:** `services/ai/infrastructure/rag/semantic_cache.py`
+### Stage 1: Input Guardrail
 
-**Class:** `SemanticCache`
+File:
 
-| Property | Value |
-|---|---|
-| Backend | Redis via `shared/redis_client.py` |
-| Key prefix | `ai:sem_cache:` |
-| Similarity threshold | cosine ≥ 0.92 |
-| TTL | 300 seconds |
-| Fail-safe | returns `None` if Redis unavailable |
+- `services/ai/infrastructure/rag/guardrails.py`
 
-**`lookup(query_embedding, workspace_id) -> str | None`**
+`check_input()` blocks:
 
-Scans all cached keys for the workspace, computes cosine similarity, and returns the stored context string if the best match exceeds the threshold.
+- prompt-injection style strings
+- oversized input above 4000 characters
 
-**`store(query_embedding, workspace_id, context) -> None`**
+### Stage 2: Conversation Memory
 
-Serializes the embedding and context and writes to Redis with the configured TTL.
+File:
 
-**Module-level:** `get_semantic_cache()` returns the singleton instance.
+- `services/ai/infrastructure/rag/memory.py`
 
----
+`load_memory()` reads recent AI interactions from `audit_log` and returns a trimmed context block.
 
-### Query Classifier
+### Stage 3: Query Rewriting
 
-**File:** `services/ai/infrastructure/rag/classifier.py`
+File:
 
-Analyzes the rewritten query and decides which retrieval paths to activate. Returns a set of retriever labels (e.g., `{"vector", "keyword", "structured"}`).
+- `services/ai/infrastructure/rag/query_rewriter.py`
 
----
+`rewrite_query()` expands vague queries when:
 
-### Retrieval
+- a model list is available
+- the query is not already long or very short
 
-**File:** `services/ai/infrastructure/rag/retriever.py`
+### Stage 4: Embedding
 
-Three retrievers run in parallel:
+File:
 
-| Retriever | Method | Source |
-|---|---|---|
-| Vector | pgvector cosine search | `document_embeddings` |
-| Keyword | Full-text search | `document_embeddings` / indexed text |
-| Structured | Direct DB queries | Projects, tasks, OPPM tables via `oppm_repo.py` |
+- `services/ai/infrastructure/embedding.py`
 
----
+`generate_embedding()` creates the query vector used for:
 
-### RRF Reranker
+- semantic cache lookup
+- vector retrieval
 
-**File:** `services/ai/infrastructure/rag/reranker.py`
+### Stage 5: Semantic Cache
 
-Merges the three retriever result sets using Reciprocal Rank Fusion (RRF):
+File:
 
-$$score_d = \sum_{r \in R} \frac{1}{k + rank_r(d)}$$
+- `services/ai/infrastructure/rag/semantic_cache.py`
 
-where $k = 60$ by default. Higher scores indicate stronger cross-retriever agreement.
+Current settings:
 
-Project-specific results receive an additional boost when they match the active `project_id`.
+- backend: Redis
+- threshold: cosine similarity `>= 0.92`
+- TTL: `300` seconds
+- key prefix: `ai:sem_cache:`
 
----
+Cache lookup is attempted before retrieval. Cache store happens after new context is built.
 
-### Project Context Builder
+### Stage 6: Query Classification
 
-**File:** `services/ai/services/ai_chat_service.py` — `_build_project_context()`
+File:
 
-Loads the full OPPM data tree for the project and formats it as a structured text block. Uses tiered windowing to stay within model context limits.
+- `services/ai/infrastructure/rag/agent.py`
 
-| Tier | Token budget | Strategy |
-|---|---|---|
-| TIER1 | 16 000 | Full data — objectives, tasks, timeline, costs, risks, deliverables, forecasts, team, commits |
-| TIER2 | 12 000 | Truncate commits and recent analyses |
-| Over TIER2 | 4 000 budget | Keep objectives, tasks, costs, team only |
+`classify_query()` is pattern-based and returns an ordered list of retrievers, for example:
 
-Data sources (via `oppm_repo.py`):
+- `vector`
+- `keyword`
+- `structured`
 
-- `oppm_objectives` with sub-objectives
-- `tasks` with assignees, owners, dependencies
-- `oppm_timeline_entries`
-- `project_costs`
-- `oppm_deliverables`
-- `oppm_forecasts`
-- `oppm_risks`
-- `workspace_members` (team)
-- `commit_analyses` (recent)
+### Stage 7: Parallel Retrieval
 
----
+Files:
 
-### Agentic Tool Loop
+- `services/ai/infrastructure/rag/retrievers/vector_retriever.py`
+- `services/ai/infrastructure/rag/retrievers/keyword_retriever.py`
+- `services/ai/infrastructure/rag/retrievers/structured_retriever.py`
 
-**File:** `services/ai/infrastructure/rag/agent_loop.py`
+Retrievers run in parallel and return `RetrievedChunk` objects.
 
-**Function:** `run_agent_loop(messages, models, tools, anthropic_tools, registry, project_id, context) -> AgentLoopResult`
+### Stage 8: Reranking And Formatting
 
-Loop logic:
+Files:
 
+- `services/ai/infrastructure/rag/reranker.py`
+- `services/ai/services/rag_service.py`
+
+The AI service:
+
+- merges retriever results with Reciprocal Rank Fusion
+- boosts project-specific matches when `project_id` is present
+- formats the final retrieved context string
+
+## Project Context Builder
+
+Primary entry point:
+
+- `services/ai/services/ai_chat_service.py` -> `_build_project_context()`
+
+The project-context builder loads:
+
+- project metadata
+- objectives and sub-objectives
+- tasks with assignees, owners, dependencies, and timeline state
+- cost summary and breakdown
+- deliverables, forecasts, and risks
+- team members and skills
+- recent commits and analyses
+
+Current context budgets are character-based:
+
+- max context chars: `32000`
+- tier 1 budget: `16000`
+- tier 2 budget: `12000`
+- tier 3 budget: `4000`
+
+## TAOR Agent Loop
+
+Primary entry point:
+
+- `services/ai/infrastructure/rag/agent_loop.py` -> `run_agent_loop()`
+
+TAOR means:
+
+- Think
+- Act
+- Observe
+- Retry
+
+### Loop Behavior
+
+Each iteration can:
+
+- inject a `<think>` scratchpad block
+- parse tool calls from native provider output or `<tool_calls>...</tool_calls>` JSON
+- execute tools via the registry
+- inject tool results back into the conversation
+- trigger a focused RAG requery when confidence is low
+
+Current loop controls:
+
+- `MAX_ITERATIONS = 7`
+- stop threshold: confidence `>= 4`
+- requery threshold: confidence `<= 2`
+- requery begins after iteration `2`
+
+If the maximum is reached, the service requests a final summary call without more tool execution.
+
+### Loop Result
+
+`AgentLoopResult` contains:
+
+- `final_text: str`
+- `all_tool_results: list[dict]`
+- `updated_entities: list[str]`
+- `iterations: int`
+- `low_confidence: bool`
+
+## Tool Call Parsing
+
+File:
+
+- `services/ai/infrastructure/llm/tool_parser.py`
+
+Supported parsing modes:
+
+- OpenAI native tool calls: `parse_openai_tool_calls()`
+- Anthropic native tool calls: `parse_anthropic_tool_calls()`
+- Prompt-based tool calls: `parse_xml_tool_calls()`
+
+Prompt-based mode expects a JSON array inside:
+
+```xml
+<tool_calls>
+[{"tool": "create_project", "input": {"title": "Example"}}]
+</tool_calls>
 ```
-for iteration in range(1, MAX_ITERATIONS + 1):
-    response = call_with_fallback_tools(models, messages, tools, anthropic_tools)
-    tool_calls = parse from response
-    if not tool_calls:
-        break
-    results = [registry.execute(tc.name, tc.args, project_id) for tc in tool_calls]
-    inject results as next user message
-    collect updated_entities
 
-if iteration == MAX_ITERATIONS:
-    make final summary call without tools
-```
+## Tool Registry Injection
 
-**`AgentLoopResult`** fields:
+Files:
 
-| Field | Type | Description |
-|---|---|---|
-| `final_text` | `str` | The LLM's final answer |
-| `all_tool_results` | `list[ToolResult]` | All tool executions across all iterations |
-| `updated_entities` | `dict` | Entity types changed (e.g., `{"tasks": ["uuid1"]}`) |
-| `iterations` | `int` | How many loop iterations ran |
+- `services/ai/infrastructure/tools/registry.py`
+- `services/ai/infrastructure/tools/base.py`
 
----
+Provider behavior:
 
-### Output Guardrail
-
-**File:** `services/ai/infrastructure/rag/guardrails.py`
-
-**Function:** `sanitize_output(text: str) -> str`
-
-Replaces sensitive patterns in the response text with `[REDACTED]`.
-
-Patterns detected:
-
-| Pattern | Regex |
-|---|---|
-| API keys | `api[_-]?key\s*[:=]\s*\S+` |
-| Passwords | `password\s*[:=]\s*\S+` |
-| JWT tokens | `ey[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.?[A-Za-z0-9_-]*` |
-| ENV vars | `[A-Z_]{4,}\s*=\s*\S+` |
-| Secrets | `secret\s*[:=]\s*\S+` |
-
----
-
-### Audit Log
-
-After every project chat completion, an `audit_log` entry is written with:
-
-- `action`: `"ai_chat"`
-- `user_id`: the requester
-- `workspace_id`: the workspace
-- `metadata`: `{ model, iterations, tool_count, project_id }`
-
-User feedback submissions are logged separately with `action = "ai_feedback"`.
-
----
+- OpenAI and Anthropic use native schema serialization
+- Ollama and Kimi receive a prompt-text tool section with `<tool_calls>` usage instructions
 
 ## LLM Adapter Layer
 
-**Files:** `services/ai/infrastructure/llm/`
+Files:
 
-### `LLMAdapter` Base Class
+- `services/ai/infrastructure/llm/base.py`
+- `services/ai/infrastructure/llm/__init__.py`
+- provider adapters under `services/ai/infrastructure/llm/`
 
-Located in `base.py`. Defines the contract:
+Base adapter contract:
 
-- `chat(messages, model_name, **kwargs) -> LLMResponse`
-- `embed(text, model_name) -> list[float]`
-- `call_with_tools(messages, model_name, tools) -> LLMResponse` — default concatenates tool descriptions into the prompt
+- `call(model_id, prompt, **kwargs) -> LLMResponse`
+- `call_json(model_id, prompt, **kwargs) -> dict | None`
+- `call_with_tools(model_id, messages, tools=None, **kwargs) -> LLMResponse`
+- `health_check(**kwargs) -> bool`
 
-`LLMResponse` carries:
+Fallback helpers:
 
-| Field | Type |
-|---|---|
-| `text` | `str` |
-| `tool_calls` | `list[dict]` |
-| `raw_response` | `dict` |
+- `call_with_fallback()`
+- `call_with_fallback_tools()`
 
-### Native Tool Providers
+Native tool providers:
 
-`NATIVE_TOOL_PROVIDERS = {"openai", "anthropic"}` (in `__init__.py`).
+- `openai`
+- `anthropic`
 
-- **OpenAI** (`openai.py`) — uses `tools` parameter with `tool_choice: "auto"`.
-- **Anthropic** (`anthropic.py`) — uses `tools` parameter and extracts the system message separately.
+## Output Guardrail And Audit
 
-### XML-Prompt Providers
+Files:
 
-- **Ollama** and **Kimi** fall back to injecting tool descriptions as an XML block in the system prompt.
-- `to_prompt_text()` from the registry generates the XML tool list.
-- `parse_xml_tool_calls()` in `tool_parser.py` extracts `<tool>` tags from the response.
+- `services/ai/infrastructure/rag/guardrails.py`
+- `services/ai/repositories/notification_repo.py`
 
-### Tool Parser
+`sanitize_output()` scrubs sensitive patterns before the response is returned.
 
-**File:** `services/ai/infrastructure/llm/tool_parser.py`
+Project chat writes an `audit_log` entry with:
 
-Three parser functions:
+- `action = "ai_chat"`
+- `operation = "chat"`
+- `project_id`
+- truncated user message and AI response
+- `tool_calls_count`
+- `agent_iterations`
 
-| Function | Use case |
-|---|---|
-| `parse_xml_tool_calls(text)` | Ollama / Kimi responses |
-| `parse_openai_tool_calls(response_data)` | OpenAI native function calling |
-| `parse_anthropic_tool_calls(response_data)` | Anthropic native tool use |
+Workspace chat uses `operation = "workspace_chat"` with the same iteration and tool-count metadata.
 
-All return `(clean_text, list_of_tool_call_dicts)`.
+## Related Files
 
----
+- `services/ai/main.py`
+- `services/ai/routers/v1/ai_chat.py`
+- `services/ai/routers/v1/ai.py`
+- `services/ai/routers/v1/rag.py`
+- `services/ai/routers/internal.py`
+- `services/ai/services/ai_chat_service.py`
+- `services/ai/services/rag_service.py`
+- `services/ai/services/ai_analyzer.py`
+- `services/ai/services/document_indexer.py`
+- `services/ai/infrastructure/rag/agent_loop.py`
+- `services/ai/infrastructure/tools/registry.py`
 
-## RAG Service Entry Point
+## Known Architectural Notes
 
-**File:** `services/ai/services/rag_service.py`
-
-**Function:** `retrieve_with_rag_pipeline(query, workspace_id, project_id, models, project_title) -> str`
-
-Orchestrates steps 1–10 of the full pipeline. Called by `ai_chat_service.py` before the system prompt is built.
-
----
-
-## Configuration
-
-| Parameter | Default | Configured In |
-|---|---|---|
-| Max agentic iterations | 5 | `agent_loop.py` `MAX_ITERATIONS` |
-| Semantic cache threshold | 0.92 | `semantic_cache.py` `SIMILARITY_THRESHOLD` |
-| Semantic cache TTL | 300 s | `semantic_cache.py` `CACHE_TTL` |
-| Query rewrite max length | 300 chars | `query_rewriter.py` |
-| Project context TIER1 | 16 000 tokens | `ai_chat_service.py` `_TIER1` |
-| Project context TIER2 | 12 000 tokens | `ai_chat_service.py` `_TIER2` |
-| Input max length | 4 000 chars | `guardrails.py` |
-| Redis key prefix | `ai:sem_cache:` | `semantic_cache.py` |
+- The AI service shares the same database and ORM layer as the other services.
+- Tool execution is a real write path against shared tables, not a simulated plan-only layer.
+- Gateway parity matters because both native and nginx gateways need to forward `/internal/analyze-commits` correctly.

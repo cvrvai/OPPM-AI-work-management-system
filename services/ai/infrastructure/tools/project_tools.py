@@ -43,9 +43,16 @@ async def _create_project(
         "workspace_id": workspace_id,
         "title": title,
     }
-    for field in ("description", "status", "priority", "budget"):
+    for field in ("description", "status", "priority", "budget",
+                    "methodology", "objective_summary", "deliverable_output", "project_code"):
         if field in tool_input and tool_input[field]:
             data[field] = tool_input[field]
+
+    if "planning_hours" in tool_input and tool_input["planning_hours"] is not None:
+        try:
+            data["planning_hours"] = float(tool_input["planning_hours"])
+        except (TypeError, ValueError):
+            pass
 
     # Normalise legacy status value the LLM may still send
     if data.get("status") == "active":
@@ -167,6 +174,12 @@ _registry.register(ToolDefinition(
         ToolParam("budget", "number", "Total budget in currency units", required=False),
         ToolParam("start_date", "string", "Start date (YYYY-MM-DD)", required=False),
         ToolParam("deadline", "string", "Deadline date (YYYY-MM-DD)", required=False),
+        ToolParam("methodology", "string", "Project methodology", required=False,
+                  enum=["agile", "waterfall", "hybrid", "oppm"]),
+        ToolParam("objective_summary", "string", "One-line goal statement for the project", required=False),
+        ToolParam("deliverable_output", "string", "What the project produces as its final output", required=False),
+        ToolParam("planning_hours", "number", "Estimated total effort in hours", required=False),
+        ToolParam("project_code", "string", "Short project identifier e.g. PRJ-204", required=False),
     ],
     handler=_create_project,
 ))

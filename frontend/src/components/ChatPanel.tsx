@@ -16,12 +16,12 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, parseFile } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { useChatStore, getContextKey, type FileAttachment } from '@/stores/chatStore'
+import { useChatStore, getContextKey, type FileAttachment, type PastSession, DEFAULT_PANEL_SIZE } from '@/stores/chatStore'
 import {
   X, Send, Loader2, Bot, User, Sparkles,
   AlertTriangle, CheckCircle2, Lightbulb,
   FolderKanban, Building2, Paperclip, FileText,
-  ImageIcon, File, Trash2, Clock,
+  ImageIcon, File, Clock, History, MessageSquarePlus, ChevronLeft, Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -128,7 +128,8 @@ export function ChatPanel() {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
 
-  // Track how many messages were restored from history when this context was opened
+  // Track if currently dragging/resizing to suppress text selection
+  const [isDragging, setIsDragging] = useState(false)
   const [sessionStartIdx, setSessionStartIdx] = useState(0)
   const prevContextKeyRef = useRef('')
 
@@ -145,6 +146,31 @@ export function ChatPanel() {
   const addMessage = useChatStore((s) => s.addMessage)
   const clearContextHistory = useChatStore((s) => s.clearContextHistory)
   const close = useChatStore((s) => s.close)
+  const panelPosition = useChatStore((s) => s.panelPosition)
+  const panelSize = useChatStore((s) => s.panelSize)
+  const setPanelGeometry = useChatStore((s) => s.setPanelGeometry)
+  const saveAndNewChat = useChatStore((s) => s.saveAndNewChat)
+  const restoreSession = useChatStore((s) => s.restoreSession)
+  const deleteSession = useChatStore((s) => s.deleteSession)
+  const pastSessions = useChatStore((s) => s.pastSessions)
+
+  // ── History panel state ──
+  const [showHistory, setShowHistory] = useState(false)
+
+  // ── Drag / resize state ──
+  const dragState = useRef<{ startMX: number; startMY: number; startX: number; startY: number } | null>(null)
+  const resizeState = useRef<{
+    edge: 'right' | 'bottom' | 'corner'
+    startMX: number; startMY: number; startW: number; startH: number; startX: number; startY: number
+  } | null>(null)
+  // Live position/size tracked in refs during drag to avoid re-renders on every mousemove
+  const livePos = useRef({ x: 0, y: 0 })
+  const liveSize = useRef(DEFAULT_PANEL_SIZE)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  const MIN_W = 300
+  const MIN_H = 300
+  const MAX_W = 900
 
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
@@ -168,6 +194,85 @@ export function ChatPanel() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Initialize panel position to right edge on first mount (when no persisted position)
+  useEffect(() => {
+    const defaultX = Math.max(0, window.innerWidth - (panelSize.width + 20))
+    const defaultY = 0
+    const pos = panelPosition ?? { x: defaultX, y: defaultY }
+    livePos.current = pos
+    liveSize.current = panelSize
+    if (panelRef.current) {
+      panelRef.current.style.left = `${pos.x}px`
+      panelRef.current.style.top = `${pos.y}px`
+      panelRef.current.style.width = `${panelSize.width}px`
+      panelRef.current.style.height = `${panelSize.height}px`
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+
+  // Global drag mousemove/mouseup
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragState.current || !panelRef.current) return
+      const { startMX, startMY, startX, startY } = dragState.current
+      const dx = e.clientX - startMX
+      const dy = e.clientY - startMY
+      const maxX = window.innerWidth - liveSize.current.width
+      const maxY = window.innerHeight - MIN_H
+      const newX = Math.max(0, Math.min(maxX, startX + dx))
+      const newY = Math.max(0, Math.min(maxY, startY + dy))
+      livePos.current = { x: newX, y: newY }
+      panelRef.current.style.left = `${newX}px`
+      panelRef.current.style.top = `${newY}px`
+    }
+    function onUp() {
+      if (!dragState.current) return
+      dragState.current = null
+      setIsDragging(false)
+      setPanelGeometry(livePos.current, liveSize.current)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [setPanelGeometry])
+
+  // Global resize mousemove/mouseup
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!resizeState.current || !panelRef.current) return
+      const { edge, startMX, startMY, startW, startH } = resizeState.current
+      const dx = e.clientX - startMX
+      const dy = e.clientY - startMY
+      const maxH = window.innerHeight - livePos.current.y
+      let newW = liveSize.current.width
+      let newH = liveSize.current.height
+      if (edge === 'right' || edge === 'corner') {
+        newW = Math.max(MIN_W, Math.min(MAX_W, startW + dx))
+      }
+      if (edge === 'bottom' || edge === 'corner') {
+        newH = Math.max(MIN_H, Math.min(maxH, startH + dy))
+      }
+      liveSize.current = { width: newW, height: newH }
+      panelRef.current.style.width = `${newW}px`
+      panelRef.current.style.height = `${newH}px`
+    }
+    function onUp() {
+      if (!resizeState.current) return
+      resizeState.current = null
+      setIsDragging(false)
+      setPanelGeometry(livePos.current, liveSize.current)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [setPanelGeometry])
 
   // Focus input when panel opens
   useEffect(() => {
@@ -413,29 +518,142 @@ export function ChatPanel() {
   if (!isOpen) return null
 
   return (
-    <div className="fixed top-0 right-0 h-full w-[420px] bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col">
+    <div
+      ref={panelRef}
+      className={cn(
+        'fixed bg-white border border-gray-200 shadow-2xl z-50 flex flex-col rounded-xl overflow-hidden',
+        isDragging && 'select-none',
+      )}
+      style={{
+        left: panelPosition ? panelPosition.x : Math.max(0, window.innerWidth - (panelSize.width + 20)),
+        top: panelPosition ? panelPosition.y : 0,
+        width: panelSize.width,
+        height: panelSize.height,
+        minWidth: MIN_W,
+        minHeight: MIN_H,
+      }}
+    >
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+      {/* Header — drag handle */}
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 cursor-move shrink-0"
+        onMouseDown={(e) => {
+          // Don't start drag on buttons inside header
+          if ((e.target as HTMLElement).closest('button')) return
+          e.preventDefault()
+          setIsDragging(true)
+          dragState.current = {
+            startMX: e.clientX,
+            startMY: e.clientY,
+            startX: livePos.current.x,
+            startY: livePos.current.y,
+          }
+        }}
+      >
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-blue-600" />
           <span className="font-semibold text-sm text-gray-800">OPPM AI Assistant</span>
         </div>
         <div className="flex items-center gap-1">
-          {messages.length > 0 && (
-            <button
-              onClick={() => clearContextHistory(contextKey)}
-              title="Clear chat history"
-              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          )}
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            title="View history"
+            className={cn(
+              'p-1.5 rounded-lg transition-colors',
+              showHistory
+                ? 'bg-blue-100 text-blue-600'
+                : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50',
+            )}
+          >
+            <History className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => { saveAndNewChat(); setShowHistory(false) }}
+            title="New chat"
+            className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+          </button>
           <button onClick={close} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg">
             <X className="h-5 w-5" />
           </button>
         </div>
       </div>
+
+      {/* ── History overlay ── */}
+      {showHistory && (
+        <div className="absolute inset-0 z-30 flex flex-col bg-white rounded-xl overflow-hidden">
+          {/* History header */}
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
+            <button
+              onClick={() => setShowHistory(false)}
+              className="p-1 text-gray-400 hover:text-gray-700 rounded-lg"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <History className="h-4 w-4 text-gray-500" />
+            <span className="font-semibold text-sm text-gray-800">Chat History</span>
+            <span className="ml-auto text-xs text-gray-400">
+              {(pastSessions[contextKey] ?? []).length} session{(pastSessions[contextKey] ?? []).length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* Session list */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {(pastSessions[contextKey] ?? []).length === 0 ? (
+              <div className="text-center text-gray-400 text-sm mt-12">
+                <History className="h-10 w-10 mx-auto mb-3 text-gray-200" />
+                <p className="font-medium text-gray-500">No past sessions</p>
+                <p className="text-xs mt-1">Start a new chat and past conversations will appear here.</p>
+              </div>
+            ) : (
+              (pastSessions[contextKey] ?? []).map((session: PastSession, idx: number) => {
+                const firstUser = session.messages.find((m) => m.role === 'user')
+                const preview = firstUser?.content?.slice(0, 80) ?? '(empty)'
+                const date = new Date(session.savedAt)
+                const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+                return (
+                  <div
+                    key={idx}
+                    className="group flex items-start gap-3 p-3 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/40 cursor-pointer transition-colors"
+                    onClick={() => { restoreSession(contextKey, idx); setShowHistory(false) }}
+                  >
+                    <div className="shrink-0 mt-0.5 h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                      <Bot className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-gray-700">{dateStr} · {timeStr}</span>
+                        <span className="text-xs text-gray-400 shrink-0">{session.messages.length} msg{session.messages.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5 truncate">{preview}</p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteSession(contextKey, idx) }}
+                      title="Delete session"
+                      className="shrink-0 p-1 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 rounded transition-all"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {/* New Chat from history screen */}
+          <div className="shrink-0 px-4 py-3 border-t border-gray-100">
+            <button
+              onClick={() => { saveAndNewChat(); setShowHistory(false) }}
+              className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-2.5 text-sm font-medium text-gray-400 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <MessageSquarePlus className="h-4 w-4" />
+              New Chat
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Context badge */}
       <div className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-100 bg-gray-50/50 text-xs text-gray-500">
@@ -697,6 +915,50 @@ export function ChatPanel() {
           onChange={handleFileChange}
         />
       </div>
+
+      {/* ── Resize handles ── */}
+      {/* Right edge */}
+      <div
+        className="absolute top-0 right-0 w-2 h-full cursor-ew-resize z-10"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+          resizeState.current = {
+            edge: 'right',
+            startMX: e.clientX, startMY: e.clientY,
+            startW: liveSize.current.width, startH: liveSize.current.height,
+            startX: livePos.current.x, startY: livePos.current.y,
+          }
+        }}
+      />
+      {/* Bottom edge */}
+      <div
+        className="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize z-10"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+          resizeState.current = {
+            edge: 'bottom',
+            startMX: e.clientX, startMY: e.clientY,
+            startW: liveSize.current.width, startH: liveSize.current.height,
+            startX: livePos.current.x, startY: livePos.current.y,
+          }
+        }}
+      />
+      {/* Bottom-right corner */}
+      <div
+        className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-20"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+          resizeState.current = {
+            edge: 'corner',
+            startMX: e.clientX, startMY: e.clientY,
+            startW: liveSize.current.width, startH: liveSize.current.height,
+            startX: livePos.current.x, startY: livePos.current.y,
+          }
+        }}
+      />
     </div>
   )
 }

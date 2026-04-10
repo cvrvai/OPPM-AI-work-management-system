@@ -26,7 +26,7 @@ export default defineConfig({
       '^/api/v1/workspaces/[^/]+/rag':              { target: 'http://127.0.0.1:8001', changeOrigin: true },
 
       // Everything else goes to the core service (port 8000)
-      '/api': { target: 'http://127.0.0.1:8010', changeOrigin: true },
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
 
       '/mcp': { target: 'http://127.0.0.1:8003', changeOrigin: true },
     },

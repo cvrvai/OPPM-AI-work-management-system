@@ -9,6 +9,8 @@ from shared.models.git import GithubAccount, RepoConfig, CommitEvent, CommitAnal
 from shared.models.ai_model import AIModel
 from shared.models.notification import Notification, AuditLog
 from shared.models.embedding import DocumentEmbedding
+from shared.models.agile import Epic, UserStory, Sprint, Retrospective
+from shared.models.waterfall import ProjectPhase, PhaseDocument
 
 __all__ = [
     "User", "RefreshToken",
@@ -20,4 +22,6 @@ __all__ = [
     "AIModel",
     "Notification", "AuditLog",
     "DocumentEmbedding",
+    "Epic", "UserStory", "Sprint", "Retrospective",
+    "ProjectPhase", "PhaseDocument",
 ]

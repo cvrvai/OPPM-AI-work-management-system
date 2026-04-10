@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: 2026-04-09
+Last updated: 2026-04-10
 
 ## Purpose
 
@@ -100,19 +100,23 @@ It owns:
 
 It provides:
 
-- workspace and project chat with an agentic tool loop (max 5 iterations)
+- workspace and project chat owned directly by the AI service routers
+- a TAOR agentic loop with a max of 7 iterations, low-confidence requery, and final wrap-up fallback
 - input guardrails (injection detection) and output guardrails (sensitive data scrub)
 - LLM-based query rewriting before retrieval
 - semantic similarity cache (Redis, cosine ≥ 0.92, TTL 5 min) for RAG results
-- tool registry with 21 tools across four categories (oppm, task, cost, read)
+- tool registry with 24 tools across five categories (`oppm`, `task`, `cost`, `read`, `project`)
 - native LLM function calling for OpenAI and Anthropic; XML-prompt fallback for Ollama and Kimi
 - weekly summaries
 - AI model configuration per workspace
 - project plan suggestion and commit of suggested plans
+- server-side file parsing, OPPM spreadsheet fill assistance, and OPPM image extraction
 - workspace reindexing for retrieval
 - RAG query endpoint
 - internal commit analysis endpoint called by the git service
 - user feedback endpoint (rating + comment logged to `audit_log`)
+
+The AI service is not advisory-only. Its tool handlers can create and update shared business data directly through AI-side repositories on the shared database, including projects, objectives, tasks, timeline entries, costs, risks, and deliverables.
 
 See [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md) and [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for component-level detail.
 
@@ -154,6 +158,8 @@ It contains:
 This is the most important architectural boundary in the backend.
 
 Services do not each own independent databases. They share one data model and one PostgreSQL database through `shared/models/` and `shared/database.py`.
+
+That shared-database model matters most for AI: the service boundary is real at the HTTP/router layer, but AI tool execution still writes through AI-owned repository code against the shared tables.
 
 ## Data Architecture
 

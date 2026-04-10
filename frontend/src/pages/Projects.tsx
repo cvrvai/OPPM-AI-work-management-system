@@ -4,8 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useChatStore } from '@/stores/chatStore'
 import { useChatContext } from '@/hooks/useChatContext'
-import type { PaginatedResponse, Project, Priority, WorkspaceMember } from '@/types'
+import type { PaginatedResponse, Project, Priority, Methodology, WorkspaceMember } from '@/types'
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
 import {
   Check,
@@ -30,6 +31,7 @@ interface CreateProjectPayload {
   project_code: string | null
   objective_summary: string | null
   priority: Priority
+  methodology: Methodology
   status: Project['status']
   progress: number
   start_date: string | null
@@ -65,6 +67,8 @@ export function Projects() {
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   useChatContext('workspace')
+  const openChat = useChatStore((s) => s.open)
+  const addChatMessage = useChatStore((s) => s.addMessage)
 
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
@@ -132,7 +136,14 @@ export function Projects() {
           </p>
         </div>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={() => {
+            setShowCreate(true)
+            openChat()
+            addChatMessage({
+              role: 'assistant',
+              content: `**Creating a new project — let me help you set it up!**\n\nBefore filling the form, here's a quick guide to the **Methodology** field:\n\n- 🔄 **Agile** — Iterative sprints (1–4 weeks). Best for software, R&D, or evolving requirements.\n- 📋 **Waterfall** — Sequential phases (Plan → Design → Build → Test → Deploy). Best for construction, compliance, or fixed-scope work.\n- 🔀 **Hybrid** — Waterfall milestones with Agile sprints inside. Best for large projects needing both structure and flexibility.\n- 🎯 **OPPM** — One-page targeted focus. Best for concise, outcome-driven initiatives across any industry.\n\nYou can also ask me to **create the project for you** — just describe what you want to build and I'll ask about methodology, objectives, deliverables, and timeline before setting it up.`,
+            })
+          }}
           className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark transition-colors"
         >
           <Plus className="h-4 w-4" /> New Project
@@ -350,6 +361,7 @@ function CreateProjectModal({
   const [description, setDescription] = useState('')
   const [objectiveSummary, setObjectiveSummary] = useState('')
   const [priority, setPriority] = useState<Priority>('medium')
+  const [methodology, setMethodology] = useState<Methodology>('oppm')
   const [startDate, setStartDate] = useState('')
   const [deadline, setDeadline] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -386,6 +398,7 @@ function CreateProjectModal({
       project_code: projectCode || null,
       objective_summary: objectiveSummary || null,
       priority,
+      methodology,
       status: 'planning',
       progress: 0,
       start_date: startDate || null,
@@ -592,6 +605,16 @@ function CreateProjectModal({
                       <option value="medium">Medium</option>
                       <option value="high">High</option>
                       <option value="critical">Critical</option>
+                    </select>
+                  </div>
+
+                  <div className="mt-3">
+                    <label className={fieldLabelClass}>Methodology</label>
+                    <select value={methodology} onChange={(e) => setMethodology(e.target.value as Methodology)} className={selectClass}>
+                      <option value="oppm">OPPM</option>
+                      <option value="agile">Agile</option>
+                      <option value="waterfall">Waterfall</option>
+                      <option value="hybrid">Hybrid (All)</option>
                     </select>
                   </div>
                 </div>

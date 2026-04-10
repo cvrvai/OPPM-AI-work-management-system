@@ -134,11 +134,11 @@ Important folders:
   Data access for AI flows. `oppm_repo.py` owns all OPPM-domain reads used by tools.
 - `infrastructure/rag/`
   RAG pipeline components:
-  - `agent_loop.py` — multi-turn agentic tool execution loop (max 5 iterations)
+  - `agent_loop.py` — multi-turn TAOR tool execution loop (max 7 iterations, low-confidence requery, final wrap-up fallback)
   - `query_rewriter.py` — LLM-based query expansion before retrieval
   - `guardrails.py` — input injection detection and output sensitive-data scrub
   - `semantic_cache.py` — Redis embedding cache (cosine ≥ 0.92, TTL 300 s)
-  - `classifier.py`, `retriever.py`, `reranker.py` — core pipeline stages
+  - `agent.py`, `retrievers/`, `reranker.py` — classifier and retrieval stages
 - `infrastructure/tools/`
   AI-callable tool registry:
   - `registry.py` — global `ToolRegistry` singleton with `register`, `execute`, and schema methods
@@ -147,6 +147,7 @@ Important folders:
   - `task_tools.py` — 5 task tools (create/update/delete/assign/dependency)
   - `cost_tools.py` — 5 cost tools (costs, risks, deliverables, project update)
   - `read_tools.py` — 6 read tools (summary, task details, search, risks, costs, team workload)
+  - `project_tools.py` — 3 workspace/project tools (create, list, update projects)
 - `infrastructure/llm/`
   LLM adapter layer:
   - `base.py` — `LLMAdapter` with `call_with_tools()` default
@@ -158,21 +159,26 @@ Important folders:
 
 Current functional ownership:
 
-- workspace AI chat (RAG only, no tools)
-- project AI chat with agentic tool loop (up to 5 iterations)
+- workspace AI chat with RAG plus workspace-scoped tool execution for write-capable callers
+- project AI chat with bounded TAOR tool loop (up to 7 iterations)
 - input guardrails and output guardrails
 - LLM query rewriting
 - semantic cache (Redis-backed)
-- tool registry with 21 tools (oppm × 5, task × 5, cost × 5, read × 6)
+- tool registry with 24 tools (oppm × 5, task × 5, cost × 5, read × 6, project × 3)
 - native LLM function calling for OpenAI and Anthropic
 - XML-prompt tool calling for Ollama and Kimi
 - weekly summary
 - AI plan suggestion and commit
 - AI model configuration
+- file parsing, OPPM fill, and OPPM image extraction
 - workspace reindexing
 - RAG retrieval
 - user feedback (logged to `audit_log`)
 - internal analyze-commits endpoint
+
+Architectural note:
+
+- the AI service also writes shared business data through its own tool handlers and repositories; the service boundary is at the HTTP/router layer, not at the database level
 
 Start here when changing:
 

@@ -4,7 +4,7 @@ AI Chat Service — Orchestrates LLM calls with OPPM project context.
 Builds a rich system prompt with full project context (objectives, sub-objectives,
 tasks with assignees/owners/dependencies, timeline, costs, risks, deliverables,
 forecasts, team skills, recent commits), sends user messages to the configured LLM,
-and runs an agentic multi-turn tool loop (up to 5 iterations) via the tool registry.
+and runs an agentic multi-turn tool loop (up to 7 iterations) via the tool registry.
 
 Pipeline: input guardrails → RAG (rewrite → cache → retrieve → RRF) → agent loop
           → output guardrails → response
@@ -129,6 +129,17 @@ When answering questions (not proposing plans), respond conversationally without
     - Each objective's main action item → create_task linked to that objective via oppm_objective_id
     - Each bullet point or sub-action under a main item → create_task with parent_task_id set to the main task's ID (this creates a sub-task)
     - Preserve the document's grouping — if the document has 6 sections, create 6 objectives, not fewer
+12. When the user asks to create a project and has not already provided these details, ask about them BEFORE calling create_project:
+    a. **Methodology** — Ask which fits best. Offer choices with brief descriptions:
+       - Agile: iterative sprints, evolving requirements
+       - Waterfall: sequential phases, fixed scope
+       - Hybrid: milestone structure + sprint execution
+       - OPPM: one-page targeted, ideal for focused initiatives
+    b. **Objective Summary** — One sentence describing the project outcome.
+    c. **Deliverable Output** — What the project produces (report, system, product, etc.).
+    d. **Project Code** — Short identifier like PRJ-204 (optional, skip if user says so).
+    e. **Planning Hours** — Estimated total effort in hours (optional, skip if unknown).
+    If the user provides some of these upfront (in the same message), skip those questions and only ask for the missing ones. If the user says "just create it" or similar, proceed with defaults.
 """
 
 # ── Context budget: max ~8K tokens ≈ 32K chars ──

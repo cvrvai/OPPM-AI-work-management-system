@@ -64,14 +64,15 @@ Assessment: structured and production-ready
 Why:
 
 - the service now has a clearly layered infrastructure sub-structure: `rag/`, `tools/`, `llm/`
-- an agentic tool loop with a bounded iteration limit (5) prevents runaway LLM calls
-- a tool registry with 21 tools across 4 categories replaces hardcoded tool dispatch
+- an agentic tool loop with a bounded iteration limit (7) prevents runaway LLM calls while still allowing low-confidence recovery
+- a tool registry with 24 tools across 5 categories replaces hardcoded tool dispatch
 - input guardrails block prompt injection at the service boundary before any model call
 - output guardrails scrub sensitive patterns before responses leave the service
 - a Redis semantic cache reduces redundant retrieval for repeated or similar questions
 - query rewriting improves recall for vague or underspecified questions
 - native function calling for OpenAI and Anthropic; XML-prompt fallback for Ollama and Kimi
 - user feedback is logged to `audit_log` for future model improvement
+- the AI service owns real route and write behavior, not just helper orchestration
 
 Risk area:
 
@@ -203,8 +204,8 @@ Priority order:
 
 ## Recent Improvements (2026-04-09)
 
-- agentic tool loop: multi-turn LLM execution with 5-iteration cap and max-iterations fallback summary
-- tool registry: 21 tools across oppm/task/cost/read categories; native calling for OpenAI/Anthropic, XML-prompt for Ollama/Kimi
+- agentic tool loop: multi-turn LLM execution with 7-iteration cap, low-confidence requery, and max-iterations fallback summary
+- tool registry: 24 tools across oppm/task/cost/read/project categories; native calling for OpenAI/Anthropic, XML-prompt for Ollama/Kimi
 - input guardrails: 9 injection-pattern checks, 4000-char limit on incoming messages
 - output guardrails: API key, password, JWT, and ENV variable patterns redacted from responses
 - query rewriting: LLM-based expansion for 3-to-300-char queries before retrieval
