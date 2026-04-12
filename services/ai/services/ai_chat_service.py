@@ -11,10 +11,12 @@ Pipeline: input guardrails → RAG (rewrite → cache → retrieve → RRF) → 
 """
 
 import json
+import asyncio
 import logging
 import re
 import uuid
 from datetime import datetime
+from typing import AsyncGenerator
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -115,8 +117,9 @@ When answering questions (not proposing plans), respond conversationally without
    - If the user references a task or objective by name and it is ambiguous, list the candidates and ask which one.
    - If a date is relative (e.g., "next week", "in 2 days"), confirm the exact date before acting.
    - If the user's request is unclear (e.g., "update the status"), ask: "Which task and what status?"
+   - NEVER reuse task IDs or member IDs from earlier in the conversation — IDs can change between sessions. Always call search_tasks to get fresh task UUIDs and get_team_workload to get fresh member UUIDs immediately before calling assign_task, set_task_dependency, or delete_task_dependency.
 2. Always reference specific objective IDs and week dates when making changes.
-3. If the user asks to update something, use an appropriate tool call.
+3. **CRITICAL — Tool calls are the ONLY way to make changes.** When the user asks you to assign, create, update, or delete anything, you MUST call the appropriate tool. Describing what you "will do" or "have done" in text WITHOUT calling a tool is FORBIDDEN and will be treated as a failure. The user sees the tool call results in real time — they will know if you did not call a tool.
 4. For read-only questions (status, analysis), respond conversationally.
 5. When suggesting multiple changes, use bulk_set_timeline for efficiency.
 6. After completing any action (create, update, assign), briefly confirm what was done and ask if anything else is needed.
@@ -414,6 +417,7 @@ async def _chat_async(
     user_id: str,
     messages: list[dict],
     model_id: str | None = None,
+    on_tool_result=None,
 ) -> dict:
     project_repo = ProjectRepository(session)
     audit_repo = AuditRepository(session)
@@ -511,6 +515,7 @@ async def _chat_async(
             openai_tools=openai_tools,
             anthropic_tools=anthropic_tools,
             rag_requery=_rag_requery,
+            on_tool_result=on_tool_result,
         )
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable: %s", e)
@@ -541,6 +546,72 @@ async def _chat_async(
         "iterations": loop_result.iterations,
         "low_confidence": loop_result.low_confidence,
     }
+
+
+async def chat_stream(
+    session: AsyncSession,
+    project_id: str,
+    workspace_id: str,
+    user_id: str,
+    messages: list[dict],
+    model_id: str | None = None,
+) -> AsyncGenerator[str, None]:
+    """Stream AI chat as Server-Sent Events.
+
+    Yields SSE-formatted strings:
+      - ``event: tool_call`` — once per tool execution, with updated_entities list
+      - ``event: message`` — final response (same payload as the blocking ``chat()``)
+      - ``event: error`` — on fatal error
+    """
+    def _sse(event: str, data: dict) -> str:
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    # Validate input + build context using the same pipeline as chat()
+    # We call _chat_async_stream which is just _chat_async with on_tool_result wired up
+    queue: asyncio.Queue[tuple[str, dict] | None] = asyncio.Queue()
+
+    async def on_tool(record: dict) -> None:
+        await queue.put(("tool_call", record))
+
+    async def run() -> None:
+        try:
+            result = await _chat_async(
+                session=session,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                messages=messages,
+                model_id=model_id,
+                on_tool_result=on_tool,
+            )
+            # Explicitly commit here — StreamingResponse background task lifecycle
+            # may not align with get_session's yield cleanup timing.
+            await session.commit()
+            await queue.put(("message", result))
+        except HTTPException as exc:
+            await session.rollback()
+            await queue.put(("error", {"detail": exc.detail, "status_code": exc.status_code}))
+        except Exception as exc:
+            logger.warning("chat_stream background task failed: %s", exc)
+            await session.rollback()
+            await queue.put(("error", {"detail": str(exc)}))
+        finally:
+            await queue.put(None)  # sentinel
+
+    task = asyncio.create_task(run())
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            event, data = item
+            yield _sse(event, data)
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 async def suggest_plan(

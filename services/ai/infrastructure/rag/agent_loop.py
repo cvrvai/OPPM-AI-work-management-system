@@ -52,7 +52,12 @@ Rules for next_action:
 - requery: re-fetch context from RAG then continue.
 
 CRITICAL: NEVER guess required values (project title, deadline, task ID, member name).
-If what_i_need is NOT "nothing" and you cannot resolve it with tools, choose clarify and ask the user.\"
+If what_i_need is NOT "nothing" and you cannot resolve it with tools, choose clarify and ask the user.
+
+MANDATORY RULE: When the user requests ANY write action (assign task, create task, update status, set dependency, etc.),
+you MUST choose next_action=call_tools and call the appropriate tool(s).
+Describing the action in text without calling the tool is a failure — tools are the ONLY way changes take effect.
+Do NOT set next_action=answer until ALL requested write operations have been executed via tool calls.
 """
 
 
@@ -237,6 +242,7 @@ async def run_agent_loop(
     anthropic_tools: list[dict] | None = None,
     max_iterations: int = MAX_ITERATIONS,
     rag_requery: Callable[..., Awaitable[str]] | None = None,
+    on_tool_result: Callable[[dict], Awaitable[None]] | None = None,
 ) -> AgentLoopResult:
     """Run the TAOR agentic loop until confident answer or max_iterations hit.
 
@@ -247,6 +253,11 @@ async def run_agent_loop(
         RAG pipeline for a specific knowledge gap and returns a context string.
         When provided and confidence is low, the loop will call this to inject
         fresh retrieval results mid-conversation.
+    on_tool_result:
+        Optional async callable ``(record: dict) -> None`` called after each
+        individual tool execution completes. The record has the shape
+        ``{tool, input, result, success, error, updated_entities}``.
+        Use this for SSE streaming to push tool-call events to the client.
     """
     primary_provider = models[0]["provider"] if models else ""
     use_native_tools = primary_provider in NATIVE_TOOL_PROVIDERS
@@ -356,6 +367,26 @@ async def run_agent_loop(
 
             if result.updated_entities:
                 all_updated.update(result.updated_entities)
+
+            # Notify streaming consumers after each tool call
+            if on_tool_result is not None:
+                try:
+                    await on_tool_result({
+                        "tool": tool_name,
+                        "success": result.success,
+                        "updated_entities": list(result.updated_entities or []),
+                        "error": result.error,
+                    })
+                except Exception as cb_exc:
+                    logger.debug("on_tool_result callback raised: %s", cb_exc)
+
+            # Propagate newly created project ID so subsequent tool calls in this
+            # same iteration (e.g. create_objective / create_task) resolve it
+            # correctly without waiting for the next LLM turn.
+            if tool_name == "create_project" and result.success and result.result:
+                new_pid = result.result.get("id")
+                if new_pid:
+                    project_id = new_pid
 
             # Tool failure: generate retry guidance
             if not result.success:

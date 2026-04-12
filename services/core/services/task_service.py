@@ -205,13 +205,21 @@ async def approve_task_report(
     workspace_id: str,
     user_id: str,
     member_id: str | None = None,
+    ws_role: str = "member",
 ) -> dict:
     from datetime import datetime, timezone
     task_data = await get_task(session, task_id, workspace_id)
     project_repo = ProjectRepository(session)
     project = await project_repo.find_by_id(task_data["project_id"])
-    if project and project.lead_id and member_id and str(project.lead_id) != member_id:
-        raise HTTPException(status_code=403, detail="Only the project lead can approve reports")
+    is_owner_or_admin = ws_role in ("owner", "admin")
+    if project and project.lead_id:
+        # Lead is set — only the lead (or owner/admin) can approve
+        if member_id and str(project.lead_id) != member_id and not is_owner_or_admin:
+            raise HTTPException(status_code=403, detail="Only the project lead can approve reports")
+    else:
+        # No lead set — only workspace owner/admin can approve
+        if not is_owner_or_admin:
+            raise HTTPException(status_code=403, detail="Only a workspace owner or admin can approve reports when no project lead is assigned")
     report_repo = TaskReportRepository(session)
     report = await report_repo.find_by_id(report_id)
     if not report or str(report.task_id) != task_id:
@@ -230,11 +238,15 @@ async def delete_task_report(
     report_id: str,
     workspace_id: str,
     user_id: str,
+    ws_role: str = "member",
 ) -> bool:
     await get_task(session, task_id, workspace_id)
     report_repo = TaskReportRepository(session)
     report = await report_repo.find_by_id(report_id)
     if not report or str(report.task_id) != task_id:
         raise HTTPException(status_code=404, detail="Report not found")
+    is_owner_or_admin = ws_role in ("owner", "admin")
+    if str(report.reporter_id) != user_id and not is_owner_or_admin:
+        raise HTTPException(status_code=403, detail="You can only delete your own reports")
     await report_repo.delete(report_id)
     return True

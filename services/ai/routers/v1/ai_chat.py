@@ -2,6 +2,7 @@
 
 import logging
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_write, require_admin
 from shared.database import get_session
@@ -10,7 +11,7 @@ from schemas.ai_chat import (
     CommitPlanRequest, CapabilitiesResponse, ReindexResponse, FeedbackRequest,
     FileParseResponse,
 )
-from services.ai_chat_service import chat, suggest_plan, commit_plan, weekly_summary, workspace_chat
+from services.ai_chat_service import chat, chat_stream, suggest_plan, commit_plan, weekly_summary, workspace_chat
 from services.document_indexer import reindex_workspace
 from repositories.vector_repo import VectorRepository
 from repositories.notification_repo import AuditRepository
@@ -103,6 +104,35 @@ async def chat_route(
         user_id=ws.user.id,
         messages=[m.model_dump() for m in data.messages],
         model_id=data.model_id,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/ai/chat/stream")
+async def chat_stream_route(
+    project_id: str,
+    data: ChatRequest,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    """Stream AI chat as Server-Sent Events.
+
+    Each tool execution yields an ``event: tool_call`` event so the UI can
+    invalidate queries in real time. The final answer is sent as ``event: message``.
+    """
+    return StreamingResponse(
+        chat_stream(
+            session=session,
+            project_id=project_id,
+            workspace_id=ws.workspace_id,
+            user_id=ws.user.id,
+            messages=[m.model_dump() for m in data.messages],
+            model_id=data.model_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

@@ -14,6 +14,7 @@ from repositories.oppm_repo import (
 )
 from shared.models.task import Task, TaskReport
 from shared.models.workspace import WorkspaceMember
+from shared.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -180,28 +181,41 @@ async def _get_team_workload(
     workspace_id: str,
     user_id: str,
 ) -> ToolResult:
-    """Get task counts and hours per team member for this project."""
-    # Count tasks per assignee
-    stmt = (
-        select(
-            WorkspaceMember.display_name,
-            func.count(Task.id).label("task_count"),
-            func.sum(Task.progress).label("total_progress"),
-        )
-        .join(Task, Task.assignee_id == WorkspaceMember.user_id)
-        .where(Task.project_id == project_id)
-        .group_by(WorkspaceMember.display_name)
+    """Get all workspace members with their full IDs and task counts for this project."""
+    from shared.models.task import TaskAssignee
+
+    # Fetch all workspace members with their user email as fallback display name
+    members_result = await session.execute(
+        select(WorkspaceMember, User.email, User.full_name)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .where(WorkspaceMember.workspace_id == workspace_id)
+        .order_by(WorkspaceMember.role)
     )
-    result = await session.execute(stmt)
+    all_members = members_result.all()
+
+    # Count tasks assigned per member (via task_assignees) for this project
+    counts_result = await session.execute(
+        select(
+            TaskAssignee.member_id,
+            func.count(Task.id).label("task_count"),
+        )
+        .join(Task, Task.id == TaskAssignee.task_id)
+        .where(Task.project_id == project_id)
+        .group_by(TaskAssignee.member_id)
+    )
+    counts = {str(row.member_id): row.task_count for row in counts_result.all()}
+
     members = [
         {
-            "name": row.display_name or "unknown",
-            "task_count": row.task_count,
-            "avg_progress": round(row.total_progress / row.task_count, 1) if row.task_count else 0,
+            "member_id": str(m.id),   # full UUID — use this for assign_task
+            "display_name": m.display_name or full_name or email or "(no name)",
+            "email": email,
+            "role": m.role,
+            "task_count_in_project": counts.get(str(m.id), 0),
         }
-        for row in result.all()
+        for m, email, full_name in all_members
     ]
-    return ToolResult(success=True, result={"members": members})
+    return ToolResult(success=True, result={"members": members, "total": len(members)})
 
 
 # ── Register tools ──
@@ -257,7 +271,7 @@ _registry.register(ToolDefinition(
 
 _registry.register(ToolDefinition(
     name="get_team_workload",
-    description="Get task counts and average progress per team member for this project",
+    description="Get all workspace members with their full member_id UUIDs, roles, and task counts. Always call this before assign_task to retrieve the correct member_id.",
     category="read",
     params=[],
     handler=_get_team_workload,

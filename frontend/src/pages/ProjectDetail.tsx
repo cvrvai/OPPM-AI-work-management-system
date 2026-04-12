@@ -32,7 +32,10 @@ import {
   DollarSign,
   Hash,
   GitBranch,
+  Download,
+  FileText,
 } from 'lucide-react'
+import { exportTasksCSV, exportTasksPDF } from '@/lib/taskReport'
 
 const PRIORITY_COLORS: Record<Priority, string> = {
   low: 'bg-slate-100 text-slate-600',
@@ -368,6 +371,22 @@ export function ProjectDetail() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportTasksCSV(taskList, objectiveMap, memberMap, p)}
+            disabled={taskList.length === 0}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium text-text-secondary hover:bg-surface-alt transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Download tasks as CSV"
+          >
+            <Download className="h-3.5 w-3.5" /> CSV
+          </button>
+          <button
+            onClick={() => exportTasksPDF(taskList, objectiveMap, memberMap, p)}
+            disabled={taskList.length === 0}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-medium text-text-secondary hover:bg-surface-alt transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Download tasks as PDF report"
+          >
+            <FileText className="h-3.5 w-3.5" /> PDF
+          </button>
           <div className="flex items-center rounded-lg border border-border bg-white p-0.5 shadow-sm">
             <button
               onClick={() => setViewMode('board')}

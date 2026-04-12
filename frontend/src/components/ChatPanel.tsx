@@ -368,31 +368,120 @@ export function ChatPanel() {
     setAttachments((prev) => prev.filter((_, i) => i !== idx))
   }, [])
 
-  // ── Chat mutation ──
+  // ── Streaming chat ──
 
-  const chatMutation = useMutation({
-    mutationFn: (msgs: { role: string; content: string }[]) => {
-      const path = isProjectContext
-        ? `${wsPath}/projects/${projectId}/ai/chat`
+  const [isChatPending, setIsChatPending] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const sendChat = useCallback(
+    async (msgs: { role: string; content: string }[]) => {
+      if (!ws) return
+      setIsChatPending(true)
+      abortRef.current = new AbortController()
+
+      // Project-level uses the streaming endpoint; workspace-level falls back to blocking POST
+      const isStreamable = isProjectContext && !!projectId
+      const path = isStreamable
+        ? `${wsPath}/projects/${projectId}/ai/chat/stream`
         : `${wsPath}/ai/chat`
-      return api.post<ChatResponse>(path, { messages: msgs })
-    },
-    onSuccess: (data) => {
-      addMessage({
-        role: 'assistant',
-        content: data.message,
-        toolCalls: data.tool_calls,
-        updatedEntities: data.updated_entities,
-        lowConfidence: data.low_confidence ?? false,
-      })
-      if (data.updated_entities.length > 0) {
-        invalidateEntities(data.updated_entities)
+
+      if (!isStreamable) {
+        // Workspace-level: blocking POST (no streaming endpoint yet)
+        try {
+          const data = await api.post<ChatResponse>(path, { messages: msgs })
+          addMessage({
+            role: 'assistant',
+            content: data.message,
+            toolCalls: data.tool_calls,
+            updatedEntities: data.updated_entities,
+            lowConfidence: data.low_confidence ?? false,
+          })
+          if (data.updated_entities.length > 0) invalidateEntities(data.updated_entities)
+        } catch (err) {
+          addMessage({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` })
+        } finally {
+          setIsChatPending(false)
+        }
+        return
+      }
+
+      // Project-level: consume SSE stream
+      const token = localStorage.getItem('access_token')
+      const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || '/api'
+
+      try {
+        const res = await fetch(`${API_BASE}${path}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ messages: msgs }),
+          signal: abortRef.current.signal,
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }))
+          throw new Error(err.detail || 'AI chat failed')
+        }
+
+        const reader = res.body?.getReader()
+        if (!reader) throw new Error('No response body')
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          // Split on double-newline SSE boundary
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop() ?? ''
+
+          for (const part of parts) {
+            const lines = part.split('\n')
+            let event = 'message'
+            let dataStr = ''
+            for (const line of lines) {
+              if (line.startsWith('event: ')) event = line.slice(7).trim()
+              else if (line.startsWith('data: ')) dataStr = line.slice(6).trim()
+            }
+            if (!dataStr) continue
+
+            try {
+              const payload = JSON.parse(dataStr)
+              if (event === 'tool_call' && payload.updated_entities?.length > 0) {
+                invalidateEntities(payload.updated_entities as string[])
+              } else if (event === 'message') {
+                const data = payload as ChatResponse
+                addMessage({
+                  role: 'assistant',
+                  content: data.message,
+                  toolCalls: data.tool_calls,
+                  updatedEntities: data.updated_entities,
+                  lowConfidence: data.low_confidence ?? false,
+                })
+                if (data.updated_entities.length > 0) invalidateEntities(data.updated_entities)
+              } else if (event === 'error') {
+                addMessage({ role: 'assistant', content: `Error: ${payload.detail ?? 'Unknown error'}` })
+              }
+            } catch {
+              // malformed SSE chunk — ignore
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          addMessage({ role: 'assistant', content: `Error: ${err.message}` })
+        }
+      } finally {
+        setIsChatPending(false)
+        abortRef.current = null
       }
     },
-    onError: (err: Error) => {
-      addMessage({ role: 'assistant', content: `Error: ${err.message}` })
-    },
-  })
+    [ws, isProjectContext, projectId, wsPath, addMessage, invalidateEntities],
+  )
 
   // ── Suggest plan mutation ──
 
@@ -461,7 +550,7 @@ export function ChatPanel() {
 
   const handleSend = useCallback(() => {
     const text = input.trim()
-    if ((!text && attachments.length === 0) || chatMutation.isPending) return
+    if ((!text && attachments.length === 0) || isChatPending) return
     if (!ws) return
 
     // Build attachments saved to chatStore (images stored as data URL, text stored as empty to save space)
@@ -507,8 +596,8 @@ export function ChatPanel() {
       ...messages.map((m) => ({ role: m.role, content: m.content })),
       { role: 'user' as const, content: apiContent },
     ]
-    chatMutation.mutate(allMsgs)
-  }, [input, attachments, messages, chatMutation, addMessage])
+    sendChat(allMsgs)
+  }, [input, attachments, messages, isChatPending, sendChat, addMessage, ws])
 
   const handleQuickSend = useCallback((text: string) => {
     if (!text.trim()) return
@@ -517,8 +606,8 @@ export function ChatPanel() {
       ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
       { role: 'user' as const, content: text },
     ]
-    chatMutation.mutate(allMsgs)
-  }, [messages, chatMutation, addMessage])
+    sendChat(allMsgs)
+  }, [messages, sendChat, addMessage])
 
   const handleSuggestPlan = useCallback(() => {
     const goal = planGoal.trim()
@@ -530,7 +619,7 @@ export function ChatPanel() {
   }, [planGoal, addMessage, suggestPlanMutation])
 
   const isLoading =
-    chatMutation.isPending ||
+    isChatPending ||
     suggestPlanMutation.isPending ||
     commitPlanMutation.isPending ||
     weeklySummaryMutation.isPending

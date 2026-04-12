@@ -109,7 +109,7 @@ async def approve_task_report_route(
         session, task_id=task_id, report_id=report_id,
         is_approved=data.is_approved,
         workspace_id=ws.workspace_id, user_id=ws.user.id,
-        member_id=ws.member_id,
+        member_id=ws.member_id, ws_role=ws.role,
     )
 
 
@@ -123,5 +123,6 @@ async def delete_task_report_route(
     await delete_task_report(
         session, task_id=task_id, report_id=report_id,
         workspace_id=ws.workspace_id, user_id=ws.user.id,
+        ws_role=ws.role,
     )
     return SuccessResponse()
