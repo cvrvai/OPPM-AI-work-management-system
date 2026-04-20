@@ -29,10 +29,11 @@ const proxy = dockerBase
       // MCP service routes (port 8003) — before generic /api rule
       '^/api/v1/workspaces/[^/]+/mcp':              { target: 'http://127.0.0.1:8003', changeOrigin: true },
 
-      // Everything else goes to the core service (port 8000)
-      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      // Everything else goes to the gateway (Docker) when backend runs in containers
+      // This routes frontend dev requests to the nginx gateway on the host
+      '/api': { target: 'http://localhost:80', changeOrigin: true },
 
-      '/mcp': { target: 'http://127.0.0.1:8003', changeOrigin: true },
+      '/mcp': { target: 'http://localhost:80', changeOrigin: true },
     }
 
 export default defineConfig({
