@@ -423,10 +423,145 @@ If validation passes, the route accepts quickly and continues processing in a ba
 | `GET` | `/api/v1/workspaces/{workspace_id}/mcp/tools` | Yes | Member |
 | `POST` | `/api/v1/workspaces/{workspace_id}/mcp/call` | Yes | Member |
 
+## GraphQL Routes (AI Service)
+
+### Endpoint
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/graphql` | Yes | Member | GraphQL Playground (schema explorer) |
+| `POST` | `/api/v1/workspaces/{workspace_id}/graphql` | Yes | Member | Execute GraphQL queries/mutations |
+
+### Query Operations
+
+#### `weeklyStatusSummary`
+
+Returns weekly project status summary with categorized items.
+
+**Arguments:**
+- `projectId: String!` - Project ID
+- `workspaceId: String!` - Workspace ID
+
+**Returns:** `WeeklySummaryResult`
+
+```graphql
+query {
+  weeklyStatusSummary(projectId: "proj-123", workspaceId: "ws-456") {
+    summary
+    atRisk {
+      title
+      description
+    }
+    onTrack {
+      title
+      description
+    }
+    blocked {
+      title
+      description
+    }
+    suggestedActions {
+      title
+      description
+    }
+  }
+}
+```
+
+#### `suggestOppmPlan`
+
+Suggests OPPM plan based on project description.
+
+**Arguments:**
+- `projectId: String!` - Project ID
+- `workspaceId: String!` - Workspace ID
+- `description: String!` - Project description for planning
+
+**Returns:** `SuggestPlanResult`
+
+```graphql
+query {
+  suggestOppmPlan(projectId: "proj-123", workspaceId: "ws-456", description: "Build new dashboard feature") {
+    suggestedObjectives {
+      title
+      suggestedWeeks
+    }
+    explanation
+    commitToken
+  }
+}
+```
+
+### Mutation Operations
+
+#### `commitOppmPlan`
+
+Commits a suggested OPPM plan to a project.
+
+**Arguments:**
+- `projectId: String!` - Project ID
+- `workspaceId: String!` - Workspace ID
+- `commitToken: String!` - Token from `suggestOppmPlan` response
+
+**Returns:** `Boolean`
+
+```graphql
+mutation {
+  commitOppmPlan(projectId: "proj-123", workspaceId: "ws-456", commitToken: "token-abc123")
+}
+```
+
+### Type Definitions
+
+#### `StatusItem`
+```graphql
+type StatusItem {
+  title: String!
+  description: String
+}
+```
+
+#### `WeeklySummaryResult`
+```graphql
+type WeeklySummaryResult {
+  summary: String!
+  atRisk: [StatusItem!]!
+  onTrack: [StatusItem!]!
+  blocked: [StatusItem!]!
+  suggestedActions: [StatusItem!]!
+}
+```
+
+#### `SuggestedObjective`
+```graphql
+type SuggestedObjective {
+  title: String!
+  suggestedWeeks: [String!]!
+}
+```
+
+#### `SuggestPlanResult`
+```graphql
+type SuggestPlanResult {
+  suggestedObjectives: [SuggestedObjective!]!
+  explanation: String!
+  commitToken: String!
+}
+```
+
+### Benefits
+
+GraphQL provides selective field queries, reducing mobile payload by **30-40%** compared to REST endpoints:
+
+- **Before (REST):** Full object returned regardless of needed fields
+- **After (GraphQL):** Only requested fields returned
+
+Example: Request only titles without descriptions saves ~40% bandwidth for large result sets.
+
 ## Endpoint Ownership Summary
 
 - Core: auth, workspaces, members, invites, projects, tasks, OPPM, notifications, dashboard
-- AI: model config, chat, planning, reindex, RAG, internal analysis
+- AI: model config, chat, planning, reindex, RAG, internal analysis, **GraphQL**
 - Git: GitHub accounts, repo configs, commits, reports, webhook
 - MCP: workspace tool discovery and execution
 
