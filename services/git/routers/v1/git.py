@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_write, require_admin
-from schemas.git import GitAccountCreate, RepoConfigCreate
+from schemas.git import GitAccountCreate, RepoConfigCreate, RepoConfigUpdate
 from shared.schemas.common import SuccessResponse
 from shared.database import get_session, get_session_factory
 from shared.models.git import RepoConfig
@@ -18,6 +18,7 @@ from services.git_service import (
     list_repos,
     create_repo,
     delete_repo,
+    update_repo,
     list_commits,
     get_developer_report,
     get_recent_analyses,
@@ -87,6 +88,16 @@ async def delete_repo_route(
     return SuccessResponse()
 
 
+@router.patch("/workspaces/{workspace_id}/git/repos/{config_id}")
+async def update_repo_route(
+    config_id: str,
+    data: RepoConfigUpdate,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    return await update_repo(session, config_id, data.model_dump(), ws.workspace_id, ws.user.id)
+
+
 # ── Commits ──
 
 @router.get("/workspaces/{workspace_id}/commits")
@@ -131,6 +142,13 @@ async def github_webhook(
     stores commits and triggers AI analysis in the background."""
     body = await request.body()
     payload = await request.json()
+
+    # GitHub sends a ping event when a webhook is first created or updated.
+    # Respond immediately with 200 so GitHub marks it as successful.
+    if x_github_event == "ping":
+        logger.info("GitHub ping received for hook_id=%s", payload.get("hook_id"))
+        return {"status": "pong"}
+
     repo_full_name = payload.get("repository", {}).get("full_name", "")
 
     result = await session.execute(

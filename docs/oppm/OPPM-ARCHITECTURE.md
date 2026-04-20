@@ -1,5 +1,7 @@
 # OPPM Architecture & Rendering
 
+Last updated: 2026-04-20
+
 ## Overview
 The OPPM (One Page Project Manager) module takes unstructured or structured project data, organizes it via an AI-assisted backend pipeline, and renders it onto a strict visual spreadsheet grid mimicking the industry-standard OPPM template.
 

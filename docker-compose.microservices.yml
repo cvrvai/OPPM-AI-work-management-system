@@ -25,6 +25,7 @@ services:
     build: ./gateway
     ports:
       - "80:80"
+    restart: on-failure
     depends_on:
       core:
         condition: service_healthy
@@ -55,8 +56,8 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 20s
+      retries: 8
+      start_period: 60s
 
   ai:
     build:

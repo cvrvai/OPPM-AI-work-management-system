@@ -8,6 +8,8 @@ This ERD describes the current relational model defined in `shared/models/` and 
 
 It is intentionally focused on the live model used by the codebase today. Where the schema contains a table that is not central to the active product flow, that is called out explicitly.
 
+For a service-oriented ER view, see [database/ER-DIAGRAM.md](database/ER-DIAGRAM.md).
+
 ## Domain Groups
 
 The schema is easiest to reason about in seven groups:

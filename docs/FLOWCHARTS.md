@@ -1,12 +1,95 @@
 # Flowcharts
 
-Last updated: 2026-04-09
+Last updated: 2026-04-20
 
 ## Purpose
 
-These flowcharts describe the major runtime paths in the current implementation.
+These flowcharts describe runtime paths based on the current implementation.
 
-They are intentionally based on the code paths that exist now, not on older architecture plans.
+Use this file in two passes:
+
+1. Read **Service Interaction Charts** to understand service boundaries and cross-service behavior.
+2. Read **Detailed Feature Flow Charts** to understand endpoint-level and function-level behavior.
+
+## Service Interaction Charts
+
+### S1. End-to-End Service Collaboration Map
+
+```mermaid
+flowchart LR
+    Browser[Browser] --> Frontend[Frontend React + Vite]
+    Frontend --> Gateway[Gateway Python or nginx]
+
+    Gateway -->|/api/auth + default /api/v1| Core[Core Service]
+    Gateway -->|/api/v1/workspaces/:ws/ai*| AI[AI Service]
+    Gateway -->|/api/v1/workspaces/:ws/rag*| AI
+    Gateway -->|/api/v1/workspaces/:ws/projects/:id/ai*| AI
+    Gateway -->|/api/v1/workspaces/:ws/github-accounts*| Git[Git Service]
+    Gateway -->|/api/v1/workspaces/:ws/commits*| Git
+    Gateway -->|/api/v1/workspaces/:ws/git/*| Git
+    Gateway -->|/api/v1/workspaces/:ws/mcp/*| MCP[MCP Service]
+
+    Git -->|POST /internal/analyze-commits + X-Internal-API-Key| AI
+
+    Core --> DB[(PostgreSQL)]
+    AI --> DB
+    Git --> DB
+    MCP --> DB
+
+    Core --> Redis[(Redis)]
+    AI --> Redis
+
+    AI --> LLM[LLM Providers]
+    Git --> GH[GitHub]
+```
+
+### S2. Backend Function Lifecycle (Router To Data)
+
+```mermaid
+sequenceDiagram
+    participant U as User / Frontend
+    participant G as Gateway
+    participant R as Service Router
+    participant A as shared/auth.py
+    participant S as Service Function
+    participant P as Repository
+    participant D as shared/database.py + PostgreSQL
+
+    U->>G: HTTP request (/api/...)
+    G->>R: Forward by route pattern
+    R->>A: Resolve user and workspace context
+    A-->>R: CurrentUser + WorkspaceContext
+    R->>S: Call domain function
+    S->>P: Apply business rules and persistence call
+    P->>D: SQLAlchemy async query
+    D-->>P: Rows / mutation result
+    P-->>S: Domain data
+    S-->>R: Response payload
+    R-->>G: JSON response
+    G-->>U: HTTP response
+```
+
+### S3. Cross-Service Calls (Current Runtime)
+
+```mermaid
+flowchart TD
+    A[GitHub push event] --> B[Git webhook route]
+    B --> C[Store commits in Git service]
+    C --> D[Git calls AI internal endpoint]
+    D --> E[AI analyzes commits]
+    E --> F[commit_analyses stored in shared DB]
+
+    G[Admin reindex request] --> H[AI reindex route]
+    H --> I[AI reads workspace data]
+    I --> J[Embeddings generated]
+    J --> K[document_embeddings upserted]
+
+    L[Model integration request] --> M[MCP list or call route]
+    M --> N[MCP tool executes with workspace_id]
+    N --> O[Shared DB reads or writes]
+```
+
+## Detailed Feature Flow Charts
 
 ## 1. App Bootstrap And Auth Refresh
 
@@ -276,4 +359,66 @@ flowchart TD
     N --> Q[Return formatted context string]
     O --> Q
     P --> Q
+```
+
+## 14. Core Service Function Flow (Workspace To OPPM)
+
+```mermaid
+flowchart TD
+    A[Core Router /api/v1/workspaces/... ] --> B[shared.auth dependencies]
+    B --> C{Role gate}
+    C -- viewer/member/admin/owner --> D[Core service function]
+    C -- unauthorized --> X[403 response]
+    D --> E[Repository call]
+    E --> F[Shared ORM models]
+    F --> G[(PostgreSQL)]
+    G --> H[Service response shaping]
+    H --> I[JSON response]
+```
+
+## 15. AI Service Function Flow (Chat And Tools)
+
+```mermaid
+flowchart TD
+    A[AI Router /api/v1/workspaces/:ws/... ] --> B[Auth + workspace context]
+    B --> C[ai_chat_service or rag_service]
+    C --> D[Guardrails + query rewrite + retrieval]
+    D --> E{Tool call needed?}
+    E -- No --> F[Final model response]
+    E -- Yes --> G[Tool registry execute]
+    G --> H[AI repositories + shared DB]
+    H --> I[Updated entities + tool output]
+    I --> F
+    F --> J[Output guardrail]
+    J --> K[JSON or SSE response]
+```
+
+## 16. Git Service Function Flow (Webhook To Analysis)
+
+```mermaid
+flowchart TD
+    A[Git Router /api/v1/git/webhook] --> B[Find repo config]
+    B --> C[Validate HMAC signature]
+    C --> D{Push event?}
+    D -- No --> E[Ignore or return]
+    D -- Yes --> F[Accept quickly]
+    F --> G[Background task stores commits]
+    G --> H[Call AI /internal/analyze-commits]
+    H --> I[AI writes commit analyses]
+    I --> J[Frontend reads /commits and /git/recent-analyses]
+```
+
+## 17. MCP Service Function Flow (Tool Discovery And Call)
+
+```mermaid
+flowchart TD
+    A[MCP Router /api/v1/workspaces/:ws/mcp/*] --> B[Auth + workspace context]
+    B --> C{Endpoint}
+    C -- GET /tools --> D[List TOOL_REGISTRY metadata]
+    C -- POST /call --> E[Resolve tool by name]
+    E --> F[Inject workspace_id into params]
+    F --> G[Execute tool function]
+    G --> H{Execution success?}
+    H -- Yes --> I[Return tool result payload]
+    H -- No --> J[Return MCP error payload]
 ```

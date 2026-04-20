@@ -1,6 +1,6 @@
 # Frontend Reference
 
-Last updated: 2026-04-06
+Last updated: 2026-04-20
 
 ## Purpose
 
@@ -445,5 +445,5 @@ Before editing a feature, read files in this order:
 1. the route page in `pages/`
 2. any supporting store in `stores/`
 3. `lib/api.ts`
-4. the related backend section in [API-REFERENCE.md](API-REFERENCE.md)
-5. the related model notes in [ERD.md](ERD.md)
+4. the related backend section in [API-REFERENCE.md](../API-REFERENCE.md)
+5. the related model notes in [ERD.md](../ERD.md)

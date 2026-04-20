@@ -12,12 +12,14 @@ Use this file for system-level orientation. Use the supporting docs for detail:
 - [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md)
 - [ERD.md](ERD.md)
 - [FLOWCHARTS.md](FLOWCHARTS.md)
-- [FRONTEND-REFERENCE.md](FRONTEND-REFERENCE.md)
+- [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md)
 - [MICROSERVICES-REFERENCE.md](MICROSERVICES-REFERENCE.md)
-- [MICROSERVICES-REVIEW.md](MICROSERVICES-REVIEW.md)
+- [services/README.md](services/README.md)
+- [database/README.md](database/README.md)
+- [MICROSERVICES-REVIEW.md](review/MICROSERVICES-REVIEW.md)
 - [AI-SYSTEM-CONTEXT.md](AI-SYSTEM-CONTEXT.md)
-- [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md)
-- [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md)
+- [AI-PIPELINE-REFERENCE.md](ai/AI-PIPELINE-REFERENCE.md)
+- [TOOL-REGISTRY-REFERENCE.md](ai/TOOL-REGISTRY-REFERENCE.md)
 - [SRS.md](SRS.md)
 - [TESTING-GUIDE.md](TESTING-GUIDE.md)
 
@@ -118,7 +120,7 @@ It provides:
 
 The AI service is not advisory-only. Its tool handlers can create and update shared business data directly through AI-side repositories on the shared database, including projects, objectives, tasks, timeline entries, costs, risks, and deliverables.
 
-See [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md) and [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for component-level detail.
+See [AI-PIPELINE-REFERENCE.md](ai/AI-PIPELINE-REFERENCE.md) and [TOOL-REGISTRY-REFERENCE.md](ai/TOOL-REGISTRY-REFERENCE.md) for component-level detail.
 
 ### Git Service
 
@@ -277,7 +279,7 @@ The frontend follows a simple pattern:
 - route protection through `ProtectedRoute` in `frontend/src/App.tsx`
 - workspace-scoped navigation safety via `useWorkspaceNavGuard` hook
 
-See [FRONTEND-REFERENCE.md](FRONTEND-REFERENCE.md) for the detailed folder-level map.
+See [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md) for the detailed folder-level map.
 
 ## Load Balancing
 
@@ -440,6 +442,6 @@ When adding new features, keep these boundaries intact:
 
 1. [SRS.md](SRS.md)
 2. [MICROSERVICES-REFERENCE.md](MICROSERVICES-REFERENCE.md)
-3. [FRONTEND-REFERENCE.md](FRONTEND-REFERENCE.md)
+3. [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md)
 4. [API-REFERENCE.md](API-REFERENCE.md)
 5. [ERD.md](ERD.md)

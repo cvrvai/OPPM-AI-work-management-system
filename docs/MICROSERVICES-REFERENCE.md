@@ -1,12 +1,20 @@
 # Microservices Reference
 
-Last updated: 2026-04-09
+Last updated: 2026-04-20
 
 ## Purpose
 
 This document explains what each backend service owns, how requests are routed, and which folders you should open first when implementing backend features.
 
 It is the folder-level reference for the current microservices layout.
+
+For service-by-service feature inventories and upgrade impact guidance, use [services/README.md](services/README.md).
+For database-by-service ownership and touchpoints, use [database/README.md](database/README.md).
+
+For runtime diagrams, use [FLOWCHARTS.md](FLOWCHARTS.md):
+
+- Service interaction map: **S1-S3**
+- Function-level service flows: **14-17**
 
 ## Active Service Map
 
@@ -43,6 +51,7 @@ Current routing summary:
 - AI routes -> `services/ai/`
 - Git routes -> `services/git/`
 - MCP routes -> `services/mcp/`
+- `/internal/analyze-commits` -> `services/ai/` (internal service-to-service path)
 - all remaining `/api/*` routes -> `services/core/`
 
 The same routing intent must exist in both:
@@ -106,6 +115,8 @@ Current functional ownership:
 - tasks, task reports, and task dependencies
 - task permission enforcement (lead-only create, assignee-only report, lead-only approve)
 - OPPM objectives (with A/B/C priority), timeline, costs
+- agile workflows (epics, user stories, sprints, retrospective)
+- waterfall workflows (phases and phase documents)
 - notifications
 - dashboard stats
 
@@ -317,6 +328,16 @@ Notes:
 - repositories own query patterns
 - `shared/` owns cross-service contracts and data models
 
+## Function Ownership Matrix
+
+| Service | Route families (entry points) | Function ownership | Main dependencies | Diagram references |
+|---|---|---|---|---|
+| Core | `/api/auth/*`, `/api/v1/workspaces/*`, `/api/v1/workspaces/*/projects*`, `/api/v1/workspaces/*/tasks*`, `/api/v1/workspaces/*/oppm*`, `/api/v1/workspaces/*/epics*`, `/api/v1/workspaces/*/user-stories*`, `/api/v1/workspaces/*/sprints*`, `/api/v1/workspaces/*/phases*`, `/api/v1/workspaces/*/dashboard/*`, `/api/v1/notifications*` | Auth/session, tenancy, projects, tasks, OPPM, agile, waterfall, notifications, dashboard | `shared/auth.py`, core services/repositories, shared ORM, PostgreSQL, Redis | [S2](FLOWCHARTS.md#s2-backend-function-lifecycle-router-to-data), [14](FLOWCHARTS.md#14-core-service-function-flow-workspace-to-oppm) |
+| AI | `/api/v1/workspaces/*/ai/*`, `/api/v1/workspaces/*/rag/*`, `/api/v1/workspaces/*/projects/*/ai/*`, `/internal/analyze-commits` | Model config, workspace/project chat, RAG retrieval, reindex, AI plan suggestion, OPPM fill/extract, feedback, internal commit analysis | AI services, tool registry, RAG pipeline, shared ORM/DB, Redis semantic cache, LLM providers | [S2](FLOWCHARTS.md#s2-backend-function-lifecycle-router-to-data), [15](FLOWCHARTS.md#15-ai-service-function-flow-chat-and-tools) |
+| Git | `/api/v1/workspaces/*/github-accounts*`, `/api/v1/workspaces/*/git/*`, `/api/v1/workspaces/*/commits*`, `/api/v1/git/webhook` | GitHub accounts, repo config, webhook validation, commit storage, reports, AI handoff trigger | Git service/repositories, shared ORM/DB, GitHub, AI internal endpoint | [S3](FLOWCHARTS.md#s3-cross-service-calls-current-runtime), [16](FLOWCHARTS.md#16-git-service-function-flow-webhook-to-analysis) |
+| MCP | `/api/v1/workspaces/*/mcp/tools`, `/api/v1/workspaces/*/mcp/call` | Tool discovery and execution for workspace-scoped integrations | MCP tool registry, shared auth context, shared ORM/DB | [S3](FLOWCHARTS.md#s3-cross-service-calls-current-runtime), [17](FLOWCHARTS.md#17-mcp-service-function-flow-tool-discovery-and-call) |
+| Gateway (Python + nginx) | All `/api/*`, `/internal/analyze-commits`, `/mcp`, `/health/*` | Route dispatch, upstream forwarding, timeout policy, health-aware balancing (Python gateway) | `services/gateway/main.py`, `gateway/nginx.conf`, upstream services | [S1](FLOWCHARTS.md#s1-end-to-end-service-collaboration-map) |
+
 ## Feature Lookup Table
 
 | Feature | First place to look |
@@ -326,6 +347,8 @@ Notes:
 | Project CRUD | `services/core/routers/v1/projects.py`, `services/core/services/project_service.py` |
 | Task CRUD and reports | `services/core/routers/v1/tasks.py`, `services/core/services/task_service.py` |
 | OPPM board | `services/core/routers/v1/oppm.py`, `services/core/services/oppm_service.py` |
+| Agile workflows | `services/core/routers/v1/agile.py`, `services/core/services/agile_service.py` |
+| Waterfall workflows | `services/core/routers/v1/waterfall.py`, `services/core/services/waterfall_service.py` |
 | Notifications | `services/core/routers/v1/notifications.py`, `services/core/services/notification_service.py` |
 | Dashboard | `services/core/routers/v1/dashboard.py`, `services/core/services/dashboard_service.py` |
 | AI model settings | `services/ai/routers/v1/ai.py` |

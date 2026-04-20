@@ -28,6 +28,8 @@ import {
   RefreshCw,
   Search,
   UserPlus,
+  Pencil,
+  X,
 } from 'lucide-react'
 import { cn, getInitials } from '@/lib/utils'
 import { useChatContext } from '@/hooks/useChatContext'
@@ -811,6 +813,11 @@ function GitHubSettings() {
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const [showAddAccount, setShowAddAccount] = useState(false)
   const [showAddRepo, setShowAddRepo] = useState(false)
+  const [editingRepoId, setEditingRepoId] = useState<string | null>(null)
+  const [editRepoName, setEditRepoName] = useState('')
+  const [editRepoProjectId, setEditRepoProjectId] = useState('')
+  const [editRepoAccountId, setEditRepoAccountId] = useState('')
+  const [editWebhookSecret, setEditWebhookSecret] = useState('')
   const [accountName, setAccountName] = useState('')
   const [githubUsername, setGithubUsername] = useState('')
   const [token, setToken] = useState('')
@@ -876,11 +883,23 @@ function GitHubSettings() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['repo-configs'] }),
   })
 
+  const updateRepo = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      api.patch(`${wsPath}/git/repos/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repo-configs'] })
+      setEditingRepoId(null)
+    },
+  })
+
   const accs = accounts || []
   const rps = repos || []
 
+  const webhookBaseUrl = import.meta.env.VITE_WEBHOOK_BASE_URL?.replace(/\/$/, '') || window.location.origin
+  const webhookUrl = `${webhookBaseUrl}/api/v1/git/webhook`
+
   const handleCopyWebhook = () => {
-    navigator.clipboard.writeText(`${window.location.origin}/api/git/webhook`)
+    navigator.clipboard.writeText(webhookUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -1072,34 +1091,139 @@ function GitHubSettings() {
         ) : (
           <div className="space-y-2">
             {rps.map((repo) => (
-              <div key={repo.id} className="flex items-center justify-between rounded-lg border border-border p-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50">
-                    <Globe className="h-4 w-4 text-violet-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-text">{repo.repo_name}</p>
-                    <div className="flex items-center gap-2 text-xs text-text-secondary">
-                      <span className="flex items-center gap-1">
-                        <Key className="h-2.5 w-2.5" /> Webhook configured
-                      </span>
-                      <span className={cn(
-                        'flex items-center gap-1 font-medium',
-                        repo.is_active ? 'text-emerald-600' : 'text-gray-400'
-                      )}>
-                        <Check className="h-2.5 w-2.5" />
-                        {repo.is_active ? 'Active' : 'Inactive'}
-                      </span>
+              <div key={repo.id} className="rounded-lg border border-border">
+                {/* ── Row ── */}
+                <div className="flex items-center justify-between p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50">
+                      <Globe className="h-4 w-4 text-violet-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-text">{repo.repo_name}</p>
+                      <div className="flex items-center gap-2 text-xs text-text-secondary">
+                        {projects.find(p => p.id === repo.project_id) && (
+                          <span className="font-medium text-violet-600">
+                            {projects.find(p => p.id === repo.project_id)!.title}
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1">
+                          <Key className="h-2.5 w-2.5" /> Webhook configured
+                        </span>
+                        <span className={cn(
+                          'flex items-center gap-1 font-medium',
+                          repo.is_active ? 'text-emerald-600' : 'text-gray-400'
+                        )}>
+                          <Check className="h-2.5 w-2.5" />
+                          {repo.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        if (editingRepoId === repo.id) {
+                          setEditingRepoId(null)
+                        } else {
+                          setEditingRepoId(repo.id)
+                          setEditRepoName(repo.repo_name)
+                          setEditRepoProjectId(repo.project_id)
+                          setEditRepoAccountId(repo.github_account_id ?? '')
+                          setEditWebhookSecret('')
+                        }
+                      }}
+                      className={cn(
+                        'rounded p-1 transition-colors',
+                        editingRepoId === repo.id
+                          ? 'text-primary bg-primary/10'
+                          : 'text-text-secondary hover:text-primary'
+                      )}
+                      title="Edit"
+                    >
+                      {editingRepoId === repo.id ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                    </button>
+                    <button
+                      onClick={() => deleteRepo.mutate(repo.id)}
+                      disabled={deleteRepo.isPending}
+                      className="rounded p-1 text-text-secondary hover:text-danger"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => deleteRepo.mutate(repo.id)}
-                  disabled={deleteRepo.isPending}
-                  className="text-text-secondary hover:text-danger"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+
+                {/* ── Inline edit form ── */}
+                {editingRepoId === repo.id && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const payload: Record<string, unknown> = {
+                        repo_name: editRepoName,
+                        project_id: editRepoProjectId,
+                        github_account_id: editRepoAccountId,
+                      }
+                      if (editWebhookSecret) payload.webhook_secret = editWebhookSecret
+                      updateRepo.mutate({ id: repo.id, data: payload })
+                    }}
+                    className="border-t border-border bg-surface-alt px-3 pb-3 pt-3 space-y-3"
+                  >
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        placeholder="owner/repo-name"
+                        value={editRepoName}
+                        onChange={(e) => setEditRepoName(e.target.value)}
+                        required
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                      <input
+                        placeholder="New webhook secret (leave blank to keep current)"
+                        value={editWebhookSecret}
+                        onChange={(e) => setEditWebhookSecret(e.target.value)}
+                        minLength={editWebhookSecret ? 8 : undefined}
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                      <select
+                        value={editRepoProjectId}
+                        onChange={(e) => setEditRepoProjectId(e.target.value)}
+                        required
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      >
+                        <option value="">Select project...</option>
+                        {(projects || []).map((p) => (
+                          <option key={p.id} value={p.id}>{p.title}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={editRepoAccountId}
+                        onChange={(e) => setEditRepoAccountId(e.target.value)}
+                        required
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      >
+                        <option value="">Select account...</option>
+                        {accs.map((a) => (
+                          <option key={a.id} value={a.id}>{a.account_name} (@{a.github_username})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingRepoId(null)}
+                        className="rounded-lg border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-white"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={updateRepo.isPending}
+                        className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50"
+                      >
+                        {updateRepo.isPending ? 'Saving...' : 'Save changes'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             ))}
           </div>
@@ -1110,7 +1234,7 @@ function GitHubSettings() {
           <p className="text-xs font-medium text-text-secondary mb-1">Webhook URL (paste in GitHub)</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs text-primary bg-white px-2 py-1 rounded border border-border overflow-x-auto">
-              {window.location.origin}/api/git/webhook
+              {webhookUrl}
             </code>
             <button
               onClick={handleCopyWebhook}

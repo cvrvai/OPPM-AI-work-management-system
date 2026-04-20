@@ -8,6 +8,8 @@ This is the authoritative reference for every table, column, constraint, and ind
 
 The schema is defined by SQLAlchemy ORM models in `shared/models/` and managed through Alembic migrations in `services/core/alembic/`. There are currently **29 tables** across 7 domains.
 
+For service-oriented database ownership notes, see [database/README.md](database/README.md).
+
 ## Quick Summary
 
 | Domain | Tables | Count |

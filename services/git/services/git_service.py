@@ -80,6 +80,19 @@ async def delete_repo(session: AsyncSession, config_id: str, workspace_id: str, 
     return await repo_config_repo.delete(config_id)
 
 
+async def update_repo(session: AsyncSession, config_id: str, data: dict, workspace_id: str, user_id: str):
+    repo_config_repo = RepoConfigRepository(session)
+    audit_repo = AuditRepository(session)
+    config = await repo_config_repo.find_by_id(config_id)
+    if not config or str(config.workspace_id) != workspace_id:
+        raise HTTPException(status_code=404, detail="Repo config not found")
+    # Remove None values — only update provided fields
+    payload = {k: v for k, v in data.items() if v is not None}
+    updated = await repo_config_repo.update(config_id, payload)
+    await audit_repo.log(workspace_id, user_id, "update", "repo_config", config_id)
+    return updated
+
+
 # ── Webhook processing ──
 
 async def validate_webhook(session: AsyncSession, repo_name: str, body: bytes, signature: str | None) -> dict:

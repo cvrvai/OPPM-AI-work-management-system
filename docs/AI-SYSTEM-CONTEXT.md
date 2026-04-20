@@ -423,8 +423,8 @@ Update notes:
 - AI model configuration is workspace-scoped.
 - RAG and chat behavior depend on indexed workspace data, not just live tables.
 - `GET /ai/chat/capabilities` now reflects write-capable tool access via `can_execute_tools` based on the caller's workspace role.
-- See [AI-PIPELINE-REFERENCE.md](AI-PIPELINE-REFERENCE.md) for the full pipeline step sequence.
-- See [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for the tool registry and all 24 tools.
+- See [AI-PIPELINE-REFERENCE.md](ai/AI-PIPELINE-REFERENCE.md) for the full pipeline step sequence.
+- See [TOOL-REGISTRY-REFERENCE.md](ai/TOOL-REGISTRY-REFERENCE.md) for the tool registry and all 24 tools.
 - Feedback is written to `audit_log` with `action = "ai_feedback"` and `metadata` containing rating, comment, and related message content.
 
 ### 9. GitHub Integration, Commits, And Commit Analysis
@@ -597,7 +597,7 @@ Update notes:
 - To add a new tool, add its `ToolDefinition` to the appropriate module and the registry will pick it up automatically on next import.
 - `NATIVE_TOOL_PROVIDERS = {"openai", "anthropic"}` controls which providers use native calling.
 - Tool results are always injected as plain-text user messages to stay provider-agnostic.
-- See [TOOL-REGISTRY-REFERENCE.md](TOOL-REGISTRY-REFERENCE.md) for full tool parameter schemas and handler contracts.
+- See [TOOL-REGISTRY-REFERENCE.md](ai/TOOL-REGISTRY-REFERENCE.md) for full tool parameter schemas and handler contracts.
 
 ## Database Schema Design
 
@@ -722,8 +722,9 @@ This file was derived from the current repository documents and then verified ag
 - `DEVELOPMENT.md`
 - `docs/ARCHITECTURE.md`
 - `docs/API-REFERENCE.md`
-- `docs/FRONTEND-REFERENCE.md`
+- `docs/frontend/FRONTEND-REFERENCE.md`
 - `docs/MICROSERVICES-REFERENCE.md`
+- `docs/services/README.md`
 - `frontend/src/App.tsx`
 - key frontend pages and components
 - service entry points and route files in `services/`

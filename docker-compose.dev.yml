@@ -47,5 +47,10 @@ services:
   frontend:
     volumes:
       - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - API_PROXY_BASE=http://gateway:80
+    depends_on:
+      - gateway
     ports:
       - "5173:5173"

@@ -26,7 +26,7 @@ Read the high-signal project documents first.
 4. `docs/ARCHITECTURE.md`
 5. `docs/API-REFERENCE.md`
 6. `docs/DATABASE-SCHEMA.md`
-7. `docs/FRONTEND-REFERENCE.md`
+7. `docs/frontend/FRONTEND-REFERENCE.md`
 8. `docs/MICROSERVICES-REFERENCE.md`
 9. Any area-specific document directly related to the request
 
