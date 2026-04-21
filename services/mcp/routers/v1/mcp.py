@@ -1,5 +1,6 @@
 """MCP endpoint — exposes MCP tools via HTTP for AI model integration."""
 
+import inspect
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -40,7 +41,7 @@ def list_tools_route(
 
 
 @router.post("/workspaces/{workspace_id}/mcp/call", response_model=MCPToolCallResponse)
-def call_tool_route(
+async def call_tool_route(
     body: MCPToolCallRequest,
     user=Depends(get_current_user),
     ctx: WorkspaceContext = Depends(get_workspace_context),
@@ -58,6 +59,8 @@ def call_tool_route(
 
     try:
         result = tool_info["fn"](**params)
+        if inspect.isawaitable(result):
+            result = await result
         return MCPToolCallResponse(tool=body.tool, result=result)
     except TypeError as e:
         logger.warning("MCP tool %s parameter error: %s", body.tool, e)

@@ -8,9 +8,6 @@ class GitSettings(SharedSettings):
     # AI service URL for commit analysis
     ai_service_url: str = "http://ai:8001"
 
-    # CORS
-    cors_origins: str = ""
-
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

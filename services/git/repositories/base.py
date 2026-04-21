@@ -1,44 +1,64 @@
 """Base repository for git service."""
 
-from shared.database import get_db
+import uuid
+from typing import Any, Type, TypeVar
+from sqlalchemy import select, func, delete, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from shared.database import Base
+
+T = TypeVar("T", bound=Base)
 
 
 class BaseRepository:
-    """Thin wrapper around Supabase table operations."""
+    """Generic async CRUD for git service."""
 
-    def __init__(self, table_name: str):
-        self.table_name = table_name
+    model: Type[T]
 
-    def _query(self):
-        return get_db().table(self.table_name)
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
-    def find_by_id(self, record_id: str) -> dict | None:
-        result = self._query().select("*").eq("id", record_id).limit(1).execute()
-        return result.data[0] if result.data else None
+    async def find_by_id(self, record_id: str | uuid.UUID) -> T | None:
+        stmt = select(self.model).where(self.model.id == record_id).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    def find_all(
+    async def find_all(
         self,
         filters: dict | None = None,
         order_by: str = "created_at",
         desc: bool = True,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[dict]:
-        q = self._query().select("*")
+    ) -> list[T]:
+        stmt = select(self.model)
         if filters:
             for k, v in filters.items():
-                q = q.eq(k, v)
-        q = q.order(order_by, desc=desc).range(offset, offset + limit - 1)
-        return q.execute().data or []
+                stmt = stmt.where(getattr(self.model, k) == v)
+        col = getattr(self.model, order_by)
+        stmt = stmt.order_by(col.desc() if desc else col.asc()).offset(offset).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
-    def create(self, data: dict) -> dict:
-        result = self._query().insert(data).execute()
-        return result.data[0]
+    async def create(self, data: dict) -> T:
+        instance = self.model(**data)
+        self.session.add(instance)
+        await self.session.flush()
+        return instance
 
-    def update(self, record_id: str, data: dict) -> dict | None:
-        result = self._query().update(data).eq("id", record_id).execute()
-        return result.data[0] if result.data else None
+    async def update(self, record_id: str | uuid.UUID, data: dict) -> T | None:
+        stmt = (
+            update(self.model)
+            .where(self.model.id == record_id)
+            .values(**data)
+            .returning(self.model)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.scalar_one_or_none()
 
-    def delete(self, record_id: str) -> bool:
-        self._query().delete().eq("id", record_id).execute()
+    async def delete(self, record_id: str | uuid.UUID) -> bool:
+        stmt = delete(self.model).where(self.model.id == record_id)
+        await self.session.execute(stmt)
+        await self.session.flush()
         return True

@@ -4,19 +4,23 @@ Document indexer — converts entities to text and stores embeddings for RAG.
 Each index_* function builds a natural-language text representation of the entity,
 generates an embedding, and upserts it into the vector store.
 
-All functions are async and designed to be called via fire-and-forget
-(asyncio.create_task) so they don't block API responses.
+All functions are async and create their own DB session since they may run
+as background tasks outside the request lifecycle.
 """
 
 import logging
 from typing import Any
 
+from sqlalchemy import select
 from infrastructure.embedding import generate_embedding
+from shared.database import get_session_factory
+from shared.models.workspace import WorkspaceMember
 from repositories.vector_repo import VectorRepository
+from repositories.project_repo import ProjectRepository
+from repositories.oppm_repo import ObjectiveRepository, CostRepository
+from repositories.task_repo import TaskRepository
 
 logger = logging.getLogger(__name__)
-
-vector_repo = VectorRepository()
 
 
 # ── Entity indexing functions ──
@@ -128,7 +132,11 @@ async def index_member(member: dict, workspace_id: str) -> None:
 async def remove_entity(entity_type: str, entity_id: str) -> None:
     """Remove an embedding when an entity is deleted."""
     try:
-        vector_repo.delete_embedding(entity_type, entity_id)
+        factory = get_session_factory()
+        async with factory() as session:
+            vector_repo = VectorRepository(session)
+            await vector_repo.delete_embedding(entity_type, entity_id)
+            await session.commit()
     except Exception as e:
         logger.warning("Failed to remove embedding for %s/%s: %s", entity_type, entity_id, e)
 
@@ -138,48 +146,49 @@ async def remove_entity(entity_type: str, entity_id: str) -> None:
 
 async def reindex_workspace(workspace_id: str) -> dict:
     """Re-index all entities in a workspace. Returns stats."""
-    from repositories.project_repo import ProjectRepository
-    from repositories.oppm_repo import ObjectiveRepository, CostRepository
-    from repositories.task_repo import TaskRepository
-    from shared.database import get_db
-
-    project_repo = ProjectRepository()
-    objective_repo = ObjectiveRepository()
-    cost_repo = CostRepository()
-    task_repo = TaskRepository()
-    db = get_db()
-
+    factory = get_session_factory()
     total = 0
 
-    # Projects
-    projects = project_repo.find_all(filters={"workspace_id": workspace_id}, limit=500)
-    for p in projects:
-        await index_project(p, workspace_id)
-        total += 1
+    async with factory() as session:
+        project_repo = ProjectRepository(session)
+        objective_repo = ObjectiveRepository(session)
+        cost_repo = CostRepository(session)
+        task_repo = TaskRepository(session)
 
-        # Objectives per project
-        objectives = objective_repo.find_with_tasks(p["id"])
-        for obj in objectives:
-            await index_objective(obj, workspace_id, p["id"])
+        projects = await project_repo.find_all(filters={"workspace_id": workspace_id}, limit=500)
+        for p in projects:
+            await index_project({"id": str(p.id), "title": p.title, "description": p.description,
+                                 "status": p.status, "priority": p.priority, "progress": p.progress,
+                                 "start_date": str(p.start_date) if p.start_date else None,
+                                 "deadline": str(p.deadline) if p.deadline else None}, workspace_id)
             total += 1
 
-        # Costs per project
-        cost_data = cost_repo.get_cost_summary(p["id"])
-        for c in cost_data.get("items", []):
-            await index_cost(c, workspace_id, p["id"])
-            total += 1
+            objectives = await objective_repo.find_with_tasks(str(p.id))
+            for obj in objectives:
+                await index_objective(obj, workspace_id, str(p.id))
+                total += 1
 
-        # Tasks per project
-        tasks = task_repo.find_project_tasks(p["id"], limit=500)
-        for t in tasks:
-            await index_task(t, workspace_id)
-            total += 1
+            cost_data = await cost_repo.get_cost_summary(str(p.id))
+            for c in cost_data.get("items", []):
+                await index_cost(c, workspace_id, str(p.id))
+                total += 1
 
-    # Workspace members
-    members = db.table("workspace_members").select("*").eq("workspace_id", workspace_id).execute()
-    for m in (members.data or []):
-        await index_member(m, workspace_id)
-        total += 1
+            tasks = await task_repo.find_project_tasks(str(p.id), limit=500)
+            for t in tasks:
+                await index_task(t, workspace_id)
+                total += 1
+
+        # Workspace members
+        result = await session.execute(
+            select(WorkspaceMember).where(WorkspaceMember.workspace_id == workspace_id)
+        )
+        members = result.scalars().all()
+        for m in members:
+            await index_member({
+                "id": str(m.id), "display_name": m.display_name,
+                "email": m.email, "user_id": str(m.user_id), "role": m.role,
+            }, workspace_id)
+            total += 1
 
     logger.info("Reindexed %d entities for workspace %s", total, workspace_id)
     return {"total_indexed": total}
@@ -198,13 +207,17 @@ async def _do_index(
     """Generate embedding and upsert into vector store."""
     try:
         embedding = await generate_embedding(text)
-        vector_repo.upsert_embedding(
-            workspace_id=workspace_id,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            content=text,
-            metadata=metadata,
-            embedding=embedding,
-        )
+        factory = get_session_factory()
+        async with factory() as session:
+            vector_repo = VectorRepository(session)
+            await vector_repo.upsert_embedding(
+                workspace_id=workspace_id,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                content=text,
+                metadata=metadata,
+                embedding=embedding,
+            )
+            await session.commit()
     except Exception as e:
         logger.warning("Failed to index %s/%s: %s", entity_type, entity_id, e)

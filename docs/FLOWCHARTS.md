@@ -1,240 +1,424 @@
-# OPPM AI — System Flowcharts
+# Flowcharts
 
-## 1. Authentication Flow
+Last updated: 2026-04-20
+
+## Purpose
+
+These flowcharts describe runtime paths based on the current implementation.
+
+Use this file in two passes:
+
+1. Read **Service Interaction Charts** to understand service boundaries and cross-service behavior.
+2. Read **Detailed Feature Flow Charts** to understand endpoint-level and function-level behavior.
+
+## Service Interaction Charts
+
+### S1. End-to-End Service Collaboration Map
+
+```mermaid
+flowchart LR
+    Browser[Browser] --> Frontend[Frontend React + Vite]
+    Frontend --> Gateway[Gateway Python or nginx]
+
+    Gateway -->|/api/auth + default /api/v1| Core[Core Service]
+    Gateway -->|/api/v1/workspaces/:ws/ai*| AI[AI Service]
+    Gateway -->|/api/v1/workspaces/:ws/rag*| AI
+    Gateway -->|/api/v1/workspaces/:ws/projects/:id/ai*| AI
+    Gateway -->|/api/v1/workspaces/:ws/github-accounts*| Git[Git Service]
+    Gateway -->|/api/v1/workspaces/:ws/commits*| Git
+    Gateway -->|/api/v1/workspaces/:ws/git/*| Git
+    Gateway -->|/api/v1/workspaces/:ws/mcp/*| MCP[MCP Service]
+
+    Git -->|POST /internal/analyze-commits + X-Internal-API-Key| AI
+
+    Core --> DB[(PostgreSQL)]
+    AI --> DB
+    Git --> DB
+    MCP --> DB
+
+    Core --> Redis[(Redis)]
+    AI --> Redis
+
+    AI --> LLM[LLM Providers]
+    Git --> GH[GitHub]
+```
+
+### S2. Backend Function Lifecycle (Router To Data)
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Frontend
-    participant Supabase Auth
-    participant Backend API
-    participant Database
+    participant U as User / Frontend
+    participant G as Gateway
+    participant R as Service Router
+    participant A as shared/auth.py
+    participant S as Service Function
+    participant P as Repository
+    participant D as shared/database.py + PostgreSQL
 
-    User->>Frontend: Enter email + password
-    Frontend->>Supabase Auth: signInWithPassword()
-    Supabase Auth-->>Frontend: JWT access_token + refresh_token
-    Frontend->>Frontend: Store token in authStore
-
-    Note over Frontend,Backend API: Subsequent API calls
-
-    Frontend->>Backend API: GET /api/v1/workspaces<br/>Authorization: Bearer {JWT}
-    Backend API->>Supabase Auth: get_current_user()<br/>db.auth.get_user(token)
-    Supabase Auth-->>Backend API: User object (id, email, role)
-    Backend API->>Database: Query workspace_members<br/>WHERE user_id = {user.id}
-    Database-->>Backend API: User's workspaces
-    Backend API-->>Frontend: 200 OK [{workspaces}]
+    U->>G: HTTP request (/api/...)
+    G->>R: Forward by route pattern
+    R->>A: Resolve user and workspace context
+    A-->>R: CurrentUser + WorkspaceContext
+    R->>S: Call domain function
+    S->>P: Apply business rules and persistence call
+    P->>D: SQLAlchemy async query
+    D-->>P: Rows / mutation result
+    P-->>S: Domain data
+    S-->>R: Response payload
+    R-->>G: JSON response
+    G-->>U: HTTP response
 ```
 
-## 2. Workspace Creation & Invite Flow
-
-```mermaid
-sequenceDiagram
-    actor Owner
-    actor Invitee
-    participant Frontend
-    participant Backend API
-    participant Database
-    participant Email
-
-    Owner->>Frontend: Create workspace "My Team"
-    Frontend->>Backend API: POST /api/v1/workspaces<br/>{name, slug, description}
-    Backend API->>Database: INSERT workspace
-    Backend API->>Database: INSERT workspace_member<br/>(user_id, role=owner)
-    Backend API-->>Frontend: 201 Created {workspace}
-
-    Owner->>Frontend: Invite teammate
-    Frontend->>Backend API: POST /api/v1/workspaces/:ws/invites<br/>{email, role: "member"}
-    Backend API->>Database: INSERT workspace_invite<br/>(token, expires_at=+7 days)
-    Backend API->>Email: Send invite link
-    Backend API-->>Frontend: 201 Created {invite}
-
-    Note over Invitee: Receives email with invite token
-
-    Invitee->>Frontend: Click invite link
-    Frontend->>Backend API: POST /api/v1/invites/accept<br/>{token}
-    Backend API->>Database: Validate token (not expired, not used)
-    Backend API->>Database: INSERT workspace_member<br/>(user_id, role from invite)
-    Backend API->>Database: UPDATE invite (accepted_at)
-    Backend API-->>Frontend: 200 OK {workspace}
-```
-
-## 3. GitHub Webhook Flow
-
-```mermaid
-sequenceDiagram
-    participant GitHub
-    participant Backend API
-    participant Rate Limiter
-    participant Database
-    participant AI Provider
-
-    GitHub->>Backend API: POST /api/v1/git/webhook<br/>X-Hub-Signature-256: sha256=...
-    Backend API->>Rate Limiter: Check webhook rate limit<br/>(30 req/min)
-    Rate Limiter-->>Backend API: OK (tokens available)
-    Backend API->>Backend API: Validate HMAC signature<br/>(webhook_secret)
-
-    alt Invalid signature
-        Backend API-->>GitHub: 401 Unauthorized
-    end
-
-    Backend API->>Database: Find repo_config by repo name
-    Backend API->>Database: INSERT commit_event<br/>(hash, message, author, branch)
-
-    Backend API->>Database: Query active AI models<br/>for workspace
-    loop For each active AI model
-        Backend API->>AI Provider: Analyze commit<br/>(message, files, diff context)
-        AI Provider-->>Backend API: {quality_score, alignment_score,<br/>progress_delta, summary}
-        Backend API->>Database: INSERT commit_analysis
-    end
-
-    Backend API->>Database: INSERT notification<br/>(type=commit, title, message)
-    Backend API-->>GitHub: 200 OK
-```
-
-## 4. OPPM Dashboard Data Flow
+### S3. Cross-Service Calls (Current Runtime)
 
 ```mermaid
 flowchart TD
-    A[User opens OPPM View] --> B[Frontend queries workspace-scoped data]
+    A[GitHub push event] --> B[Git webhook route]
+    B --> C[Store commits in Git service]
+    C --> D[Git calls AI internal endpoint]
+    D --> E[AI analyzes commits]
+    E --> F[commit_analyses stored in shared DB]
 
-    B --> C[GET /projects/:id]
-    B --> D[GET /projects/:id/oppm/objectives]
-    B --> E[GET /projects/:id/oppm/timeline]
-    B --> F[GET /projects/:id/oppm/costs]
-    B --> G[GET /projects/:id/members]
+    G[Admin reindex request] --> H[AI reindex route]
+    H --> I[AI reads workspace data]
+    I --> J[Embeddings generated]
+    J --> K[document_embeddings upserted]
 
-    C --> H{Compose OPPM Grid}
-    D --> H
-    E --> H
-    F --> H
-    G --> H
-
-    H --> I[Header Row: Project meta + timeline months]
-    H --> J[Objectives Column: Goals with owners]
-    H --> K[Timeline Grid: Month × Objective status cells]
-    H --> L[Team Section: Members with roles]
-    H --> M[Cost Section: Budget vs Actual]
-
-    I --> N[Render OPPM One-Page View]
-    J --> N
-    K --> N
-    L --> N
-    M --> N
-
-    style H fill:#e3f2fd
-    style N fill:#c8e6c9
+    L[Model integration request] --> M[MCP list or call route]
+    M --> N[MCP tool executes with workspace_id]
+    N --> O[Shared DB reads or writes]
 ```
 
-## 5. AI Commit Analysis Flow
+## Detailed Feature Flow Charts
+
+## 1. App Bootstrap And Auth Refresh
 
 ```mermaid
 flowchart TD
-    A[Webhook receives push event] --> B[Extract commits from payload]
-    B --> C{For each commit}
-    C --> D[Store commit_event in DB]
-    D --> E[Load active AI models for workspace]
-    E --> F{For each AI model}
+    A[Browser loads React app] --> B[App.tsx initialize]
+    B --> C{Has local access token?}
+    C -- No --> D[Render public routes]
+    C -- Yes --> E[fetchWorkspaces after auth init]
+    D --> F[User goes to login or invite page]
+    E --> G[Protected routes render]
 
-    F --> G{Provider type?}
-    G -->|Ollama| H[OllamaAdapter.call_json]
-    G -->|OpenAI| I[OpenAIAdapter.call_json]
-    G -->|Anthropic| J[AnthropicAdapter.call_json]
-    G -->|Kimi| K[KimiAdapter.call_json]
+    G --> H[User makes API request]
+    H --> I{API returns 401?}
+    I -- No --> J[Use response]
+    I -- Yes --> K[POST /api/auth/refresh]
+    K --> L{Refresh succeeds?}
+    L -- Yes --> M[Store new tokens]
+    M --> N[Retry original request once]
+    L -- No --> O[Clear tokens]
+    O --> P[ProtectedRoute redirects to /login]
+```
 
-    H --> L[Parse JSON response]
-    I --> L
-    J --> L
+## 2. Workspace Invite Acceptance
+
+```mermaid
+flowchart TD
+    A[User opens /invites/:token] --> B[Frontend calls GET /api/v1/invites/preview/:token]
+    B --> C{Preview valid?}
+    C -- No --> D[Show invalid or expired state]
+    C -- Yes --> E[Show workspace name, role, member count]
+    E --> F{User authenticated?}
+    F -- No --> G[User logs in or signs up]
+    G --> H[POST /api/v1/invites/accept]
+    F -- Yes --> H[POST /api/v1/invites/accept]
+    H --> I[Core service validates token and membership rules]
+    I --> J[workspace_members row created]
+    J --> K[Invite marked accepted]
+    K --> L[Frontend refreshes workspace list]
+```
+
+## 3. Project Creation Wizard
+
+```mermaid
+flowchart TD
+    A[User opens New Project modal] --> B[Step 1 project info]
+    B --> C[Title, code, objective summary, schedule, budget, lead]
+    C --> D[Step 2 team assignment]
+    D --> E[Select workspace members and project roles]
+    E --> F[POST /api/v1/workspaces/:ws/projects]
+    F --> G[Core creates project]
+    G --> H[Creator workspace membership added as project lead]
+    H --> I{Additional team members selected?}
+    I -- No --> J[Invalidate project queries]
+    I -- Yes --> K[Frontend loops POST /projects/:project_id/members]
+    K --> L[Backend stores project_members rows]
+    L --> J[Invalidate project queries]
+```
+
+## 4. Task Report Approval Flow
+
+```mermaid
+flowchart TD
+    A[Member opens project detail page] --> B[Create task report]
+    B --> C[POST /api/v1/workspaces/:ws/tasks/:task_id/reports]
+    C --> D[task_reports row created]
+    D --> E[Write-enabled user reviews report]
+    E --> F[PATCH /reports/:report_id/approve]
+    F --> G[Core updates is_approved and approved_by]
+    G --> H[UI refreshes task reports]
+```
+
+## 5. GitHub Webhook To Commit Analysis
+
+```mermaid
+flowchart TD
+    A[Developer pushes to GitHub] --> B[GitHub sends POST /api/v1/git/webhook]
+    B --> C[Git service locates repo_config by repository full name]
+    C --> D[Validate X-Hub-Signature-256 with webhook secret]
+    D --> E{Signature valid and push event?}
+    E -- No --> F[Reject or ignore request]
+    E -- Yes --> G[Return accepted response quickly]
+    G --> H[Background task stores commit_events]
+    H --> I[Git service calls AI /internal/analyze-commits]
+    I --> J[AI service analyzes commits against project context]
+    J --> K[commit_analyses rows stored]
+    K --> L[Frontend can fetch recent analyses and reports]
+```
+
+## 6. AI Chat And RAG Retrieval
+
+```mermaid
+flowchart TD
+    A[User sends AI message] --> B[Input Guardrail\ncheck length + injection patterns]
+    B -- blocked --> BX[400 error returned]
+    B -- safe --> C{Workspace chat or project chat?}
+    C -- Workspace --> D[POST /ai/chat\nRAG only no tools]
+    C -- Project --> E[POST /projects/:id/ai/chat\nfull pipeline]
+
+    E --> F[Load project context\nobjectives tasks risks costs team commits]
+    F --> G[Query Rewriting\nLLM expands vague query]
+    G --> H{Semantic Cache\nhit?}
+    H -- HIT --> I[Return cached RAG context]
+    H -- MISS --> J[Classify query\nselect retrievers]
+    J --> K[Parallel retrieval\nvector + keyword + structured]
+    K --> L[RRF Reranker\nmerge + boost project results]
+    L --> M[Store in semantic cache TTL 5min]
+    M --> N[Build system prompt\ncontext + RAG + tool section]
+    I --> N
+
+    N --> O[Agentic Tool Loop\nmax 7 iterations]
+    O --> P[LLM call\nnative tools or XML prompt]
+    P --> Q{Tool calls\nin response?}
+    Q -- No --> R[Final answer]
+    Q -- Yes --> S[Execute tools via registry\nOPPM tasks costs risks deliverables]
+    S --> T[Inject tool results\nas next user turn]
+    T --> P
+
+    R --> U[Output Guardrail\nscrub sensitive patterns]
+    U --> V[Audit log\niterations + tool count]
+    V --> W[Response to frontend\nmessage + tool_calls + updated_entities + iterations]
+```
+
+## 6a. User Feedback Flow
+
+```mermaid
+flowchart TD
+    A[User clicks thumbs up or down] --> B[POST /projects/:id/ai/feedback]
+    B --> C[Store in audit_log\nrating + user message + ai message + comment]
+    C --> D[200 ok returned]
+```
+
+## 7. Workspace Reindex Flow
+
+```mermaid
+flowchart TD
+    A[Admin triggers reindex] --> B[POST /api/v1/workspaces/:ws/ai/reindex]
+    B --> C[AI document indexer walks workspace data]
+    C --> D[Projects, tasks, objectives, costs, members, commits gathered]
+    D --> E[Embeddings generated]
+    E --> F[document_embeddings upserted]
+    F --> G[Capabilities endpoint reflects updated index count]
+```
+
+## 8. Gateway Routing Decision
+
+```mermaid
+flowchart TD
+    A[Incoming /api request] --> B{Path matches AI pattern?}
+    B -- Yes --> C[Forward to AI service]
+    B -- No --> D{Path matches Git pattern?}
+    D -- Yes --> E[Forward to Git service]
+    D -- No --> F{Path matches MCP pattern?}
+    F -- Yes --> G[Forward to MCP service]
+    F -- No --> H[Forward to Core service]
+```
+
+## Notes
+
+- Native development uses the Python gateway in `services/gateway/`.
+- Docker deployments use nginx rules in `gateway/nginx.conf`.
+- Those routing rules must stay aligned.
+- The internal AI analysis route is not part of the public frontend API surface.
+- The exact-match route `/internal/analyze-commits` is forwarded to the AI service for service-to-service use.
+
+---
+
+## 9. RAG Pipeline — Step By Step
+
+```mermaid
+flowchart TD
+    A[Raw query text] --> B[Step 1: Input Guardrail\ncheck_input - block injection or > 4000 chars]
+    B --> C[Step 2: Query Rewriting\nrewrite_query if 3+ words and < 300 chars]
+    C --> D[Step 3: Generate Embedding\nLLM embed rewritten query]
+    D --> E{Step 4: Semantic Cache\nlookup cosine >= 0.92}
+    E -- HIT --> F[Return cached context\nskip retrieval]
+    E -- MISS --> G[Step 5: Classify Query\nlabel retriever types]
+    G --> H[Step 6: Parallel Retrieval\nvector + keyword + structured]
+    H --> I[Step 7: RRF Reranker\nReciprocal Rank Fusion merge]
+    I --> J[Step 8: Project Boost\nup-rank project-specific hits]
+    J --> K[Step 9: Format Context\nbuild retrieval string]
+    K --> L[Step 10: Store in Semantic Cache\nTTL 300 s — ai:sem_cache: prefix]
+    L --> M[Return context to caller]
+    F --> M
+```
+
+## 10. Agentic Tool Loop
+
+```mermaid
+flowchart TD
+    A[Build system prompt\ncontext + tool section] --> B[LLM call\nnative tools or XML prompt]
+    B --> C{Response contains\ntool_calls?}
+    C -- No --> D[Final text response]
+    C -- Yes --> E[Parse tool_calls\nvia tool_parser.py]
+    E --> F[Execute each tool\nvia registry.execute]
+    F --> G[Collect tool results\nToolResult objects]
+    G --> H{Iteration count\n< max 7?}
+    H -- No --> I[Final summary call\nno tools included]
+    I --> J[Return AgentLoopResult\nfinal_text + iterations + updated_entities]
+    H -- Yes --> K[Inject results\nas next user turn text]
+    K --> B
+    D --> J
+```
+
+## 11. Tool Registry Execution
+
+```mermaid
+flowchart TD
+    A[AI service calls get_registry] --> B{Registry initialized?}
+    B -- No --> C[Auto-import oppm_tools\ntask_tools cost_tools\nread_tools project_tools]
+    C --> D[All 24 tools registered]
+    B -- Yes --> D
+    D --> E{LLM provider\nnative or prompt-based?}
+    E -- OpenAI / Anthropic --> F[to_openai_schema or\nto_anthropic_schema]
+    E -- Ollama / Kimi --> G[to_prompt_text\nprompt-text tool section]
+    F --> H[LLM returns native tool_calls JSON]
+    G --> I[LLM returns JSON inside\n<tool_calls> tags]
+    H --> J[parse_openai_tool_calls or\nparse_anthropic_tool_calls]
+    I --> K[parse_xml_tool_calls]
+    J --> L[registry.execute tool_name + args]
     K --> L
-
-    L --> M{Valid response?}
-    M -->|Yes| N[Store commit_analysis]
-    M -->|No| O[Log error, skip]
-
-    N --> P[Calculate progress_delta]
-    P --> Q{progress_delta > 0?}
-    Q -->|Yes| R[Update task progress]
-    R --> S[Recalculate project progress]
-    Q -->|No| T[No progress update]
-
-    S --> U[Create notification]
-    T --> U
-
-    style A fill:#fff3e0
-    style N fill:#c8e6c9
-    style O fill:#ffcdd2
+    L --> M{Tool requires\nproject context?}
+    M -- Yes --> N[Inject project_id\nfrom ChatRequest]
+    M -- No --> O[Execute handler directly]
+    N --> O
+    O --> P[Return ToolResult\nsuccess + result + updated_entities]
 ```
 
-## 6. Multi-Tenant Data Isolation
+## 12. Semantic Cache Lookup And Store
 
 ```mermaid
 flowchart TD
-    A[API Request] --> B[Validate token via<br/>supabase.auth.get_user → user_id]
-    B --> C[Extract workspace_id from URL path]
-    C --> D{Is user a member<br/>of this workspace?}
+    A[Query text] --> B[Generate query embedding]
+    B --> C{Redis\navailable?}
+    C -- No --> D[Return None - cache miss]
+    C -- Yes --> E[Scan ai:sem_cache: keys\nin workspace namespace]
+    E --> F[Compute cosine similarity\nbetween query and each cached embedding]
+    F --> G{Best similarity\n>= 0.92?}
+    G -- No --> H[Return None - cache miss]
+    G -- Yes --> I[Return cached context string]
 
-    D -->|No| E[403 Forbidden]
-    D -->|Yes| F[Determine user role in workspace]
-
-    F --> G{Required permission?}
-
-    G -->|Read| H[Allow - all members can read]
-    G -->|Write| I{Role >= member?}
-    G -->|Admin| J{Role >= admin?}
-    G -->|Owner| K{Role == owner?}
-
-    I -->|No| E
-    I -->|Yes| L[Allow operation]
-
-    J -->|No| E
-    J -->|Yes| L
-
-    K -->|No| E
-    K -->|Yes| L
-
-    L --> M[Execute with workspace_id filter]
-    M --> N[RLS policy double-checks<br/>at database level]
-
-    style E fill:#ffcdd2
-    style L fill:#c8e6c9
-    style N fill:#e3f2fd
+    J[RAG result ready] --> K{Redis\navailable?}
+    K -- No --> L[Skip store - fail-safe]
+    K -- Yes --> M[Serialize result + embedding]
+    M --> N[SET ai:sem_cache:hash_key\nEX 300 seconds]
 ```
 
-## 7. Frontend State Management
+## 13. OPPM Project Context Loading
 
 ```mermaid
 flowchart TD
-    subgraph Zustand Stores
-        AS[authStore<br/>user, session, isAuthenticated]
-        WS[workspaceStore<br/>workspaces, currentWorkspace]
-    end
+    A[_build_project_context called\nproject_id + workspace_id] --> B[Load project record\ntitle status budget dates lead]
+    B --> C[Load objectives\nwith A/B/C priority and owner]
+    C --> D[Load sub-objectives\npositions 1-6]
+    D --> E[Load tasks\nwith assignees dependencies owners]
+    E --> F[Load timeline entries\nweek_start + status + quality]
+    F --> G[Load project costs\ncategory planned actual]
+    G --> H[Load deliverables]
+    H --> I[Load forecasts]
+    I --> J[Load risks]
+    J --> K[Load team members\nwith skills]
+    K --> L[Load recent commits\nand analyses]
+    L --> M{Total context\nsize?}
+    M -- <= TIER1 16K --> N[Include full data]
+    M -- <= TIER2 12K --> O[Truncate commits\nand analyses]
+    M -- > TIER2 --> P[Keep objectives + tasks\ncosts + team only]
+    N --> Q[Return formatted context string]
+    O --> Q
+    P --> Q
+```
 
-    subgraph React Query
-        RQ1[useQuery: projects]
-        RQ2[useQuery: tasks]
-        RQ3[useQuery: objectives]
-        RQ4[useQuery: notifications]
-    end
+## 14. Core Service Function Flow (Workspace To OPPM)
 
-    subgraph Custom Hooks
-        UW[useWorkspaceId<br/>→ workspace UUID]
-        UP[useWsPath<br/>→ /v1/workspaces/:ws]
-    end
+```mermaid
+flowchart TD
+    A[Core Router /api/v1/workspaces/... ] --> B[shared.auth dependencies]
+    B --> C{Role gate}
+    C -- viewer/member/admin/owner --> D[Core service function]
+    C -- unauthorized --> X[403 response]
+    D --> E[Repository call]
+    E --> F[Shared ORM models]
+    F --> G[(PostgreSQL)]
+    G --> H[Service response shaping]
+    H --> I[JSON response]
+```
 
-    AS --> UW
-    WS --> UW
-    UW --> UP
-    UP --> RQ1
-    UP --> RQ2
-    UP --> RQ3
-    UP --> RQ4
+## 15. AI Service Function Flow (Chat And Tools)
 
-    RQ1 --> Pages
-    RQ2 --> Pages
-    RQ3 --> Pages
-    RQ4 --> Pages
+```mermaid
+flowchart TD
+    A[AI Router /api/v1/workspaces/:ws/... ] --> B[Auth + workspace context]
+    B --> C[ai_chat_service or rag_service]
+    C --> D[Guardrails + query rewrite + retrieval]
+    D --> E{Tool call needed?}
+    E -- No --> F[Final model response]
+    E -- Yes --> G[Tool registry execute]
+    G --> H[AI repositories + shared DB]
+    H --> I[Updated entities + tool output]
+    I --> F
+    F --> J[Output guardrail]
+    J --> K[JSON or SSE response]
+```
 
-    style AS fill:#e3f2fd
-    style WS fill:#e3f2fd
-    style UW fill:#fff3e0
-    style UP fill:#fff3e0
+## 16. Git Service Function Flow (Webhook To Analysis)
+
+```mermaid
+flowchart TD
+    A[Git Router /api/v1/git/webhook] --> B[Find repo config]
+    B --> C[Validate HMAC signature]
+    C --> D{Push event?}
+    D -- No --> E[Ignore or return]
+    D -- Yes --> F[Accept quickly]
+    F --> G[Background task stores commits]
+    G --> H[Call AI /internal/analyze-commits]
+    H --> I[AI writes commit analyses]
+    I --> J[Frontend reads /commits and /git/recent-analyses]
+```
+
+## 17. MCP Service Function Flow (Tool Discovery And Call)
+
+```mermaid
+flowchart TD
+    A[MCP Router /api/v1/workspaces/:ws/mcp/*] --> B[Auth + workspace context]
+    B --> C{Endpoint}
+    C -- GET /tools --> D[List TOOL_REGISTRY metadata]
+    C -- POST /call --> E[Resolve tool by name]
+    E --> F[Inject workspace_id into params]
+    F --> G[Execute tool function]
+    G --> H{Execution success?}
+    H -- Yes --> I[Return tool result payload]
+    H -- No --> J[Return MCP error payload]
 ```

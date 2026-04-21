@@ -19,6 +19,9 @@ ADAPTERS: dict[str, type[LLMAdapter]] = {
     "openai": OpenAIAdapter,
 }
 
+# Providers that support native function calling
+NATIVE_TOOL_PROVIDERS = {"openai", "anthropic"}
+
 
 def get_adapter(provider: str) -> type[LLMAdapter]:
     adapter_cls = ADAPTERS.get(provider)
@@ -75,12 +78,74 @@ async def call_with_fallback(
     )
 
 
+async def call_with_fallback_tools(
+    models: list[dict],
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    *,
+    anthropic_tools: list[dict] | None = None,
+) -> LLMResponse:
+    """Try each model in order with native tool calling support.
+
+    For OpenAI/Anthropic: uses call_with_tools() with native tool schemas.
+    For Ollama/Kimi: uses call_with_tools() which falls back to prompt-based calling.
+
+    Args:
+        models: list of ai_models rows.
+        messages: conversation messages [{role, content}].
+        tools: OpenAI-format tool definitions.
+        anthropic_tools: Anthropic-format tool definitions (optional, defaults to OpenAI format).
+
+    Returns:
+        LLMResponse with .tool_calls populated for native providers,
+        or .text containing <tool_calls> XML tags for prompt-based providers.
+    """
+    last_error: Exception | None = None
+    for model in models:
+        provider = model["provider"]
+        adapter_cls = ADAPTERS.get(provider)
+        if not adapter_cls:
+            logger.warning("Skipping unknown provider: %s", provider)
+            continue
+        adapter = adapter_cls()
+        try:
+            model_tools = None
+            if provider == "anthropic" and anthropic_tools:
+                model_tools = anthropic_tools
+            elif provider in NATIVE_TOOL_PROVIDERS and tools:
+                model_tools = tools
+
+            return await adapter.call_with_tools(
+                model["model_id"],
+                messages,
+                tools=model_tools,
+                endpoint_url=model.get("endpoint_url"),
+            )
+        except ProviderUnavailableError as e:
+            logger.warning("Provider %s/%s unavailable (tools), trying next: %s",
+                           provider, model["model_id"], e.reason)
+            last_error = e
+            continue
+        except Exception as e:
+            logger.warning("Provider %s/%s error (tools), trying next: %s",
+                           provider, model["model_id"], e)
+            last_error = ProviderUnavailableError(provider, str(e))
+            continue
+
+    raise ProviderUnavailableError(
+        "all",
+        f"All {len(models)} model(s) unavailable. Last error: {last_error}",
+    )
+
+
 __all__ = [
     "LLMAdapter",
     "LLMResponse",
     "ProviderUnavailableError",
+    "NATIVE_TOOL_PROVIDERS",
     "get_adapter",
     "call_with_fallback",
+    "call_with_fallback_tools",
     "OllamaAdapter",
     "KimiAdapter",
     "AnthropicAdapter",

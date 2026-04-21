@@ -1,77 +1,94 @@
 """Git-related repositories (copy — used by dashboard_service for commit stats)."""
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from repositories.base import BaseRepository
-from shared.database import get_db
+from shared.models.git import GithubAccount, RepoConfig, CommitEvent, CommitAnalysis
 
 
 class GitAccountRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("github_accounts")
+    model = GithubAccount
 
-    def find_workspace_accounts(self, workspace_id: str) -> list[dict]:
-        result = (
-            self._query()
-            .select("id, workspace_id, account_name, github_username, created_at")
-            .eq("workspace_id", workspace_id)
-            .order("created_at", desc=True)
-            .execute()
+    async def find_workspace_accounts(self, workspace_id: str) -> list[dict]:
+        stmt = (
+            select(
+                GithubAccount.id,
+                GithubAccount.workspace_id,
+                GithubAccount.account_name,
+                GithubAccount.github_username,
+                GithubAccount.created_at,
+            )
+            .where(GithubAccount.workspace_id == workspace_id)
+            .order_by(GithubAccount.created_at.desc())
         )
-        return result.data or []
+        result = await self.session.execute(stmt)
+        return [dict(r._mapping) for r in result.all()]
 
 
 class RepoConfigRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("repo_configs")
+    model = RepoConfig
 
-    def find_by_repo_name(self, repo_name: str, active_only: bool = True) -> dict | None:
-        q = self._query().select("*").eq("repo_name", repo_name)
+    async def find_by_repo_name(self, repo_name: str, active_only: bool = True) -> RepoConfig | None:
+        stmt = select(RepoConfig).where(RepoConfig.repo_name == repo_name)
         if active_only:
-            q = q.eq("is_active", True)
-        result = q.limit(1).execute()
-        return result.data[0] if result.data else None
+            stmt = stmt.where(RepoConfig.is_active == True)
+        stmt = stmt.limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    def find_project_repos(self, project_id: str) -> list[dict]:
-        return self.find_all(filters={"project_id": project_id}, order_by="created_at")
+    async def find_project_repos(self, project_id: str) -> list[RepoConfig]:
+        return await self.find_all(filters={"project_id": project_id}, order_by="created_at")
 
 
 class CommitRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("commit_events")
+    model = CommitEvent
 
-    def find_with_analyses(
+    async def find_with_analyses(
         self,
         repo_config_ids: list[str] | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict]:
-        db = get_db()
-        q = db.table("commit_events").select("*, commit_analyses(*)")
+        stmt = select(CommitEvent).order_by(CommitEvent.pushed_at.desc())
         if repo_config_ids:
-            q = q.in_("repo_config_id", repo_config_ids)
-        result = q.order("pushed_at", desc=True).range(offset, offset + limit - 1).execute()
+            stmt = stmt.where(CommitEvent.repo_config_id.in_(repo_config_ids))
+        stmt = stmt.offset(offset).limit(limit)
+        result = await self.session.execute(stmt)
         commits = []
-        for c in result.data or []:
-            analyses = c.pop("commit_analyses", [])
-            c["analysis"] = analyses[0] if analyses else None
-            commits.append(c)
+        for ce in result.scalars().all():
+            d = {c.name: getattr(ce, c.name) for c in ce.__table__.columns}
+            # Fetch analysis separately
+            analysis_stmt = select(CommitAnalysis).where(CommitAnalysis.commit_event_id == ce.id).limit(1)
+            analysis_result = await self.session.execute(analysis_stmt)
+            analysis = analysis_result.scalar_one_or_none()
+            d["analysis"] = {c.name: getattr(analysis, c.name) for c in analysis.__table__.columns} if analysis else None
+            commits.append(d)
         return commits
 
-    def find_commits_since(self, repo_config_ids: list[str], since: str) -> list[dict]:
-        db = get_db()
-        result = (
-            db.table("commit_events")
-            .select("*, commit_analyses(*)")
-            .in_("repo_config_id", repo_config_ids)
-            .gte("pushed_at", since)
-            .order("pushed_at", desc=True)
-            .execute()
+    async def find_commits_since(self, repo_config_ids: list[str], since: str) -> list[dict]:
+        stmt = (
+            select(CommitEvent)
+            .where(
+                CommitEvent.repo_config_id.in_(repo_config_ids),
+                CommitEvent.pushed_at >= since,
+            )
+            .order_by(CommitEvent.pushed_at.desc())
         )
-        return result.data or []
+        result = await self.session.execute(stmt)
+        commits = []
+        for ce in result.scalars().all():
+            d = {c.name: getattr(ce, c.name) for c in ce.__table__.columns}
+            analysis_stmt = select(CommitAnalysis).where(CommitAnalysis.commit_event_id == ce.id).limit(1)
+            analysis_result = await self.session.execute(analysis_stmt)
+            analysis = analysis_result.scalar_one_or_none()
+            d["analysis"] = {c.name: getattr(analysis, c.name) for c in analysis.__table__.columns} if analysis else None
+            commits.append(d)
+        return commits
 
 
 class CommitAnalysisRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("commit_analyses")
+    model = CommitAnalysis
 
-    def find_recent(self, limit: int = 5) -> list[dict]:
-        return self.find_all(order_by="analyzed_at", desc=True, limit=limit)
+    async def find_recent(self, limit: int = 5) -> list[CommitAnalysis]:
+        return await self.find_all(order_by="analyzed_at", desc=True, limit=limit)

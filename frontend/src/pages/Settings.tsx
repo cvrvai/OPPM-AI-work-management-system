@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import type { GitAccount, RepoConfig, AIModel, Project, WorkspaceMember, WorkspaceInvite, WorkspaceRole } from '@/types'
+import type { AIModel, GitAccount, PaginatedResponse, Project, RepoConfig, WorkspaceInvite, WorkspaceMember, WorkspaceRole } from '@/types'
 import {
   GitFork,
   Plus,
@@ -22,52 +23,228 @@ import {
   Crown,
   Eye,
   Clock,
+  AlertTriangle,
+  UserCheck,
+  RefreshCw,
+  Search,
+  UserPlus,
+  Pencil,
+  X,
 } from 'lucide-react'
 import { cn, getInitials } from '@/lib/utils'
 import { useChatContext } from '@/hooks/useChatContext'
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export function Settings() {
-  const [activeTab, setActiveTab] = useState<'profile' | 'members' | 'github' | 'ai'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'workspace' | 'github' | 'ai'>('profile')
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   useChatContext('workspace')
 
+  const navItems = [
+    { id: 'profile'  as const, label: 'Profile',              icon: UserCircle, description: 'Name, email and account info' },
+    ...(ws ? [{ id: 'workspace' as const, label: 'Workspace', icon: Globe, description: 'Workspace details and owner-only controls' }] : []),
+    { id: 'github'   as const, label: 'GitHub Integration',   icon: GitFork,    description: 'Connect repos and configure webhooks' },
+    { id: 'ai'       as const, label: 'AI Models',            icon: Cpu,        description: 'LLM providers and API keys' },
+  ]
+
+  const active = navItems.find((n) => n.id === activeTab) ?? navItems[0]
+
+  return (
+    <div className="flex min-h-[calc(100vh-120px)] flex-col gap-6 lg:flex-row lg:gap-8">
+      {/* ── Left sidebar nav ── */}
+      <aside className="w-full shrink-0 lg:w-56">
+        <div className="mb-5">
+          <h1 className="text-xl font-bold text-text">Settings</h1>
+          <p className="text-xs text-text-secondary mt-0.5 leading-relaxed">
+            Configure your workspace
+          </p>
+        </div>
+        <nav className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-0.5 lg:overflow-visible lg:pb-0">
+          {navItems.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left whitespace-nowrap transition-colors lg:w-full',
+                activeTab === id
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-text-secondary hover:bg-surface-alt hover:text-text'
+              )}
+            >
+              <Icon className={cn('h-4 w-4 shrink-0', activeTab === id ? 'text-primary' : 'text-text-secondary')} />
+              {label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* ── Divider ── */}
+      <div className="hidden w-px shrink-0 bg-border lg:block" />
+
+      {/* ── Content panel ── */}
+      <div className="flex-1 min-w-0">
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-text flex items-center gap-2">
+            <active.icon className="h-5 w-5 text-primary" />
+            {active.label}
+          </h2>
+          <p className="text-sm text-text-secondary mt-0.5">{active.description}</p>
+        </div>
+
+        {activeTab === 'profile'  && <ProfileSettings />}
+        {activeTab === 'workspace' && ws && <WorkspaceSettings />}
+        {activeTab === 'github'   && <GitHubSettings />}
+        {activeTab === 'ai'       && <AIModelSettings />}
+      </div>
+    </div>
+  )
+}
+
+function WorkspaceSettings() {
+  const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const fetchWorkspaces = useWorkspaceStore((s) => s.fetchWorkspaces)
+  const navigate = useNavigate()
+  const currentRole = ws?.current_user_role ?? ws?.role ?? 'viewer'
+  const isOwner = currentRole === 'owner'
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteName, setDeleteName] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+
+  const resetDeleteState = () => {
+    setShowDeleteConfirm(false)
+    setDeleteName('')
+    setDeleteError('')
+  }
+
+  const deleteWorkspaceMutation = useMutation({
+    mutationFn: () => api.delete(`/v1/workspaces/${ws!.id}`),
+    onSuccess: async () => {
+      resetDeleteState()
+      await fetchWorkspaces()
+      navigate('/')
+    },
+    onError: (error: Error) => {
+      setDeleteError(error.message)
+    },
+  })
+
+  if (!ws) {
+    return null
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-text">Settings</h1>
-        <p className="text-sm text-text-secondary mt-0.5">
-          Configure your profile, workspace members, GitHub integration, and AI models
-        </p>
+      <div className="rounded-xl border border-border bg-white p-6 shadow-sm">
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-text">Workspace Overview</h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              Review the current workspace identity and the role you hold inside it.
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-600">
+            {currentRole}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Workspace name</p>
+            <p className="mt-2 text-sm font-semibold text-text">{ws.name}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Slug</p>
+            <p className="mt-2 text-sm font-semibold text-text">{ws.slug}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4 md:col-span-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Description</p>
+            <p className="mt-2 text-sm text-text-secondary">
+              {ws.description || 'No workspace description has been added yet.'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Created</p>
+            <p className="mt-2 text-sm text-text-secondary">{new Date(ws.created_at).toLocaleDateString()}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-alt/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-secondary">Last updated</p>
+            <p className="mt-2 text-sm text-text-secondary">{new Date(ws.updated_at).toLocaleDateString()}</p>
+          </div>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
-        {([
-          { id: 'profile' as const, label: 'Profile', icon: UserCircle },
-          ...(ws ? [{ id: 'members' as const, label: 'Members', icon: Users }] : []),
-          { id: 'github' as const, label: 'GitHub Integration', icon: GitFork },
-          { id: 'ai' as const, label: 'AI Models', icon: Cpu },
-        ]).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={cn(
-              'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors -mb-px',
-              activeTab === id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-text-secondary hover:text-text'
+      <div className="rounded-xl border border-danger/25 bg-white p-6 shadow-sm">
+        <div className="mb-5 flex items-start gap-3">
+          <div className="rounded-full bg-danger/10 p-2 text-danger">
+            <AlertTriangle className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-text">Danger Zone</h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              Deleting a workspace removes its projects, tasks, invites, and related planning data permanently.
+            </p>
+          </div>
+        </div>
+
+        {!isOwner ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Only the workspace owner can delete this workspace. Your current role is <strong className="capitalize">{currentRole}</strong>.
+          </div>
+        ) : showDeleteConfirm ? (
+          <div className="space-y-4 rounded-2xl border border-danger/25 bg-danger/5 p-4">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-text">Confirm workspace deletion</p>
+              <p className="text-sm text-text-secondary">
+                Type <strong>{ws.name}</strong> to confirm. This cannot be undone.
+              </p>
+            </div>
+
+            <input
+              value={deleteName}
+              onChange={(e) => setDeleteName(e.target.value)}
+              placeholder={ws.name}
+              className="w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors focus:border-danger focus:ring-4 focus:ring-danger/10"
+            />
+
+            {deleteError && (
+              <p className="text-sm text-danger">{deleteError}</p>
             )}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
 
-      {activeTab === 'profile' && <ProfileSettings />}
-      {activeTab === 'members' && ws && <MembersSettings />}
-      {activeTab === 'github' && <GitHubSettings />}
-      {activeTab === 'ai' && <AIModelSettings />}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={resetDeleteState}
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-alt"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteWorkspaceMutation.mutate()}
+                disabled={deleteWorkspaceMutation.isPending || deleteName.trim() !== ws.name}
+                className="inline-flex items-center justify-center rounded-xl bg-danger px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteWorkspaceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Workspace'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-alt/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-text">Delete {ws.name}</p>
+              <p className="text-sm text-text-secondary">Make sure you really want to remove the entire workspace before continuing.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="inline-flex items-center justify-center rounded-xl bg-danger px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+            >
+              Delete Workspace
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -76,7 +253,7 @@ function ProfileSettings() {
   const user = useAuthStore((s) => s.user)
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const email = user?.email || ''
-  const name = user?.user_metadata?.full_name || email.split('@')[0]
+  const name = user?.full_name || user?.user_metadata?.full_name || email.split('@')[0]
   const [displayName, setDisplayName] = useState(name)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -84,11 +261,8 @@ function ProfileSettings() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      const { supabase } = await import('@/lib/supabase')
-      // Update Supabase Auth user metadata
-      await supabase.auth.updateUser({
-        data: { full_name: displayName },
-      })
+      // Update profile via gateway → core auth endpoint
+      await api.patch('/auth/profile', { full_name: displayName })
       // Also update workspace_members.display_name if workspace is selected
       if (ws) {
         await api.patch(`/v1/workspaces/${ws.id}/members/me/display-name`, {
@@ -176,25 +350,72 @@ function ProfileSettings() {
 
 // ── Members & Invites ──
 
-const ROLE_CONFIG: Record<WorkspaceRole, { label: string; color: string; icon: typeof Crown }> = {
-  owner: { label: 'Owner', color: 'bg-amber-100 text-amber-700', icon: Crown },
-  admin: { label: 'Admin', color: 'bg-purple-100 text-purple-700', icon: Shield },
-  member: { label: 'Member', color: 'bg-blue-100 text-blue-700', icon: Users },
-  viewer: { label: 'Viewer', color: 'bg-gray-100 text-gray-600', icon: Eye },
+type EmailLookup = { exists: boolean; user_id?: string; display_name?: string; already_member: boolean }
+
+const ROLE_CONFIG: Record<WorkspaceRole, { label: string; color: string; icon: typeof Crown; description: string }> = {
+  owner:  { label: 'Owner',  color: 'bg-amber-100 text-amber-700',  icon: Crown,  description: 'Full control including deleting the workspace' },
+  admin:  { label: 'Admin',  color: 'bg-purple-100 text-purple-700', icon: Shield, description: 'Manage members, settings, and all projects' },
+  member: { label: 'Member', color: 'bg-blue-100 text-blue-700',    icon: Users,  description: 'Create projects, manage own tasks, comment' },
+  viewer: { label: 'Viewer', color: 'bg-gray-100 text-gray-600',    icon: Eye,    description: 'Read-only access — great for clients or auditors' },
 }
 
-function MembersSettings() {
+const ROLE_ORDER: WorkspaceRole[] = ['owner', 'admin', 'member', 'viewer']
+
+export function WorkspaceMembersPanel() {
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const user = useAuthStore((s) => s.user)
   const wsPath = `/v1/workspaces/${ws!.id}`
-  const currentRole = (ws as any)?.current_user_role as WorkspaceRole | undefined
+  const currentRole = ws?.current_user_role ?? ws?.role
   const isAdmin = currentRole === 'owner' || currentRole === 'admin'
+  const [inviteReferenceTime] = useState(() => Date.now())
 
-  // ── State ──
+  // ── Invite form state ──
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<WorkspaceRole>('member')
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+  const [memberSearch, setMemberSearch] = useState('')
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Email lookup ──
+  const [lookupState, setLookupState] = useState<'idle' | 'loading' | 'found' | 'not-found' | 'member'>('idle')
+  const [lookupData, setLookupData] = useState<EmailLookup | null>(null)
+
+  const handleInviteEmailChange = (value: string) => {
+    setInviteEmail(value)
+
+    const trimmed = value.trim()
+    if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
+      setLookupState('idle')
+      setLookupData(null)
+      return
+    }
+
+    setLookupState('loading')
+  }
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    const trimmed = inviteEmail.trim()
+    if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
+      return
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const result = await api.get<EmailLookup>(
+          `${wsPath}/members/lookup?email=${encodeURIComponent(trimmed)}`
+        )
+        setLookupData(result)
+        if (result.already_member) setLookupState('member')
+        else if (result.exists) setLookupState('found')
+        else setLookupState('not-found')
+      } catch {
+        setLookupState('idle')
+      }
+    }, 500)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [inviteEmail, wsPath])
 
   // ── Queries ──
   const { data: members = [], isLoading: loadingMembers } = useQuery({
@@ -216,6 +437,8 @@ function MembersSettings() {
       queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] })
       setInviteEmail('')
       setInviteRole('member')
+      setLookupState('idle')
+      setLookupData(null)
     },
   })
 
@@ -241,83 +464,180 @@ function MembersSettings() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] }),
   })
 
+  const resendInvite = useMutation({
+    mutationFn: (inviteId: string) => api.post(`${wsPath}/invites/${inviteId}/resend`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] }),
+  })
+
   const ownerCount = members.filter(m => m.role === 'owner').length
+  const sortedMembers = [...members].sort(
+    (a, b) => ROLE_ORDER.indexOf(a.role as WorkspaceRole) - ROLE_ORDER.indexOf(b.role as WorkspaceRole)
+  )
+  const filteredMembers = memberSearch.trim()
+    ? sortedMembers.filter(m =>
+        (m.display_name || '').toLowerCase().includes(memberSearch.toLowerCase()) ||
+        (m.email || '').toLowerCase().includes(memberSearch.toLowerCase())
+      )
+    : sortedMembers
+
+  const canSendInvite = lookupState !== 'member' && lookupState !== 'loading' && inviteEmail.trim()
+  const isNewUser = lookupState === 'not-found'
 
   return (
     <div className="space-y-6">
-      {/* Invite Form (admin+ only) */}
+      {/* ── Invite Form (admin+ only) ── */}
       {isAdmin && (
         <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
-            <Mail className="h-4 w-4 text-primary" />
+            <UserPlus className="h-4 w-4 text-primary" />
             Invite Member
           </h2>
           <form
             onSubmit={(e) => {
               e.preventDefault()
-              if (!inviteEmail.trim()) return
+              if (!canSendInvite) return
               sendInvite.mutate({ email: inviteEmail.trim(), role: inviteRole })
             }}
-            className="flex items-end gap-3"
+            className="space-y-4"
           >
-            <div className="flex-1">
+            {/* Email input + lookup feedback */}
+            <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">Email address</label>
-              <input
-                type="email"
-                placeholder="colleague@company.com"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                required
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-            <div className="w-36">
-              <label className="block text-sm font-medium text-text-secondary mb-1">Role</label>
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as WorkspaceRole)}
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
-              >
-                <option value="admin">Admin</option>
-                <option value="member">Member</option>
-                <option value="viewer">Viewer</option>
-              </select>
-            </div>
-            <button
-              type="submit"
-              disabled={sendInvite.isPending || !inviteEmail.trim()}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors whitespace-nowrap"
-            >
-              {sendInvite.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                'Send Invite'
+              <div className="relative">
+                <input
+                  type="email"
+                  placeholder="colleague@company.com"
+                  value={inviteEmail}
+                  onChange={(e) => handleInviteEmailChange(e.target.value)}
+                  required
+                  className={cn(
+                    'w-full rounded-lg border px-3 py-2 text-sm pr-10 outline-none focus:ring-2 transition-all',
+                    lookupState === 'found'     && 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-100',
+                    lookupState === 'not-found' && 'border-amber-400 focus:border-amber-500 focus:ring-amber-100',
+                    lookupState === 'member'    && 'border-danger focus:border-danger focus:ring-danger/10',
+                    (lookupState === 'idle' || lookupState === 'loading') && 'border-border focus:border-primary focus:ring-primary/20',
+                  )}
+                />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {lookupState === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-text-secondary" />}
+                  {lookupState === 'found'   && <UserCheck className="h-4 w-4 text-emerald-500" />}
+                  {lookupState === 'not-found' && <AlertTriangle className="h-4 w-4 text-amber-500" />}
+                  {lookupState === 'member'  && <AlertTriangle className="h-4 w-4 text-danger" />}
+                </div>
+              </div>
+
+              {/* Lookup status banner */}
+              {lookupState === 'found' && lookupData && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm text-emerald-700">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-200 text-emerald-700 text-xs font-semibold">
+                    {getInitials(lookupData.display_name || inviteEmail)}
+                  </div>
+                  <span><strong>{lookupData.display_name || inviteEmail}</strong> has an account — they'll receive an invite email.</span>
+                </div>
               )}
-            </button>
+              {lookupState === 'not-found' && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-700">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>No account found. They'll receive a <strong>sign-up link</strong> — they can register and join automatically.</span>
+                </div>
+              )}
+              {lookupState === 'member' && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-danger">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>This person is already a member of this workspace.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Role picker cards */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">Assign role</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {(['admin', 'member', 'viewer'] as WorkspaceRole[]).map((role) => {
+                  const cfg = ROLE_CONFIG[role]
+                  const Icon = cfg.icon
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => setInviteRole(role)}
+                      className={cn(
+                        'flex flex-col items-start gap-1 rounded-lg border-2 px-3 py-2.5 text-left transition-all',
+                        inviteRole === role
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-text-secondary/50'
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Icon className={cn('h-3.5 w-3.5', inviteRole === role ? 'text-primary' : 'text-text-secondary')} />
+                        <span className={cn('text-sm font-semibold', inviteRole === role ? 'text-primary' : 'text-text')}>
+                          {cfg.label}
+                        </span>
+                        {role === 'member' && (
+                          <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">recommended</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-text-secondary leading-tight">{cfg.description}</p>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={sendInvite.isPending || !canSendInvite}
+                className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors"
+              >
+                {sendInvite.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : isNewUser ? (
+                  'Send Sign-Up Invite'
+                ) : (
+                  'Send Invite'
+                )}
+              </button>
+              {sendInvite.isError && (
+                <p className="text-sm text-danger">{(sendInvite.error as Error).message}</p>
+              )}
+              {sendInvite.isSuccess && (
+                <p className="text-sm text-emerald-600 flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4" /> Invitation sent!
+                </p>
+              )}
+            </div>
           </form>
-          {sendInvite.isError && (
-            <p className="mt-2 text-sm text-danger">{(sendInvite.error as Error).message}</p>
-          )}
-          {sendInvite.isSuccess && (
-            <p className="mt-2 text-sm text-emerald-600">Invitation sent successfully!</p>
-          )}
         </div>
       )}
 
-      {/* Members List */}
+      {/* ── Members List ── */}
       <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
-          <Users className="h-4 w-4 text-primary" />
-          Members
-          <span className="text-xs text-text-secondary font-normal">({members.length})</span>
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-text flex items-center gap-2">
+            <Users className="h-4 w-4 text-primary" />
+            Members
+            <span className="text-xs text-text-secondary font-normal">({members.length})</span>
+          </h2>
+          {members.length > 5 && (
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-secondary pointer-events-none" />
+              <input
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                placeholder="Search members..."
+                className="rounded-lg border border-border pl-8 pr-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 w-44"
+              />
+            </div>
+          )}
+        </div>
         {loadingMembers ? (
           <div className="flex justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-primary" />
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {members.map((member) => {
+            {filteredMembers.map((member) => {
               const isSelf = member.user_id === user?.id
               const isLastOwner = member.role === 'owner' && ownerCount <= 1
               const roleInfo = ROLE_CONFIG[member.role as WorkspaceRole] || ROLE_CONFIG.member
@@ -334,9 +654,14 @@ function MembersSettings() {
                         {member.display_name || member.email || member.user_id.slice(0, 8)}
                         {isSelf && <span className="ml-1.5 text-xs text-text-secondary">(you)</span>}
                       </p>
-                      {member.email && member.display_name && (
-                        <p className="text-xs text-text-secondary">{member.email}</p>
-                      )}
+                      <div className="flex items-center gap-2 text-xs text-text-secondary">
+                        {member.email && member.display_name && <span>{member.email}</span>}
+                        {member.joined_at && (
+                          <span className="text-text-secondary/60">
+                            · since {new Date(member.joined_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -388,11 +713,14 @@ function MembersSettings() {
                 </div>
               )
             })}
+            {filteredMembers.length === 0 && (
+              <p className="py-6 text-center text-sm text-text-secondary">No members match your search.</p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Pending Invites (admin+ only) */}
+      {/* ── Pending Invites (admin+ only) ── */}
       {isAdmin && (
         <div className="rounded-xl border border-border bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
@@ -412,38 +740,62 @@ function MembersSettings() {
             <div className="divide-y divide-border">
               {invites.map((invite) => {
                 const expiresAt = new Date(invite.expires_at)
-                const isExpired = expiresAt < new Date()
-                const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                const roleInfo = ROLE_CONFIG[invite.role as WorkspaceRole] || ROLE_CONFIG.member
+                const isExpired = expiresAt.getTime() < inviteReferenceTime
+                const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - inviteReferenceTime) / (1000 * 60 * 60 * 24)))
+                const sentAt = invite.sent_at ? new Date(invite.sent_at) : null
+                const isNew = invite.is_new_user
+                const roleInfo = ROLE_CONFIG[invite.role] || ROLE_CONFIG.member
 
                 return (
                   <div key={invite.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 text-sm">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500">
                         <Mail className="h-4 w-4" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-text">{invite.email}</p>
-                        <div className="flex items-center gap-2 text-xs text-text-secondary">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-text">{invite.email}</p>
+                          {isNew === true && (
+                            <span className="rounded-full bg-amber-100 text-amber-700 px-1.5 py-0.5 text-[10px] font-medium">new user</span>
+                          )}
+                          {isNew === false && (
+                            <span className="rounded-full bg-blue-100 text-blue-700 px-1.5 py-0.5 text-[10px] font-medium">existing user</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-text-secondary mt-0.5">
                           <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium', roleInfo.color)}>
                             {roleInfo.label}
                           </span>
+                          {sentAt && <span>sent {sentAt.toLocaleDateString()}</span>}
                           {isExpired ? (
-                            <span className="text-danger font-medium">Expired</span>
+                            <span className="text-danger font-medium">· Expired</span>
                           ) : (
-                            <span>Expires in {daysLeft} day{daysLeft !== 1 ? 's' : ''}</span>
+                            <span className={cn(daysLeft <= 1 ? 'text-danger' : daysLeft <= 3 ? 'text-amber-600' : '')}>
+                              · {daysLeft}d left
+                            </span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => revokeInvite.mutate(invite.id)}
-                      disabled={revokeInvite.isPending}
-                      className="text-text-secondary hover:text-danger transition-colors"
-                      title="Revoke invite"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => resendInvite.mutate(invite.id)}
+                        disabled={resendInvite.isPending}
+                        className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary hover:text-primary hover:border-primary transition-colors"
+                        title="Resend invite"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Resend
+                      </button>
+                      <button
+                        onClick={() => revokeInvite.mutate(invite.id)}
+                        disabled={revokeInvite.isPending}
+                        className="text-text-secondary hover:text-danger transition-colors"
+                        title="Revoke invite"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 )
               })}
@@ -461,6 +813,11 @@ function GitHubSettings() {
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const [showAddAccount, setShowAddAccount] = useState(false)
   const [showAddRepo, setShowAddRepo] = useState(false)
+  const [editingRepoId, setEditingRepoId] = useState<string | null>(null)
+  const [editRepoName, setEditRepoName] = useState('')
+  const [editRepoProjectId, setEditRepoProjectId] = useState('')
+  const [editRepoAccountId, setEditRepoAccountId] = useState('')
+  const [editWebhookSecret, setEditWebhookSecret] = useState('')
   const [accountName, setAccountName] = useState('')
   const [githubUsername, setGithubUsername] = useState('')
   const [token, setToken] = useState('')
@@ -472,28 +829,28 @@ function GitHubSettings() {
 
   const { data: accounts, isLoading: loadingAccounts } = useQuery({
     queryKey: ['github-accounts', ws?.id],
-    queryFn: () => ws ? api.get<GitAccount[]>(`${wsPath}/github-accounts`) : api.get<GitAccount[]>('/github-accounts'),
+    queryFn: () => api.get<GitAccount[]>(`${wsPath}/github-accounts`),
+    enabled: !!ws,
   })
 
   const { data: repos, isLoading: loadingRepos } = useQuery({
     queryKey: ['repo-configs', ws?.id],
-    queryFn: () => ws ? api.get<RepoConfig[]>(`${wsPath}/git/repos`) : api.get<RepoConfig[]>('/git/repo-map'),
+    queryFn: () => api.get<RepoConfig[]>(`${wsPath}/git/repos`),
+    enabled: !!ws,
   })
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
-      if (ws) {
-        const res = await api.get<{ items: Project[]; total: number }>(`${wsPath}/projects`)
-        return (res as any)?.items ?? []
-      }
-      return api.get<Project[]>('/projects')
+      const res = await api.get<PaginatedResponse<Project>>(`${wsPath}/projects`)
+      return res.items ?? []
     },
+    enabled: !!ws,
   })
 
   const createAccount = useMutation({
     mutationFn: (data: { account_name: string; github_username: string; token: string }) =>
-      ws ? api.post(`${wsPath}/github-accounts`, data) : api.post('/github-accounts', data),
+      api.post(`${wsPath}/github-accounts`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['github-accounts'] })
       setShowAddAccount(false)
@@ -504,13 +861,13 @@ function GitHubSettings() {
   })
 
   const deleteAccount = useMutation({
-    mutationFn: (id: string) => ws ? api.delete(`${wsPath}/github-accounts/${id}`) : api.delete(`/github-accounts/${id}`),
+    mutationFn: (id: string) => api.delete(`${wsPath}/github-accounts/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['github-accounts'] }),
   })
 
   const createRepo = useMutation({
     mutationFn: (data: { repo_name: string; project_id: string; github_account_id: string; webhook_secret: string }) =>
-      ws ? api.post(`${wsPath}/git/repos`, data) : api.post('/git/repo-map', data),
+      api.post(`${wsPath}/git/repos`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repo-configs'] })
       setShowAddRepo(false)
@@ -522,15 +879,27 @@ function GitHubSettings() {
   })
 
   const deleteRepo = useMutation({
-    mutationFn: (id: string) => ws ? api.delete(`${wsPath}/git/repos/${id}`) : api.delete(`/git/repo-map/${id}`),
+    mutationFn: (id: string) => api.delete(`${wsPath}/git/repos/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['repo-configs'] }),
+  })
+
+  const updateRepo = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      api.patch(`${wsPath}/git/repos/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repo-configs'] })
+      setEditingRepoId(null)
+    },
   })
 
   const accs = accounts || []
   const rps = repos || []
 
+  const webhookBaseUrl = import.meta.env.VITE_WEBHOOK_BASE_URL?.replace(/\/$/, '') || window.location.origin
+  const webhookUrl = `${webhookBaseUrl}/api/v1/git/webhook`
+
   const handleCopyWebhook = () => {
-    navigator.clipboard.writeText(`${window.location.origin}/api/git/webhook`)
+    navigator.clipboard.writeText(webhookUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -722,34 +1091,139 @@ function GitHubSettings() {
         ) : (
           <div className="space-y-2">
             {rps.map((repo) => (
-              <div key={repo.id} className="flex items-center justify-between rounded-lg border border-border p-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50">
-                    <Globe className="h-4 w-4 text-violet-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-text">{repo.repo_name}</p>
-                    <div className="flex items-center gap-2 text-xs text-text-secondary">
-                      <span className="flex items-center gap-1">
-                        <Key className="h-2.5 w-2.5" /> Webhook configured
-                      </span>
-                      <span className={cn(
-                        'flex items-center gap-1 font-medium',
-                        repo.is_active ? 'text-emerald-600' : 'text-gray-400'
-                      )}>
-                        <Check className="h-2.5 w-2.5" />
-                        {repo.is_active ? 'Active' : 'Inactive'}
-                      </span>
+              <div key={repo.id} className="rounded-lg border border-border">
+                {/* ── Row ── */}
+                <div className="flex items-center justify-between p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50">
+                      <Globe className="h-4 w-4 text-violet-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-text">{repo.repo_name}</p>
+                      <div className="flex items-center gap-2 text-xs text-text-secondary">
+                        {projects.find(p => p.id === repo.project_id) && (
+                          <span className="font-medium text-violet-600">
+                            {projects.find(p => p.id === repo.project_id)!.title}
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1">
+                          <Key className="h-2.5 w-2.5" /> Webhook configured
+                        </span>
+                        <span className={cn(
+                          'flex items-center gap-1 font-medium',
+                          repo.is_active ? 'text-emerald-600' : 'text-gray-400'
+                        )}>
+                          <Check className="h-2.5 w-2.5" />
+                          {repo.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        if (editingRepoId === repo.id) {
+                          setEditingRepoId(null)
+                        } else {
+                          setEditingRepoId(repo.id)
+                          setEditRepoName(repo.repo_name)
+                          setEditRepoProjectId(repo.project_id)
+                          setEditRepoAccountId(repo.github_account_id ?? '')
+                          setEditWebhookSecret('')
+                        }
+                      }}
+                      className={cn(
+                        'rounded p-1 transition-colors',
+                        editingRepoId === repo.id
+                          ? 'text-primary bg-primary/10'
+                          : 'text-text-secondary hover:text-primary'
+                      )}
+                      title="Edit"
+                    >
+                      {editingRepoId === repo.id ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                    </button>
+                    <button
+                      onClick={() => deleteRepo.mutate(repo.id)}
+                      disabled={deleteRepo.isPending}
+                      className="rounded p-1 text-text-secondary hover:text-danger"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => deleteRepo.mutate(repo.id)}
-                  disabled={deleteRepo.isPending}
-                  className="text-text-secondary hover:text-danger"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+
+                {/* ── Inline edit form ── */}
+                {editingRepoId === repo.id && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const payload: Record<string, unknown> = {
+                        repo_name: editRepoName,
+                        project_id: editRepoProjectId,
+                        github_account_id: editRepoAccountId,
+                      }
+                      if (editWebhookSecret) payload.webhook_secret = editWebhookSecret
+                      updateRepo.mutate({ id: repo.id, data: payload })
+                    }}
+                    className="border-t border-border bg-surface-alt px-3 pb-3 pt-3 space-y-3"
+                  >
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        placeholder="owner/repo-name"
+                        value={editRepoName}
+                        onChange={(e) => setEditRepoName(e.target.value)}
+                        required
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                      <input
+                        placeholder="New webhook secret (leave blank to keep current)"
+                        value={editWebhookSecret}
+                        onChange={(e) => setEditWebhookSecret(e.target.value)}
+                        minLength={editWebhookSecret ? 8 : undefined}
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                      <select
+                        value={editRepoProjectId}
+                        onChange={(e) => setEditRepoProjectId(e.target.value)}
+                        required
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      >
+                        <option value="">Select project...</option>
+                        {(projects || []).map((p) => (
+                          <option key={p.id} value={p.id}>{p.title}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={editRepoAccountId}
+                        onChange={(e) => setEditRepoAccountId(e.target.value)}
+                        required
+                        className="rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+                      >
+                        <option value="">Select account...</option>
+                        {accs.map((a) => (
+                          <option key={a.id} value={a.id}>{a.account_name} (@{a.github_username})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingRepoId(null)}
+                        className="rounded-lg border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-white"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={updateRepo.isPending}
+                        className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50"
+                      >
+                        {updateRepo.isPending ? 'Saving...' : 'Save changes'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             ))}
           </div>
@@ -760,7 +1234,7 @@ function GitHubSettings() {
           <p className="text-xs font-medium text-text-secondary mb-1">Webhook URL (paste in GitHub)</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs text-primary bg-white px-2 py-1 rounded border border-border overflow-x-auto">
-              {window.location.origin}/api/git/webhook
+              {webhookUrl}
             </code>
             <button
               onClick={handleCopyWebhook}
@@ -998,7 +1472,7 @@ function AIModelSettings() {
                         onClick={() =>
                           createModel.mutate({
                             name: m.name,
-                            provider: activeProvider,
+                            provider: activePreset?.provider ?? activeProvider,
                             model_id: m.model_id,
                             endpoint_url: m.endpoint ?? null,
                           })

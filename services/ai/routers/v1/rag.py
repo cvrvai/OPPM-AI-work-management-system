@@ -3,8 +3,10 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import get_current_user, get_workspace_context
+from shared.database import get_session
 from schemas.rag import RAGQueryRequest, RAGQueryResponse, RAGSource
 from services import rag_service
 
@@ -17,10 +19,12 @@ async def rag_query_route(
     body: RAGQueryRequest,
     user=Depends(get_current_user),
     ctx=Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
 ):
     """Query the RAG pipeline for relevant context."""
     try:
         result = await rag_service.retrieve_with_rag_pipeline(
+            session=session,
             workspace_id=ctx.workspace_id,
             query=body.query,
             user_id=user.id,

@@ -10,6 +10,7 @@ export interface Workspace {
   created_at: string
   updated_at: string
   role?: WorkspaceRole
+  current_user_role?: WorkspaceRole
 }
 
 export interface WorkspaceMember {
@@ -22,6 +23,16 @@ export interface WorkspaceMember {
   display_name?: string
 }
 
+export type SkillLevel = 'beginner' | 'intermediate' | 'expert'
+
+export interface MemberSkill {
+  id: string
+  workspace_member_id: string
+  skill_name: string
+  skill_level: SkillLevel
+  created_at: string
+}
+
 export interface WorkspaceInvite {
   id: string
   workspace_id: string
@@ -31,23 +42,54 @@ export interface WorkspaceInvite {
   token: string
   expires_at: string
   accepted_at: string | null
+  created_at?: string
+  sent_at?: string | null
+  is_new_user?: boolean
+}
+
+export interface MyInvite {
+  id: string
+  workspace_id: string
+  workspace_name: string
+  workspace_slug: string
+  inviter_name: string
+  role: WorkspaceRole
+  token: string
+  expires_at: string
+  created_at: string
+  is_expired: boolean
+}
+
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page?: number
+  page_size?: number
 }
 
 // ── Project ──
 export type ProjectStatus = 'planning' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled'
 export type Priority = 'low' | 'medium' | 'high' | 'critical'
+export type Methodology = 'agile' | 'waterfall' | 'hybrid' | 'oppm'
 
 export interface Project {
   id: string
   workspace_id: string
   title: string
   description: string
+  project_code: string | null
+  objective_summary: string | null
+  deliverable_output: string | null
   status: ProjectStatus
   priority: Priority
   progress: number
+  budget: number
+  planning_hours: number
   start_date: string | null
   deadline: string | null
+  end_date: string | null
   metadata?: Record<string, unknown>
+  methodology: Methodology
   lead_id: string | null
   lead?: WorkspaceMember
   created_at: string
@@ -67,6 +109,12 @@ export interface ProjectMember {
 // ── Task ──
 export type TaskStatus = 'todo' | 'in_progress' | 'completed'
 
+export interface TaskOwner {
+  member_id: string
+  display_name?: string | null
+  priority: 'A' | 'B' | 'C'
+}
+
 export interface Task {
   id: string
   title: string
@@ -76,13 +124,33 @@ export interface Task {
   priority: Priority
   progress: number
   project_contribution: number
+  sort_order: number
+  start_date: string | null
   due_date: string | null
   assignee_id: string | null
+  parent_task_id?: string | null
   created_by: string | null
   completed_at: string | null
   created_at: string
   updated_at: string
   oppm_objective_id?: string | null
+  depends_on: string[]
+  assignees?: { id: string; display_name?: string | null }[]
+  owners?: TaskOwner[]
+  sub_objective_ids?: string[]
+}
+
+export interface TaskReport {
+  id: string
+  task_id: string
+  reporter_id: string
+  report_date: string
+  hours: number
+  description: string
+  is_approved: boolean
+  approved_by: string | null
+  approved_at: string | null
+  created_at: string
 }
 
 // ── OPPM ──
@@ -91,17 +159,27 @@ export interface OPPMObjective {
   project_id: string
   title: string
   owner_id: string | null
+  priority?: string | null
   owner?: WorkspaceMember
   sort_order: number
   tasks: Task[]
 }
 
+export interface OPPMSubObjective {
+  id: string
+  project_id: string
+  position: number
+  label: string
+  created_at: string
+}
+
 export interface OPPMTimelineEntry {
   id: string
   project_id: string
-  objective_id: string
+  task_id: string
   week_start: string
   status: 'planned' | 'in_progress' | 'completed' | 'at_risk' | 'blocked'
+  quality?: 'good' | 'average' | 'bad' | null
   ai_score?: number | null
   notes?: string | null
   created_at: string
@@ -113,7 +191,34 @@ export interface OPPMCost {
   category: string
   planned_amount: number
   actual_amount: number
-  notes: string
+  description: string
+  created_at: string
+}
+
+export interface OPPMDeliverable {
+  id: string
+  project_id: string
+  item_number: number
+  description: string
+  created_at: string
+}
+
+export interface OPPMForecast {
+  id: string
+  project_id: string
+  item_number: number
+  description: string
+  created_at: string
+}
+
+export type RagStatus = 'green' | 'amber' | 'red'
+
+export interface OPPMRisk {
+  id: string
+  project_id: string
+  item_number: number
+  description: string
+  rag: RagStatus
   created_at: string
 }
 
@@ -183,6 +288,13 @@ export interface AIModel {
 }
 
 // ── Dashboard Stats ──
+export interface ProjectProgress {
+  project_id: string
+  title: string
+  progress: number
+  status: string
+}
+
 export interface DashboardStats {
   total_projects: number
   active_projects: number
@@ -191,6 +303,7 @@ export interface DashboardStats {
   total_commits_today: number
   avg_quality_score: number
   avg_alignment_score: number
+  project_progress: ProjectProgress[]
 }
 
 // ── Notifications ──

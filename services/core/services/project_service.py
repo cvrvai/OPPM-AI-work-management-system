@@ -3,63 +3,96 @@ Project service — business logic for project CRUD + progress.
 """
 
 import asyncio
+import logging
+from datetime import date
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from repositories.project_repo import ProjectRepository, ProjectMemberRepository
 from repositories.notification_repo import AuditRepository
-from services.document_indexer import index_project, remove_entity
 
-project_repo = ProjectRepository()
-project_member_repo = ProjectMemberRepository()
-audit_repo = AuditRepository()
+logger = logging.getLogger(__name__)
 
 
-def list_projects(workspace_id: str, status: str | None = None, limit: int = 50, offset: int = 0) -> dict:
-    items = project_repo.find_workspace_projects(workspace_id, status=status, limit=limit, offset=offset)
-    total = project_repo.count_in_workspace(workspace_id)
+def _parse_dates(data: dict) -> dict:
+    """Convert ISO date strings to datetime.date for asyncpg compatibility."""
+    for field in ("start_date", "deadline", "end_date"):
+        val = data.get(field)
+        if isinstance(val, str) and val:
+            try:
+                data[field] = date.fromisoformat(val)
+            except ValueError:
+                pass
+    return data
+
+
+def _audit_safe(data: dict) -> dict:
+    """Return a copy of data safe for JSON (converts date objects to ISO strings)."""
+    out = {}
+    for k, v in data.items():
+        out[k] = v.isoformat() if isinstance(v, date) else v
+    return out
+
+
+async def list_projects(session: AsyncSession, workspace_id: str, status: str | None = None, limit: int = 50, offset: int = 0) -> dict:
+    project_repo = ProjectRepository(session)
+    items = await project_repo.find_workspace_projects(workspace_id, status=status, limit=limit, offset=offset)
+    total = await project_repo.count_in_workspace(workspace_id)
     return {"items": items, "total": total}
 
 
-def get_project(project_id: str, workspace_id: str) -> dict:
-    project = project_repo.find_by_id(project_id)
-    if not project or project.get("workspace_id") != workspace_id:
+async def get_project(session: AsyncSession, project_id: str, workspace_id: str) -> dict:
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
 
-def create_project(workspace_id: str, user_id: str, data: dict, member_id: str) -> dict:
+async def create_project(session: AsyncSession, workspace_id: str, user_id: str, data: dict, member_id: str) -> dict:
+    project_repo = ProjectRepository(session)
+    project_member_repo = ProjectMemberRepository(session)
+    audit_repo = AuditRepository(session)
+
     data["workspace_id"] = workspace_id
-    project = project_repo.create(data)
-    # Auto-add creator as project lead
-    project_member_repo.add_member(project["id"], member_id, role="lead")
-    audit_repo.log(workspace_id, user_id, "create", "project", project["id"], new_data=data)
-    asyncio.create_task(index_project(project, workspace_id))
+    _parse_dates(data)
+    project = await project_repo.create(data)
+    await project_member_repo.add_member(str(project.id), member_id, role="lead")
+    await audit_repo.log(workspace_id, user_id, "create", "project", str(project.id), new_data=_audit_safe(data))
     return project
 
 
-def update_project(project_id: str, workspace_id: str, user_id: str, data: dict) -> dict:
-    project = get_project(project_id, workspace_id)
-    result = project_repo.update(project_id, data)
+async def update_project(session: AsyncSession, project_id: str, workspace_id: str, user_id: str, data: dict) -> dict:
+    project_repo = ProjectRepository(session)
+    audit_repo = AuditRepository(session)
+
+    await get_project(session, project_id, workspace_id)
+    _parse_dates(data)
+    result = await project_repo.update(project_id, data)
     if not result:
         raise HTTPException(status_code=404, detail="Project not found")
-    audit_repo.log(workspace_id, user_id, "update", "project", project_id, new_data=data)
-    asyncio.create_task(index_project(result, workspace_id))
+    await audit_repo.log(workspace_id, user_id, "update", "project", project_id, new_data=_audit_safe(data))
     return result
 
 
-def delete_project(project_id: str, workspace_id: str, user_id: str) -> bool:
-    get_project(project_id, workspace_id)  # verify exists + workspace
-    audit_repo.log(workspace_id, user_id, "delete", "project", project_id)
-    asyncio.create_task(remove_entity("project", project_id))
-    return project_repo.delete(project_id)
+async def delete_project(session: AsyncSession, project_id: str, workspace_id: str, user_id: str) -> bool:
+    project_repo = ProjectRepository(session)
+    audit_repo = AuditRepository(session)
+
+    await get_project(session, project_id, workspace_id)
+    await audit_repo.log(workspace_id, user_id, "delete", "project", project_id)
+    return await project_repo.delete(project_id)
 
 
-def get_project_members(project_id: str) -> list[dict]:
-    return project_member_repo.find_project_members(project_id)
+async def get_project_members(session: AsyncSession, project_id: str) -> list[dict]:
+    project_member_repo = ProjectMemberRepository(session)
+    return await project_member_repo.find_project_members(project_id)
 
 
-def add_project_member(project_id: str, member_id: str, role: str = "contributor") -> dict:
-    return project_member_repo.add_member(project_id, member_id, role)
+async def add_project_member(session: AsyncSession, project_id: str, member_id: str, role: str = "contributor") -> dict:
+    project_member_repo = ProjectMemberRepository(session)
+    return await project_member_repo.add_member(project_id, member_id, role)
 
 
-def remove_project_member(project_id: str, member_id: str) -> bool:
-    return project_member_repo.remove_member(project_id, member_id)
+async def remove_project_member(session: AsyncSession, project_id: str, member_id: str) -> bool:
+    project_member_repo = ProjectMemberRepository(session)
+    return await project_member_repo.remove_member(project_id, member_id)

@@ -20,6 +20,6 @@
 - Repository methods: `find_*`, `create`, `update`, `delete`
 
 ## Auth Flow
-- `get_current_user` → validates JWT via `supabase.auth.get_user(token)` → returns `CurrentUser`
+- `get_current_user` → decodes HS256 JWT via `python-jose` → returns `CurrentUser`
 - `get_workspace_context` → checks `workspace_members` table → returns `WorkspaceContext` with role
-- Never decode JWT locally; always validate via Supabase Auth API
+- JWT is validated locally using `JWT_SECRET_KEY` from environment

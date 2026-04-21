@@ -1,75 +1,93 @@
 """
-Base repository with generic workspace-scoped CRUD operations.
+Base repository with generic workspace-scoped CRUD operations using SQLAlchemy async.
 All domain repositories inherit from this.
 """
 
-from typing import Any
-from shared.database import get_db
+import uuid
+from typing import Any, Type, TypeVar
+from sqlalchemy import select, func, delete, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from shared.database import Base
+
+T = TypeVar("T", bound=Base)
 
 
 class BaseRepository:
-    """Generic CRUD with workspace scoping."""
+    """Generic async CRUD with workspace scoping."""
 
-    def __init__(self, table_name: str):
-        self.table_name = table_name
-        self.db = get_db()
+    model: Type[T]
 
-    def _query(self):
-        return self.db.table(self.table_name)
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
     # ── Read ──
 
-    def find_all(
+    async def find_all(
         self,
         filters: dict[str, Any] | None = None,
         order_by: str = "created_at",
         desc: bool = True,
         limit: int | None = None,
         offset: int | None = None,
-    ) -> list[dict]:
-        q = self._query().select("*")
+    ) -> list[T]:
+        stmt = select(self.model)
         if filters:
             for k, v in filters.items():
-                q = q.eq(k, v)
-        q = q.order(order_by, desc=desc)
-        if limit:
-            q = q.limit(limit)
+                stmt = stmt.where(getattr(self.model, k) == v)
+        col = getattr(self.model, order_by)
+        stmt = stmt.order_by(col.desc() if desc else col.asc())
         if offset:
-            q = q.range(offset, offset + (limit or 20) - 1)
-        return q.execute().data or []
+            stmt = stmt.offset(offset)
+        if limit:
+            stmt = stmt.limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
-    def find_by_id(self, record_id: str) -> dict | None:
-        result = self._query().select("*").eq("id", record_id).limit(1).execute()
-        return result.data[0] if result.data else None
+    async def find_by_id(self, record_id: str | uuid.UUID) -> T | None:
+        stmt = select(self.model).where(self.model.id == record_id).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
-    def count(self, filters: dict[str, Any] | None = None) -> int:
-        q = self._query().select("id", count="exact")
+    async def count(self, filters: dict[str, Any] | None = None) -> int:
+        stmt = select(func.count(self.model.id))
         if filters:
             for k, v in filters.items():
-                q = q.eq(k, v)
-        result = q.execute()
-        return result.count or 0
+                stmt = stmt.where(getattr(self.model, k) == v)
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
 
     # ── Write ──
 
-    def create(self, data: dict) -> dict:
-        result = self._query().insert(data).execute()
-        return result.data[0]
+    async def create(self, data: dict) -> T:
+        instance = self.model(**data)
+        self.session.add(instance)
+        await self.session.flush()
+        return instance
 
-    def update(self, record_id: str, data: dict) -> dict | None:
+    async def update(self, record_id: str | uuid.UUID, data: dict) -> T | None:
         clean = {k: v for k, v in data.items() if v is not None}
         if not clean:
-            return self.find_by_id(record_id)
-        result = self._query().update(clean).eq("id", record_id).execute()
-        return result.data[0] if result.data else None
+            return await self.find_by_id(record_id)
+        stmt = (
+            update(self.model)
+            .where(self.model.id == record_id)
+            .values(**clean)
+            .returning(self.model)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.scalar_one_or_none()
 
-    def delete(self, record_id: str) -> bool:
-        self._query().delete().eq("id", record_id).execute()
+    async def delete(self, record_id: str | uuid.UUID) -> bool:
+        stmt = delete(self.model).where(self.model.id == record_id)
+        await self.session.execute(stmt)
+        await self.session.flush()
         return True
 
     # ── Workspace-scoped helpers ──
 
-    def find_all_in_workspace(
+    async def find_all_in_workspace(
         self,
         workspace_id: str,
         extra_filters: dict[str, Any] | None = None,
@@ -77,14 +95,14 @@ class BaseRepository:
         desc: bool = True,
         limit: int | None = None,
         offset: int | None = None,
-    ) -> list[dict]:
+    ) -> list[T]:
         filters = {"workspace_id": workspace_id}
         if extra_filters:
             filters.update(extra_filters)
-        return self.find_all(filters=filters, order_by=order_by, desc=desc, limit=limit, offset=offset)
+        return await self.find_all(filters=filters, order_by=order_by, desc=desc, limit=limit, offset=offset)
 
-    def count_in_workspace(self, workspace_id: str, extra_filters: dict[str, Any] | None = None) -> int:
+    async def count_in_workspace(self, workspace_id: str, extra_filters: dict[str, Any] | None = None) -> int:
         filters = {"workspace_id": workspace_id}
         if extra_filters:
             filters.update(extra_filters)
-        return self.count(filters=filters)
+        return await self.count(filters=filters)
