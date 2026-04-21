@@ -4,8 +4,9 @@
 ```
 ├── .claude/                    # AI agent configuration
 │   ├── rules/                  # Mandatory rules for all agents
-│   └── commands/               # Reusable agent commands
-├── services/                   # Python FastAPI microservices
+│   ├── commands/               # Reusable agent commands
+│   └── prompts/                # Prompt templates
+├── apps/                       # Python FastAPI microservices
 │   ├── core/                   # Main service (auth, workspaces, projects, tasks)
 │   │   ├── main.py             # App factory + middleware chain
 │   │   ├── config.py           # Pydantic settings
@@ -17,12 +18,13 @@
 │   ├── ai/                     # AI / LLM service
 │   ├── git/                    # GitHub integration service
 │   ├── mcp/                    # MCP tool service
-│   └── gateway/                # API gateway / load balancer
-├── shared/                     # Shared Python package
-│   ├── auth.py                 # JWT validation (python-jose HS256)
-│   ├── database.py             # SQLAlchemy async engine
-│   ├── models/                 # SQLAlchemy ORM models
-│   └── schemas/                # Shared Pydantic schemas
+│   └── gateway/                # API gateway / load balancer (native dev)
+├── packages/
+│   └── shared/                 # Shared Python package
+│       ├── auth.py             # JWT validation (python-jose HS256)
+│       ├── database.py         # SQLAlchemy async engine
+│       ├── models/             # SQLAlchemy ORM models
+│       └── schemas/            # Shared Pydantic schemas
 ├── frontend/                   # React + Vite frontend
 │   └── src/
 │       ├── components/         # Shared UI components
@@ -31,7 +33,19 @@
 │       ├── pages/              # Route-level page components
 │       ├── stores/             # Zustand stores
 │       └── types/              # TypeScript interfaces
+├── infrastructure/
+│   └── nginx/                  # Nginx gateway (Docker / production)
 ├── docs/                       # Architecture documentation
+│   ├── architecture/           # System overview, microservices, flowcharts, SRS
+│   ├── api/                    # API reference
+│   ├── database/               # Schema, ERD, per-service DB docs
+│   ├── development/            # Setup, testing, contributing guides
+│   ├── services/               # Per-service feature docs
+│   ├── ai/                     # AI pipeline and tool registry
+│   └── archive/                # Phase history, old reports
+├── scripts/                    # Utility scripts
+├── tests/
+│   └── integration/            # Integration test scripts
 └── docker-compose.yml
 ```
 

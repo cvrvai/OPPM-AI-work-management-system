@@ -8,20 +8,20 @@ This document describes the current runtime architecture of the OPPM AI Work Man
 
 Use this file for system-level orientation. Use the supporting docs for detail:
 
-- [API-REFERENCE.md](API-REFERENCE.md)
-- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md)
-- [ERD.md](ERD.md)
-- [FLOWCHARTS.md](FLOWCHARTS.md)
-- [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md)
-- [MICROSERVICES-REFERENCE.md](MICROSERVICES-REFERENCE.md)
-- [services/README.md](services/README.md)
-- [database/README.md](database/README.md)
-- [MICROSERVICES-REVIEW.md](review/MICROSERVICES-REVIEW.md)
-- [AI-SYSTEM-CONTEXT.md](AI-SYSTEM-CONTEXT.md)
-- [AI-PIPELINE-REFERENCE.md](ai/AI-PIPELINE-REFERENCE.md)
-- [TOOL-REGISTRY-REFERENCE.md](ai/TOOL-REGISTRY-REFERENCE.md)
-- [SRS.md](SRS.md)
-- [TESTING-GUIDE.md](TESTING-GUIDE.md)
+- [api/reference.md](../api/reference.md)
+- [database/schema.md](../database/schema.md)
+- [database/erd.md](../database/erd.md)
+- [architecture/flowcharts.md](flowcharts.md)
+- [frontend/FRONTEND-REFERENCE.md](../frontend/FRONTEND-REFERENCE.md)
+- [architecture/microservices.md](microservices.md)
+- [services/README.md](../services/README.md)
+- [database/README.md](../database/README.md)
+- [review/MICROSERVICES-REVIEW.md](../review/MICROSERVICES-REVIEW.md)
+- [ai/context.md](../ai/context.md)
+- [ai/pipeline.md](../ai/pipeline.md)
+- [ai/tool-registry.md](../ai/tool-registry.md)
+- [architecture/srs.md](srs.md)
+- [development/testing.md](../development/testing.md)
 
 ## System Overview
 

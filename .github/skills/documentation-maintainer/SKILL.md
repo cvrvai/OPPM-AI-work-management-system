@@ -22,12 +22,12 @@ Read the high-signal project documents first.
 
 1. `CLAUDE.md`
 2. `README.md`
-3. `DEVELOPMENT.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/API-REFERENCE.md`
-6. `docs/DATABASE-SCHEMA.md`
+3. `docs/development/setup.md`
+4. `docs/architecture/overview.md`
+5. `docs/api/reference.md`
+6. `docs/database/schema.md`
 7. `docs/frontend/FRONTEND-REFERENCE.md`
-8. `docs/MICROSERVICES-REFERENCE.md`
+8. `docs/architecture/microservices.md`
 9. Any area-specific document directly related to the request
 
 Then verify the current implementation from code before stating facts or updating docs.
@@ -36,12 +36,12 @@ Then verify the current implementation from code before stating facts or updatin
 
 When documentation and code differ, prefer the code and record the mismatch.
 
-- Backend entry points: `services/*/main.py`, `services/core/main.py`, `services/gateway/main.py`
-- Backend API surface: `services/*/routers/`, `services/core/routers/`, `services/*/schemas/`
-- Business logic: `services/*/services/`, `services/core/services/`
-- Shared platform behavior: `shared/auth.py`, `shared/database.py`, `shared/models/`
+- Backend entry points: `apps/*/main.py`, `apps/core/main.py`, `apps/gateway/main.py`
+- Backend API surface: `apps/*/routers/`, `apps/core/routers/`, `apps/*/schemas/`
+- Business logic: `apps/*/services/`, `apps/core/services/`
+- Shared platform behavior: `packages/shared/auth.py`, `packages/shared/database.py`, `packages/shared/models/`
 - Frontend stack and routes: `frontend/package.json`, `frontend/src/App.tsx`, `frontend/src/pages/`, `frontend/src/lib/api.ts`
-- Deployment/runtime shape: `docker-compose.yml`, `docker-compose.dev.yml`, `docker-compose.microservices.yml`, `start_*.ps1`
+- Deployment/runtime shape: `docker-compose.yml`, `docker-compose.dev.yml`, `docker-compose.microservices.yml`, `scripts/start-all.ps1`
 
 ## Procedure
 

@@ -9,7 +9,7 @@ AI-powered **One Page Project Manager (OPPM)** — a multi-tenant, workspace-sco
 | Frontend | React 19 + Vite + TypeScript + Tailwind CSS v4 + TanStack Query v5 + Zustand v5 |
 | Backend | Python FastAPI (microservices: core, ai, git, mcp) |
 | Database | PostgreSQL via Supabase (connection string only — self-hosted DB) |
-| Auth | Local HS256 JWT validation in `shared/auth.py` with refresh-token persistence |
+| Auth | Local HS256 JWT validation in `packages/shared/auth.py` with refresh-token persistence |
 | AI | Multi-model: Ollama, Kimi K2.5, Claude (Anthropic), OpenAI — plug-in adapters |
 | API Gateway | FastAPI gateway service (port 8080) or Nginx in production |
 | Deployment | Docker Compose (monolith or microservices) |
@@ -114,20 +114,21 @@ Browser → Frontend (React/Vite :5173)
 │       ├── lib/                 api.ts (fetch wrapper), tokens.ts, utils.ts
 │       ├── stores/              authStore, workspaceStore, chatStore (Zustand)
 │       └── types/               TypeScript interfaces for all API types
-├── services/
+├── apps/
 │   ├── core/                    Auth, workspaces, projects, tasks, OPPM, notifications
 │   ├── ai/                      Chat, weekly summary, RAG, embedding, LLM adapters
 │   ├── git/                     GitHub accounts, repos, webhooks, commit analysis
 │   ├── mcp/                     Model Context Protocol endpoints
-│   └── gateway/                 FastAPI reverse-proxy gateway
-├── shared/                      Shared Python package (auth, database client, schemas)
-├── supabase/
-│   └── schema.sql               Full DDL — reference schema (not auto-applied)
+│   └── gateway/                 FastAPI reverse-proxy gateway (native dev)
+├── packages/
+│   └── shared/                  Shared Python package (auth, database client, schemas)
+├── infrastructure/
+│   └── nginx/                   Nginx gateway (Docker / production)
 ├── docs/                        Architecture, ERD, API Reference, Flowcharts, etc.
-├── seed_demo.ps1                 Industry demo data seed script
-├── test_api.ps1                  Full API test suite (48 tests)
-├── docker-compose.yml            Monolith compose
-└── docker-compose.microservices.yml  Microservices compose
+├── scripts/                     Utility scripts (start-all.ps1, run_ai_service.py)
+├── tests/integration/           Integration test scripts
+├── docker-compose.yml           Infrastructure dependencies (postgres + redis)
+└── docker-compose.microservices.yml  Full microservices compose
 ```
 
 ## Key Features
@@ -144,18 +145,17 @@ Browser → Frontend (React/Vite :5173)
 
 | File | Contents |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, service map, data flow |
-| [docs/AI-SYSTEM-CONTEXT.md](docs/AI-SYSTEM-CONTEXT.md) | Fast start reference for future AI or human updates: feature flows, edit hotspots, schema design, and verified drift notes |
-| [docs/API-REFERENCE.md](docs/API-REFERENCE.md) | Current public route reference and contract notes |
+| [docs/architecture/overview.md](docs/architecture/overview.md) | System design, service map, data flow |
+| [docs/ai/context.md](docs/ai/context.md) | Fast start reference for future AI or human updates: feature flows, edit hotspots, schema design |
+| [docs/api/reference.md](docs/api/reference.md) | Current public route reference and contract notes |
 | [docs/frontend/FRONTEND-REFERENCE.md](docs/frontend/FRONTEND-REFERENCE.md) | Frontend folder map, route ownership, state flow, and feature entry points |
-| [docs/MICROSERVICES-REFERENCE.md](docs/MICROSERVICES-REFERENCE.md) | Service ownership, shared package map, gateway routing, and backend feature entry points |
+| [docs/architecture/microservices.md](docs/architecture/microservices.md) | Service ownership, shared package map, gateway routing, and backend feature entry points |
 | [docs/services/README.md](docs/services/README.md) | Service-level feature inventory hub for core/ai/git/mcp/gateway and upgrade planning |
 | [docs/database/README.md](docs/database/README.md) | Database documentation hub by service plus ER diagram view |
-| [docs/ERD.md](docs/ERD.md) | Current relational model and relationship notes |
-| [docs/FLOWCHARTS.md](docs/FLOWCHARTS.md) | Runtime flows for auth, invites, projects, AI, GitHub, and routing |
-| [docs/TESTING-GUIDE.md](docs/TESTING-GUIDE.md) | Automated checks, smoke scripts, and manual test matrix |
-| [docs/PHASE-TRACKER.md](docs/PHASE-TRACKER.md) | Active per-task tracker for ongoing implementation work; older trackers are archived in `docs/phase-history/` |
+| [docs/database/erd.md](docs/database/erd.md) | Current relational model and relationship notes |
+| [docs/architecture/flowcharts.md](docs/architecture/flowcharts.md) | Runtime flows for auth, invites, projects, AI, GitHub, and routing |
+| [docs/development/testing.md](docs/development/testing.md) | Automated checks, smoke scripts, and manual test matrix |
 | [docs/review/MICROSERVICES-REVIEW.md](docs/review/MICROSERVICES-REVIEW.md) | Architecture assessment, risks, and cleanup priorities |
-| [docs/SRS.md](docs/SRS.md) | Product-level software requirements specification |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | Local development setup and conventions |
+| [docs/architecture/srs.md](docs/architecture/srs.md) | Product-level software requirements specification |
+| [docs/development/setup.md](docs/development/setup.md) | Local development setup and conventions |
 

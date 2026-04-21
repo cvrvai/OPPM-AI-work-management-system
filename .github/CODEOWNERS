@@ -1,0 +1,24 @@
+# CODEOWNERS
+# Assign ownership by directory. GitHub requires at least one approval
+# from the owner before merging to a protected branch.
+
+# Default — all files require review from the repo maintainer
+*                           @cvrvai
+
+# Backend services
+/apps/core/                 @cvrvai
+/apps/ai/                   @cvrvai
+/apps/git/                  @cvrvai
+/apps/mcp/                  @cvrvai
+/apps/gateway/              @cvrvai
+/packages/                  @cvrvai
+
+# Frontend
+/frontend/                  @cvrvai
+
+# Infrastructure
+/infrastructure/            @cvrvai
+/docker-compose*.yml        @cvrvai
+
+# Documentation
+/docs/                      @cvrvai

@@ -3,18 +3,18 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install shared package dependencies (not the package itself, since PYTHONPATH handles import)
-COPY shared/ /shared/
+COPY packages/shared/ /shared/
 RUN pip install --no-cache-dir /shared
 
 # Install service dependencies
-COPY services/git/requirements.txt .
+COPY apps/git/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # PYTHONPATH allows 'import shared' to resolve /shared/ at runtime
 ENV PYTHONPATH=/
 
 # Copy service code
-COPY services/git/ .
+COPY apps/git/ .
 
 EXPOSE 8002
 

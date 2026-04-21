@@ -3,19 +3,19 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install shared package dependencies (not the package itself, since PYTHONPATH handles import)
-COPY shared/ /shared/
+COPY packages/shared/ /shared/
 RUN pip install --no-cache-dir /shared
 
 # Install service dependencies
-COPY services/ai/requirements.txt .
+COPY apps/core/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # PYTHONPATH allows 'import shared' to resolve /shared/ at runtime
 ENV PYTHONPATH=/
 
 # Copy service code
-COPY services/ai/ .
+COPY apps/core/ .
 
-EXPOSE 8001
+EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

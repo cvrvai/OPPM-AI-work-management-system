@@ -22,7 +22,7 @@ services:
       - redis_data:/data
 
   gateway:
-    build: ./gateway
+    build: ./infrastructure/nginx
     ports:
       - "80:80"
     restart: on-failure
@@ -39,11 +39,11 @@ services:
   core:
     build:
       context: .
-      dockerfile: services/core/Dockerfile
+      dockerfile: apps/core/Dockerfile
     expose:
       - "8000"
     env_file:
-      - services/.env
+      - apps/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
       - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
@@ -62,11 +62,11 @@ services:
   ai:
     build:
       context: .
-      dockerfile: services/ai/Dockerfile
+      dockerfile: apps/ai/Dockerfile
     expose:
       - "8001"
     env_file:
-      - services/.env
+      - apps/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
     depends_on:
@@ -82,11 +82,11 @@ services:
   git:
     build:
       context: .
-      dockerfile: services/git/Dockerfile
+      dockerfile: apps/git/Dockerfile
     expose:
       - "8002"
     env_file:
-      - services/.env
+      - apps/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
       - AI_SERVICE_URL=http://ai:8001
@@ -103,11 +103,11 @@ services:
   mcp:
     build:
       context: .
-      dockerfile: services/mcp/Dockerfile
+      dockerfile: apps/mcp/Dockerfile
     expose:
       - "8003"
     env_file:
-      - services/.env
+      - apps/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
     depends_on:
