@@ -6,7 +6,7 @@ Code review checklist for the OPPM AI project.
 - [ ] No hardcoded secrets or API keys
 - [ ] All v1 routes require authentication
 - [ ] Write operations check workspace role
-- [ ] No raw SQL injection vectors (using Supabase client, not raw queries)
+- [ ] No raw SQL injection vectors (using SQLAlchemy ORM parameterized queries)
 - [ ] GitHub webhook validates HMAC signature
 - [ ] Sensitive fields not exposed in API responses
 

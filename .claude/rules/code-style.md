@@ -5,13 +5,13 @@
 - Use `logging.getLogger(__name__)` — never `print()`
 - Services are plain functions, not classes
 - Repositories are classes inheriting `BaseRepository`
-- Use `.limit(1).execute()` and `data[0] if data else None` for queries that may return no rows — `maybe_single()` returns `None` in supabase-py 2.9.0
+- Use `session.execute(select(...).limit(1))` and `.scalar_one_or_none()` for single-row queries
 - Pydantic models: use `model_config` to suppress protected namespace warnings for `model_*` fields
 
 ## Frontend (TypeScript / React)
 - Functional components only
 - Use `@tanstack/react-query` for server state, Zustand for client state
-- API calls go through `lib/api.ts` — never call `fetch` or `supabase` directly from components
+- API calls go through `lib/api.ts` — never call `fetch` directly from components
 - Use `useWorkspaceStore` for workspace context, `useAuthStore` for auth
 - Path alias: `@/` maps to `src/`
 - No whitespace text nodes inside `<colgroup>`, `<thead>`, `<tbody>`, `<tr>` — use `{/* comment */}` without extra spaces

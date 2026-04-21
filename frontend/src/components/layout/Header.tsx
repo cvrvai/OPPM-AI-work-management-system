@@ -15,6 +15,7 @@ import {
   Cpu,
   GitCommitHorizontal,
   ListChecks,
+  Menu,
   X,
 } from 'lucide-react'
 
@@ -38,10 +39,10 @@ const typeColors: Record<string, string> = {
   task_update: 'text-cyan-500 bg-cyan-50',
 }
 
-export function Header() {
+export function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const user = useAuthStore((s) => s.user)
   const email = user?.email || 'User'
-  const name = user?.user_metadata?.full_name || email.split('@')[0]
+  const name = user?.full_name || user?.user_metadata?.full_name || email.split('@')[0]
   const [showNotifs, setShowNotifs] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
@@ -106,9 +107,18 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-white/80 backdrop-blur-sm px-6">
-      <div />
-      <div className="flex items-center gap-4">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-white/80 px-4 backdrop-blur-sm sm:px-6">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-alt hover:text-text"
+          title="Toggle sidebar"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="flex items-center gap-2 sm:gap-4">
         {/* Notification Bell */}
         <div className="relative" ref={panelRef}>
           <button
@@ -125,7 +135,7 @@ export function Header() {
 
           {/* Notification Panel */}
           {showNotifs && (
-            <div className="absolute right-0 top-full mt-2 w-96 rounded-xl border border-border bg-white shadow-lg overflow-hidden">
+            <div className="absolute right-0 top-full mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-white shadow-lg">
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <h3 className="text-sm font-semibold text-text">Notifications</h3>
                 {unreadCount > 0 && (
@@ -195,7 +205,7 @@ export function Header() {
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-white text-xs font-semibold">
             {getInitials(name)}
           </div>
-          <span className="text-sm font-medium text-text">{name}</span>
+          <span className="hidden text-sm font-medium text-text sm:block">{name}</span>
         </div>
       </div>
     </header>

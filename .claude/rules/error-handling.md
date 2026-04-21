@@ -15,5 +15,5 @@
 
 ## Auth Errors
 - 401 from backend → frontend should redirect to login or refresh token
-- Token refresh is handled by Supabase JS client automatically via `onAuthStateChange`
-- Backend validates via `supabase.auth.get_user(token)` — returns 401 for expired/invalid tokens
+- Token refresh is handled by `api.ts` — calls `/auth/refresh` with the stored refresh token
+- Backend validates JWT via `python-jose` — returns 401 for expired/invalid tokens

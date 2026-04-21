@@ -1,546 +1,447 @@
-# OPPM AI Work Management System — Architecture
+# Architecture
 
-> Multi-tenant, workspace-scoped AI-powered project management platform following the **One Page Project Manager (OPPM)** methodology.
+Last updated: 2026-04-10
 
-## Table of Contents
-- [System Overview](#system-overview)
-- [Architecture Layers](#architecture-layers)
-- [Database Design](#database-design)
-- [Backend Architecture](#backend-architecture)
-- [Frontend Architecture](#frontend-architecture)
-- [API Design](#api-design)
-- [RAG Architecture](#rag-architecture)
-- [Authentication & Authorization](#authentication--authorization)
-- [Multi-Tenancy Model](#multi-tenancy-model)
-- [Deployment](#deployment)
+## Purpose
 
----
+This document describes the current runtime architecture of the OPPM AI Work Management System as it exists in code today. It replaces older notes that mixed the previous monolith assumptions with the current microservices implementation.
+
+Use this file for system-level orientation. Use the supporting docs for detail:
+
+- [API-REFERENCE.md](API-REFERENCE.md)
+- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md)
+- [ERD.md](ERD.md)
+- [FLOWCHARTS.md](FLOWCHARTS.md)
+- [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md)
+- [MICROSERVICES-REFERENCE.md](MICROSERVICES-REFERENCE.md)
+- [services/README.md](services/README.md)
+- [database/README.md](database/README.md)
+- [MICROSERVICES-REVIEW.md](review/MICROSERVICES-REVIEW.md)
+- [AI-SYSTEM-CONTEXT.md](AI-SYSTEM-CONTEXT.md)
+- [AI-PIPELINE-REFERENCE.md](ai/AI-PIPELINE-REFERENCE.md)
+- [TOOL-REGISTRY-REFERENCE.md](ai/TOOL-REGISTRY-REFERENCE.md)
+- [SRS.md](SRS.md)
+- [TESTING-GUIDE.md](TESTING-GUIDE.md)
 
 ## System Overview
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        OPPM AI System                           │
-│                                                                  │
-│  ┌─────────┐     ┌─────────────┐     ┌────────────────────────┐ │
-│  │ React   │────▶│ FastAPI     │────▶│ Supabase PostgreSQL   │ │
-│  │ Frontend│◀────│ Backend     │◀────│ + RLS + Auth          │ │
-│  │ (SPA)   │     │ (REST API)  │     │                        │ │
-│  └─────────┘     └──────┬──────┘     └────────────────────────┘ │
-│                         │                                        │
-│                  ┌──────▼──────┐                                 │
-│                  │ AI Providers│                                  │
-│                  │ Ollama/GPT/ │                                  │
-│                  │ Claude/Kimi │                                  │
-│                  └─────────────┘                                 │
-└──────────────────────────────────────────────────────────────────┘
-```
+OPPM is a workspace-scoped project management platform built around four backend services, a shared data layer, and a React frontend.
 
-## Architecture Layers
+Current runtime shape:
 
-### Backend (4-Layer Clean Architecture)
-
-```
-┌───────────────────────────────────────────────────┐
-│  Routers (API Layer)                              │
-│  routers/v1/*.py — HTTP handlers, validation      │
-├───────────────────────────────────────────────────┤
-│  Services (Business Logic)                        │
-│  services/*.py — orchestration, rules, workflows  │
-├───────────────────────────────────────────────────┤
-│  Repositories (Data Access)                       │
-│  repositories/*.py — Supabase queries, CRUD       │
-├───────────────────────────────────────────────────┤
-│  Infrastructure (External)                        │
-│  infrastructure/llm/*.py — AI model adapters      │
-│  middleware/*.py — auth, rate limiting, logging    │
-└───────────────────────────────────────────────────┘
+```text
+Browser
+  -> Frontend (React + Vite)
+  -> /api
+      -> Gateway
+          -> Core service
+          -> AI service
+          -> Git service
+          -> MCP service
+  -> PostgreSQL
+  -> Redis
+  -> External providers (GitHub, email, LLM APIs)
 ```
 
-### Frontend (Feature-Module Pattern)
+## Runtime Topology
 
+### Frontend
+
+The frontend lives in `frontend/` and runs as a React 19 + Vite + TypeScript application.
+
+Primary responsibilities:
+
+- authentication bootstrap and token persistence
+- workspace selection and workspace-scoped navigation
+- project, OPPM, team, commit, and settings UI
+- calling backend APIs through `frontend/src/lib/api.ts`
+- auto-refreshing access tokens on `401` via `POST /api/auth/refresh`
+
+### Gateway Layer
+
+There are two gateway implementations:
+
+1. `services/gateway/`
+   Native-development FastAPI reverse proxy with health-aware round robin.
+2. `gateway/`
+   Nginx config used in Docker and containerized deployments.
+
+Both gateways must route the same URL patterns to the same services.
+
+High-level route ownership:
+
+- `/api/auth/*` -> core
+- `/api/v1/workspaces/*/ai/*` -> ai
+- `/api/v1/workspaces/*/rag/*` -> ai
+- `/api/v1/workspaces/*/mcp/*` -> mcp
+- `/api/v1/workspaces/*/github-accounts*` -> git
+- `/api/v1/workspaces/*/commits*` -> git
+- `/api/v1/workspaces/*/git/*` -> git
+- `/api/v1/git/webhook` -> git
+- all other `/api/*` -> core
+
+### Core Service
+
+`services/core/` is the primary business service.
+
+It owns:
+
+- authentication routes
+- workspace CRUD and membership management
+- invites and member skills
+- project CRUD and project membership
+- task CRUD and task daily reports
+- OPPM objectives, timeline, and costs
+- notifications
+- dashboard stats
+- Alembic migrations
+
+### AI Service
+
+`services/ai/` owns AI-facing functionality.
+
+It provides:
+
+- workspace and project chat owned directly by the AI service routers
+- a TAOR agentic loop with a max of 7 iterations, low-confidence requery, and final wrap-up fallback
+- input guardrails (injection detection) and output guardrails (sensitive data scrub)
+- LLM-based query rewriting before retrieval
+- semantic similarity cache (Redis, cosine ≥ 0.92, TTL 5 min) for RAG results
+- tool registry with 24 tools across five categories (`oppm`, `task`, `cost`, `read`, `project`)
+- native LLM function calling for OpenAI and Anthropic; XML-prompt fallback for Ollama and Kimi
+- weekly summaries
+- AI model configuration per workspace
+- project plan suggestion and commit of suggested plans
+- server-side file parsing, OPPM spreadsheet fill assistance, and OPPM image extraction
+- workspace reindexing for retrieval
+- RAG query endpoint
+- internal commit analysis endpoint called by the git service
+- user feedback endpoint (rating + comment logged to `audit_log`)
+
+The AI service is not advisory-only. Its tool handlers can create and update shared business data directly through AI-side repositories on the shared database, including projects, objectives, tasks, timeline entries, costs, risks, and deliverables.
+
+See [AI-PIPELINE-REFERENCE.md](ai/AI-PIPELINE-REFERENCE.md) and [TOOL-REGISTRY-REFERENCE.md](ai/TOOL-REGISTRY-REFERENCE.md) for component-level detail.
+
+### Git Service
+
+`services/git/` owns GitHub integration.
+
+It provides:
+
+- GitHub account registration
+- repo configuration per project
+- commit listing and recent analyses
+- developer report endpoints
+- GitHub webhook ingestion
+- background handoff to the AI service for commit analysis
+
+### MCP Service
+
+`services/mcp/` exposes Model Context Protocol tools through HTTP.
+
+It provides:
+
+- tool discovery for the current workspace
+- tool execution scoped to the current workspace
+
+## Shared Layer
+
+The shared Python package in `shared/` is the contract layer across services.
+
+It contains:
+
+- SQLAlchemy base and async session lifecycle
+- authentication and authorization helpers
+- Redis client bootstrap
+- shared ORM models
+- common schemas and enums
+- common configuration
+
+This is the most important architectural boundary in the backend.
+
+Services do not each own independent databases. They share one data model and one PostgreSQL database through `shared/models/` and `shared/database.py`.
+
+That shared-database model matters most for AI: the service boundary is real at the HTTP/router layer, but AI tool execution still writes through AI-owned repository code against the shared tables.
+
+## Data Architecture
+
+### Primary Database
+
+The backend uses PostgreSQL accessed through SQLAlchemy async sessions.
+
+Important facts:
+
+- the ORM models live in `shared/models/`
+- migrations live in `services/core/alembic/`
+- 29 tables across 7 domain groups (see [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) and [ERD.md](ERD.md))
+- RAG embeddings are stored in the same database
+- audit and notification data are part of the same application database
+
+### Redis
+
+Redis is used as a support dependency, not as the source of truth.
+
+**How Redis works in this system:**
+
+Redis is an in-memory key-value store. The app uses `redis.asyncio` (async client) via `shared/redis_client.py`, which maintains a singleton connection pool.
+
+Current roles in code:
+
+| Role | Where | How |
+|---|---|---|
+| Token blacklist | `auth_service.signout()` | On signout, current access token hash is stored with a TTL equal to the remaining token lifetime. Subsequent requests check this key before accepting the token. |
+| Rate limiting | `middleware/` | Request count per user/IP stored as a Redis key with a sliding window TTL. Returns `429` when limit exceeded. |
+| Semantic cache | `services/ai/infrastructure/rag/semantic_cache.py` | Embedding similarity cache for RAG results. Cosine threshold ≥ 0.92, TTL 300 s. Keys prefixed `ai:sem_cache:`. Fail-safe — returns `None` if Redis is unavailable. |
+
+If Redis is unavailable, the app can still start, but:
+- signed-out access tokens may still work until they expire naturally
+- rate limit enforcement degrades to in-memory (non-distributed)
+
+**To check if Redis is running:**
+```powershell
+redis-cli ping  # should return PONG
 ```
-src/
-├── components/        # Shared UI components
-│   ├── layout/        # Header, Sidebar, Layout
-│   └── workspace/     # Workspace selector
-├── hooks/             # Shared custom hooks
-├── lib/               # API client, Supabase, utils
-├── pages/             # Route-level page components
-├── stores/            # Zustand stores (auth, workspace)
-└── types/             # TypeScript interfaces
-```
+The connection URL comes from `REDIS_URL` env var (default: `redis://localhost:6379`).
 
----
+## Authentication And Authorization
 
-## Database Design
+Authentication is local JWT validation, not remote Supabase token introspection.
 
-### Entity Relationship Diagram
+Current flow:
 
-```
-                    ┌────────────────┐
-                    │   workspaces   │
-                    │────────────────│
-                    │ id (PK)        │
-                    │ name           │
-                    │ slug (unique)  │
-                    │ description    │
-                    │ created_by     │
-                    └───────┬────────┘
-                            │ 1:N
-            ┌───────────────┼───────────────┐
-            ▼               ▼               ▼
-  ┌──────────────────┐ ┌──────────────┐ ┌──────────────────┐
-  │workspace_members │ │workspace_    │ │  projects        │
-  │──────────────────│ │  invites     │ │──────────────────│
-  │ id (PK)          │ │──────────────│ │ id (PK)          │
-  │ workspace_id(FK) │ │ id (PK)      │ │ workspace_id(FK) │
-  │ user_id          │ │workspace_id  │ │ title            │
-  │ role             │ │ email        │ │ status           │
-  │  (owner/admin/   │ │ role         │ │ priority         │
-  │   member/viewer) │ │ token        │ │ progress         │
-  └────────┬─────────┘ │ expires_at   │ │ lead_id (FK)     │
-           │            └──────────────┘ └───────┬──────────┘
-           │                                     │ 1:N
-     ┌─────┴────────────────┬───────────────┬────┴──────────┐
-     ▼                      ▼               ▼               ▼
-┌──────────────┐  ┌───────────────┐  ┌──────────────┐ ┌──────────────┐
-│project_      │  │oppm_objectives│  │   tasks      │ │project_costs │
-│  members     │  │───────────────│  │──────────────│ │──────────────│
-│──────────────│  │ id (PK)       │  │ id (PK)      │ │ id (PK)      │
-│ id (PK)      │  │ project_id(FK)│  │ project_id   │ │ project_id   │
-│ project_id   │  │ title         │  │ title        │ │ category     │
-│workspace_    │  │ owner_id      │  │ status       │ │planned_amount│
-│  member_id   │  │ sort_order    │  │ progress     │ │actual_amount │
-│ role         │  └───────┬───────┘  │ assignee_id  │ └──────────────┘
-└──────────────┘          │          │oppm_objective │
-                          │          │  _id (FK)     │
-                    ┌─────▼────────┐ └──────┬───────┘
-                    │oppm_timeline │        │
-                    │  _entries    │  ┌─────▼────────┐
-                    │──────────────│  │task_assignees │
-                    │ id (PK)      │  │──────────────│
-                    │ objective_id │  │ task_id       │
-                    │ year, month  │  │workspace_     │
-                    │ status       │  │  member_id    │
-                    └──────────────┘  └──────────────┘
-```
+1. `POST /api/auth/login` or `POST /api/auth/signup` issues access and refresh tokens.
+2. The frontend stores tokens in local storage.
+3. `frontend/src/lib/api.ts` sends `Authorization: Bearer <token>`.
+4. `shared/auth.py` validates the JWT locally using `python-jose` and `JWT_SECRET`.
+5. Workspace-scoped routes resolve `WorkspaceContext` from `workspace_members`.
 
-### Additional Tables
+Authorization rules:
 
-```
-┌────────────────────┐  ┌─────────────────┐  ┌───────────────────┐
-│  github_accounts   │  │  repo_configs   │  │  commit_events    │
-│────────────────────│  │─────────────────│  │───────────────────│
-│ id                 │  │ id              │  │ id                │
-│ workspace_id (FK)  │  │ repo_name       │  │ repo_config_id    │
-│ account_name       │  │ project_id (FK) │  │ commit_hash       │
-│ github_username    │  │ github_account  │  │ commit_message    │
-│ encrypted_token    │  │   _id (FK)      │  │ author            │
-└────────────────────┘  │ webhook_secret  │  │ branch            │
-                        └─────────────────┘  │ files_changed     │
-                                             │ pushed_at         │
-┌────────────────────┐                       └─────────┬─────────┘
-│  commit_analyses   │                                 │
-│────────────────────│◀────────────────────────────────┘
-│ id                 │
-│ commit_event_id    │
-│ ai_model           │
-│ quality_score      │
-│ alignment_score    │
-│ progress_delta     │
-│ summary            │
-│ quality_flags      │
-│ suggestions        │
-└────────────────────┘
+- authenticated routes use `get_current_user`
+- workspace reads use `get_workspace_context`
+- write routes use `require_write`
+- admin routes use `require_admin`
+- internal service-to-service routes use `X-Internal-API-Key`
 
-┌────────────────────┐  ┌─────────────────┐  ┌───────────────────┐
-│  notifications     │  │   ai_models     │  │    audit_log      │
-│────────────────────│  │─────────────────│  │───────────────────│
-│ id                 │  │ id              │  │ id                │
-│ workspace_id       │  │ workspace_id    │  │ workspace_id      │
-│ user_id            │  │ name            │  │ user_id           │
-│ type               │  │ provider        │  │ action            │
-│ title              │  │  (ollama/       │  │ entity_type       │
-│ message            │  │  anthropic/     │  │ entity_id         │
-│ is_read            │  │  openai/kimi/   │  │ old_data          │
-│ link               │  │  custom)        │  │ new_data          │
-│ metadata           │  │ model_id        │  │ ip_address        │
-└────────────────────┘  │ endpoint_url    │  └───────────────────┘
-                        │ is_active       │
-                        └─────────────────┘
+Role behavior:
 
-┌───────────────────────────────┐
-│     document_embeddings       │
-│───────────────────────────────│
-│ id (PK)                       │
-│ workspace_id (FK)             │
-│ entity_type (task/objective/  │
-│   commit/project)             │
-│ entity_id                     │
-│ content                       │
-│ metadata (JSONB)              │
-│ embedding VECTOR(1536)        │
-└───────────────────────────────┘
+- `owner` and `admin` can perform admin actions
+- `member` can perform write actions but not admin-only actions
+- `viewer` is read-only
 
-Searchable via `match_documents(query_embedding, match_count, filter_workspace_id)` pgvector RPC (cosine similarity).
-```
+## Request Flow Patterns
 
-### Row-Level Security (RLS)
+### Standard UI Request
 
-All tables have RLS enabled with workspace-scoped policies:
-- **Helper functions**: `is_workspace_member(ws_id)`, `is_workspace_admin(ws_id)`
-- **Read**: User must be a member of the workspace owning the data
-- **Write**: User must be member/admin/owner depending on role requirements
-
----
-
-## Backend Architecture
-
-### Directory Structure
-
-```
-backend/
-├── main.py                    # App factory + middleware chain
-├── config.py                  # Pydantic settings (env vars)
-├── database.py                # Supabase client singleton
-├── middleware/
-│   ├── auth.py                # Supabase auth.get_user() → CurrentUser
-│   ├── workspace.py           # Workspace membership → WorkspaceContext
-│   ├── rate_limit.py          # Token bucket rate limiter
-│   └── logging.py             # Request logging + timing
-├── repositories/
-│   ├── base.py                # BaseRepository (generic CRUD)
-│   ├── workspace_repo.py      # Workspace + Member + Invite repos
-│   ├── project_repo.py        # Project + ProjectMember repos
-│   ├── task_repo.py           # Task repo (with progress calc)
-│   ├── oppm_repo.py           # Objective + Timeline + Cost repos
-│   ├── git_repo.py            # GitAccount + Repo + Commit repos
-│   └── notification_repo.py   # Notification + Audit repos
-├── services/
-│   ├── workspace_service.py   # Workspace lifecycle + invites
-│   ├── project_service.py     # Project CRUD + members
-│   ├── task_service.py        # Task CRUD + progress recalc
-│   ├── oppm_service.py        # OPPM objectives, timeline, costs
-│   ├── git_service.py         # Git integration + webhooks
-│   ├── notification_service.py # Notification CRUD
-│   ├── dashboard_service.py   # Aggregated stats
-│   ├── ai_analyzer.py         # AI commit analysis (with LLM fallback)
-│   ├── ai_chat_service.py     # AI chat + suggest-plan + weekly summary
-│   └── rag_service.py         # RAG pipeline orchestration
-├── routers/
-│   ├── v1/                    # New workspace-scoped routes
-│   │   ├── auth.py            # GET /me
-│   │   ├── workspaces.py      # Workspace CRUD + members + invites
-│   │   ├── projects.py        # Workspace-scoped project CRUD
-│   │   ├── tasks.py           # Workspace-scoped task CRUD
-│   │   ├── oppm.py            # Objectives + timeline + costs
-│   │   ├── git.py             # Git accounts + repos + commits + webhook
-│   │   ├── ai.py              # AI model config (ALLOWED_PROVIDERS validation)
-│   │   ├── ai_chat.py         # AI chat, suggest-plan, weekly-summary
-│   │   ├── rag.py             # RAG query endpoint
-│   │   ├── mcp.py             # MCP tool list + execution
-│   │   ├── notifications.py   # User-scoped notifications
-│   │   └── dashboard.py       # Workspace stats
-│   └── *.py                   # Legacy routes (backwards compat)
-├── schemas/
-│   ├── common.py              # Enums, PaginatedResponse, errors
-│   ├── workspace.py           # Workspace CRUD schemas
-│   ├── project.py             # Project CRUD schemas
-│   ├── task.py                # Task CRUD schemas
-│   ├── oppm.py                # OPPM objective/timeline/cost
-│   ├── git.py                 # Git account/repo schemas
-│   ├── ai.py                  # AI model config schemas
-│   ├── ai_chat.py             # Chat request/response schemas
-│   ├── rag.py                 # RAGQueryRequest/Response
-│   ├── notification.py        # Notification schemas
-│   └── dashboard.py           # Dashboard stats schema
-└── infrastructure/
-    ├── llm/
-    │   ├── base.py            # LLMAdapter ABC + ProviderUnavailableError
-    │   ├── __init__.py        # call_with_fallback() factory
-    │   ├── ollama.py          # Ollama local/cloud adapter
-    │   ├── kimi.py            # Kimi/Moonshot adapter
-    │   ├── anthropic.py       # Claude adapter
-    │   └── openai.py          # OpenAI adapter
-    ├── rag/
-    │   ├── __init__.py        # Package exports
-    │   ├── embedder.py        # OpenAI text-embedding-3-small (1536 dims)
-    │   ├── reranker.py        # Reciprocal Rank Fusion (RRF)
-    │   ├── memory.py          # Conversation memory from audit_log
-    │   ├── agent.py           # Pattern-based query classifier
-    │   └── retrievers/
-    │       ├── base_retriever.py    # RetrievedChunk dataclass + ABC
-    │       ├── vector_retriever.py  # pgvector cosine similarity
-    │       ├── keyword_retriever.py # ILIKE on tasks/objectives
-    │       └── structured_retriever.py  # Direct DB for costs/projects
-    └── mcp/
-        ├── __init__.py        # Package exports
-        └── tools/
-            ├── __init__.py    # TOOL_REGISTRY dict
-            ├── project_tools.py   # get_project_status, list_projects
-            ├── objective_tools.py # list_at_risk_objectives
-            ├── task_tools.py      # get_task_summary
-            └── commit_tools.py    # summarize_recent_commits
+```text
+React page
+  -> api.ts
+  -> /api/*
+  -> gateway
+  -> owning service
+  -> shared database session
+  -> PostgreSQL
+  -> JSON response
 ```
 
-### Request Flow
+### GitHub Commit Analysis
 
-```
-Client Request
-    │
-    ▼
-Vite Dev Proxy (/api → localhost:8000, dev only)
-    │
-    ▼
-CORSMiddleware
-    │
-    ▼
-RequestLoggingMiddleware (timing, request ID)
-    │
-    ▼
-Router (path matching)
-    │
-    ▼
-Dependencies:
-├── get_current_user (validates JWT via supabase.auth.get_user())
-├── get_workspace_context (membership check)
-├── rate_limit_api / rate_limit_webhook
-    │
-    ▼
-Service Layer (business logic)
-    │
-    ▼
-Repository Layer (data access)
-    │
-    ▼
-Supabase Client (service_role_key, bypasses RLS) → PostgreSQL
+```text
+GitHub push webhook
+  -> git service webhook endpoint
+  -> validate HMAC signature
+  -> store commits
+  -> background task
+  -> AI internal endpoint /internal/analyze-commits
+  -> commit analysis persisted
+  -> frontend can query recent analyses and reports
 ```
 
----
+### RAG Query
 
-## API Design
-
-### V1 Endpoints (Workspace-Scoped)
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/v1/auth/me` | JWT | Current user info |
-| `GET` | `/api/v1/workspaces` | JWT | List user's workspaces |
-| `POST` | `/api/v1/workspaces` | JWT | Create workspace |
-| `PUT` | `/api/v1/workspaces/:ws` | Admin | Update workspace |
-| `DELETE` | `/api/v1/workspaces/:ws` | Admin | Delete workspace |
-| `GET` | `/api/v1/workspaces/:ws/members` | Member | List members |
-| `PUT` | `/api/v1/workspaces/:ws/members/:id` | Admin | Update member role |
-| `DELETE` | `/api/v1/workspaces/:ws/members/:id` | Admin | Remove member |
-| `POST` | `/api/v1/workspaces/:ws/invites` | Admin | Create invite |
-| `POST` | `/api/v1/invites/accept` | JWT | Accept invite by token |
-| `GET` | `/api/v1/workspaces/:ws/projects` | Member | List projects (paginated) |
-| `POST` | `/api/v1/workspaces/:ws/projects` | Writer | Create project |
-| `GET` | `/api/v1/workspaces/:ws/projects/:id` | Member | Get project |
-| `PUT` | `/api/v1/workspaces/:ws/projects/:id` | Writer | Update project |
-| `DELETE` | `/api/v1/workspaces/:ws/projects/:id` | Writer | Delete project |
-| `GET` | `/api/v1/workspaces/:ws/tasks` | Member | List tasks |
-| `POST` | `/api/v1/workspaces/:ws/tasks` | Writer | Create task |
-| `PUT` | `/api/v1/workspaces/:ws/tasks/:id` | Writer | Update task |
-| `DELETE` | `/api/v1/workspaces/:ws/tasks/:id` | Writer | Delete task |
-| `GET` | `/api/v1/workspaces/:ws/projects/:id/oppm/objectives` | Member | OPPM objectives |
-| `POST` | `/api/v1/workspaces/:ws/projects/:id/oppm/objectives` | Writer | Create objective |
-| `GET` | `/api/v1/workspaces/:ws/projects/:id/oppm/timeline` | Member | Timeline entries |
-| `GET` | `/api/v1/workspaces/:ws/projects/:id/oppm/costs` | Member | Project costs |
-| `GET` | `/api/v1/workspaces/:ws/commits` | Member | Commit list |
-| `GET` | `/api/v1/workspaces/:ws/github-accounts` | Member | Git accounts |
-| `POST` | `/api/v1/workspaces/:ws/github-accounts` | Admin | Add git account |
-| `GET` | `/api/v1/workspaces/:ws/ai/models` | Member | AI models |
-| `POST` | `/api/v1/workspaces/:ws/ai/models` | Admin | Add AI model |
-| `POST` | `/api/v1/workspaces/:ws/projects/:id/ai/chat` | Member | AI chat |
-| `POST` | `/api/v1/workspaces/:ws/projects/:id/ai/suggest-plan` | Member | Suggest OPPM plan |
-| `GET` | `/api/v1/workspaces/:ws/projects/:id/ai/weekly-summary` | Member | Weekly AI summary |
-| `POST` | `/api/v1/workspaces/:ws/rag/query` | Member | RAG retrieval pipeline |
-| `GET` | `/api/v1/workspaces/:ws/mcp/tools` | Member | List MCP tools |
-| `POST` | `/api/v1/workspaces/:ws/mcp/call` | Member | Execute MCP tool |
-| `GET` | `/api/v1/workspaces/:ws/dashboard/stats` | Member | Dashboard stats |
-| `GET` | `/api/v1/notifications` | JWT | User notifications |
-| `PUT` | `/api/v1/notifications/read-all` | JWT | Mark all read |
-| `POST` | `/api/v1/git/webhook` | HMAC | GitHub webhook |
-
----
-
-## RAG Architecture
-
-### Pipeline Overview
-
-```
-User Query
-    │
-    ▼
-Query Classifier (pattern-based regex routing)
-    │      │      │
-    ▼      ▼      ▼
-Vector  Keyword  Structured
-Retriever Retriever Retriever
- (pgvector) (ILIKE) (direct DB)
-    │      │      │
-    └──────┴──────┘
-           │
-           ▼
-    RRF Reranker (k=60)
-           │
-    + Memory Loader
-    (last 20 audit_log ai_chat events)
-           │
-           ▼
-    Top-K Chunks → LLM Context
+```text
+Frontend or AI flow
+  -> /api/v1/workspaces/{workspace_id}/rag/query
+  -> AI service retrievers + reranker + memory loader
+  -> document embeddings + structured queries + audit history
+  -> synthesized context + sources returned
 ```
 
-### Query Routing
+## Frontend Architecture Summary
 
-| Query Pattern | Retrievers Used |
-|---------------|-----------------|
-| objective / goal | vector + keyword |
-| task / todo | vector + keyword |
-| commit / push | vector only |
-| cost / budget | structured only |
-| status / progress | vector + structured |
-| team / member | structured + vector |
-| timeline | vector + structured |
-| (default) | all three |
+The frontend follows a simple pattern:
 
-### LLM Fallback Chain
+- route-level pages in `frontend/src/pages/`
+- reusable UI in `frontend/src/components/`
+- server state with TanStack Query
+- client session, workspace, and chat state with Zustand
+- all HTTP requests through `frontend/src/lib/api.ts`
+- route protection through `ProtectedRoute` in `frontend/src/App.tsx`
+- workspace-scoped navigation safety via `useWorkspaceNavGuard` hook
 
-```
-call_with_fallback(models=[model1, model2, ...], prompt)
-    │
-    ├── Try model1.call() → success → return
-    │
-    ├── ProviderUnavailableError → log warning → continue
-    │
-    ├── Try model2.call() → success → return
-    │
-    └── All failed → raise ProviderUnavailableError
-```
+See [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md) for the detailed folder-level map.
 
-All LLM adapters raise `ProviderUnavailableError` on:
-- `httpx.ConnectError` (service unreachable)
-- `httpx.TimeoutException`
-- `httpx.HTTPStatusError` with 404 / 502 / 503 / 529
+## Load Balancing
 
----
+### How Load Balancing Works
 
-## Authentication & Authorization
+There are two load balancing implementations — one for native dev, one for Docker.
 
-### Auth Flow
-```
-┌──────────┐    ┌──────────────┐    ┌───────────┐
-│  Client  │───▶│ Supabase Auth│───▶│ JWT Token │
-│  (Login) │◀───│ (email/pass) │◀───│ (returned)│
-└──────────┘    └──────────────┘    └─────┬─────┘
-                                          │
-                              ┌───────────▼─────────────┐
-                              │ Backend: get_current_user│
-                              │ db.auth.get_user(token)  │
-                              │ (validates via Supabase  │
-                              │  Auth API, NOT local JWT)│
-                              └───────────┬─────────────┘
-                                          │
-                              ┌───────────▼─────────────┐
-                              │  get_workspace_context   │
-                              │  (checks workspace_     │
-                              │   members table for role)│
-                              └──────────────────────────┘
-```
-
-### Role Hierarchy
-```
-owner  → Full control (can delete workspace, transfer ownership)
-admin  → Manage members, invites, settings
-member → CRUD projects, tasks, objectives
-viewer → Read-only access
-```
-
----
-
-## Multi-Tenancy Model
+#### Python Gateway (native dev) — `services/gateway/`
 
 ```
-┌─── Workspace A ────────────────────────┐
-│  Owner: user_1                         │
-│  Members: user_1(owner), user_2(admin) │
-│                                        │
-│  ┌── Project 1 ──┐  ┌── Project 2 ──┐ │
-│  │ Tasks         │  │ Tasks         │ │
-│  │ Objectives    │  │ Objectives    │ │
-│  │ Timeline      │  │ Timeline      │ │
-│  │ Costs         │  │ Costs         │ │
-│  │ Git Repos     │  │ Git Repos     │ │
-│  └───────────────┘  └───────────────┘ │
-│                                        │
-│  Git Accounts (shared)                 │
-│  AI Models (shared)                    │
-│  Notifications (per-user)              │
-│  Audit Log (workspace-wide)            │
-└────────────────────────────────────────┘
-
-┌─── Workspace B ────────────────────────┐
-│  Owner: user_2                         │
-│  Members: user_2(owner), user_3(member)│
-│  ... (completely isolated data) ...    │
-└────────────────────────────────────────┘
+Browser
+  -> gateway:8080
+      -> HealthyRoundRobin.next()
+          -> next healthy instance from pool
+              -> target service (core:8000, ai:8001, etc.)
 ```
 
-All data queries include `workspace_id` filtering. RLS policies enforce at the database level.
+`HealthyRoundRobin` in `services/gateway/load_balancer.py` uses Python's `itertools.cycle` to
+select the next upstream in a round-robin loop, but only from the set of currently healthy instances.
 
----
+Every 10 seconds an async background task pings each upstream's `/health` endpoint.
+If a service returns HTTP 5xx or is unreachable, it is removed from the cycle.
+When it recovers, it is added back.
 
-## Deployment
-
-### Docker Compose
-
-```yaml
-services:
-  backend:
-    build: ./backend
-    ports: ["8000:8000"]
-    env_file: ./backend/.env
-
-  frontend:
-    build: ./frontend
-    ports: ["5173:80"]
-    depends_on: [backend]
+To run multiple instances of a service, set the env var to a comma-separated list:
+```
+CORE_URLS=http://localhost:8000,http://localhost:8010
 ```
 
-### Scaling Considerations (100k Users)
+#### Nginx Gateway (Docker / production) — `gateway/nginx.conf`
 
-| Component | Current | Production |
-|-----------|---------|------------|
-| Rate Limiter | In-memory token bucket | Redis-backed |
-| Database | Supabase hosted | Supabase Pro + connection pooler |
-| Sessions | JWT (stateless) | JWT (stateless) ✓ |
-| File Storage | N/A | Supabase Storage |
-| Background Jobs | In-process | Celery + Redis |
-| Caching | None | Redis cache layer |
-| Search | SQL LIKE | pg_trgm + full-text search |
+Nginx uses its built-in `upstream` directive with the default round-robin strategy.
+The same route ownership table applies — the Docker and native rules must stay in sync.
 
----
+#### Route Ownership (both gateways)
 
-## AI Agent Configuration
+| URL prefix | Service |
+|---|---|
+| `/api/v1/workspaces/*/ai/*` | ai |
+| `/api/v1/workspaces/*/rag/*` | ai |
+| `/api/v1/workspaces/*/mcp/*` | mcp |
+| `/api/v1/workspaces/*/github-accounts*` | git |
+| `/api/v1/workspaces/*/commits*` | git |
+| `/api/v1/git/webhook` | git |
+| all other `/api/*` | core |
 
-Project uses `.claude/` directory for AI agent rules and commands:
+## Real-Time Collaboration (Design Note)
+
+The current architecture does not implement real-time multi-user collaboration (like Google Docs).
+This section documents the algorithm and approach that would be used if it were added.
+
+### Google Docs Technique: Operational Transformation (OT)
+
+Google Docs uses **Operational Transformation**. The simpler modern alternative is **CRDTs** (Conflict-free Replicated Data Types), used by Figma, Notion, and others.
+
+**How OT works (simplified):**
 
 ```
-.claude/
-├── rules/                      # Mandatory rules for all agents
-│   ├── api-conventions.md     # API route & naming conventions
-│   ├── code-style.md          # Python & TypeScript style rules
-│   ├── database.md            # Schema design & RLS rules
-│   ├── error-handling.md      # Error response patterns
-│   ├── project-structure.md   # Layer boundaries
-│   ├── security.md            # Auth & data access security
-│   └── testing.md             # Test patterns & checklist
-└── commands/                   # Reusable agent workflows
-    ├── deploy.md              # Deployment checklist
-    ├── fix-issue.md           # Issue diagnosis workflow
-    └── review.md              # Code review checklist
+User A types "Hello"  →  Op: Insert("Hello", position=0)
+User B types "World"  →  Op: Insert("World", position=0)
+
+Server receives A's op first.
+Server transforms B's op: Insert("World", position=5)  ← shifted past A's insert
+Both users see "HelloWorld"
 ```
 
-See `CLAUDE.md` at project root for the agent entry point.
+**How CRDTs work:**
+
+Each operation is designed so that applying it in any order always produces the same result (commutativity + idempotency). No central transform needed — just merge.
+
+### How to Add Real-Time to This System
+
+The recommended approach given this stack:
+
+```
+1. Backend: Add WebSocket endpoint per project (FastAPI supports this natively)
+   POST /api/v1/workspaces/{ws}/projects/{id}/ws
+
+2. Connection: Frontend keeps a WebSocket open while on a project page
+
+3. Broadcast: When any user saves a change (spreadsheet op, task update),
+   the server fans out the operation to all connected clients for that project
+
+4. Redis Pub/Sub: Use Redis as the message bus across multiple core instances
+   - Core instance A receives op from User A
+   - Publishes to Redis channel "project:{id}:ops"
+   - Core instance B is subscribed and forwards to User B's WebSocket
+```
+
+**Redis Pub/Sub pattern (would be added to `shared/redis_client.py`):**
+```python
+# Publisher (when a user saves)
+redis = await get_redis()
+await redis.publish(f"project:{project_id}:ops", json.dumps(op))
+
+# Subscriber (WebSocket handler)
+pubsub = redis.pubsub()
+await pubsub.subscribe(f"project:{project_id}:ops")
+async for message in pubsub.listen():
+    await ws.send_text(message["data"])
+```
+
+**The FortuneSheet spreadsheet** already exposes an `onOp` callback that fires for every cell change,
+making it the natural source of ops to broadcast.
+
+## Deployment Modes
+
+### Native Development
+
+Typical local stack:
+
+- frontend dev server on `5173`
+- python gateway on `8080`
+- core on `8000`
+- ai on `8001`
+- git on `8002`
+- mcp on `8003`
+
+### Docker / Compose
+
+Typical container stack:
+
+- nginx gateway at the edge
+- each backend service in its own container
+- shared database and Redis dependencies
+
+The two gateway implementations must stay behaviorally aligned.
+
+## Strengths In The Current Architecture
+
+- clean service split by responsibility
+- one shared ORM model set instead of duplicated service-specific schemas
+- clear workspace-scoped authorization model
+- AI features are isolated from the core CRUD service
+- GitHub webhook processing is decoupled through background work and internal calls
+- frontend already follows a consistent API access pattern
+
+## Current Architectural Risks
+
+These are real, code-observed issues worth keeping in mind:
+
+- gateway rules exist in two places, so route drift is possible
+- some public field names do not match stored identifiers exactly, especially project member assignment
+- workspace role naming is not fully normalized between backend responses and frontend types
+- both `tasks.assignee_id` and `task_assignees` exist, but the current product flow uses the single-assignee field
+- documentation had previously drifted from code, which is why this refresh was required
+
+## Design Rules To Preserve
+
+When adding new features, keep these boundaries intact:
+
+- new business CRUD goes to the owning service, not the gateway
+- shared tables belong in `shared/models/`
+- migrations go through the core service migration flow
+- frontend components should never call `fetch` directly outside `lib/api.ts`
+- internal service calls should not be exposed through public routers accidentally
+- workspace-scoped data must always resolve authorization through `WorkspaceContext`
+
+## Recommended Reading Order
+
+1. [SRS.md](SRS.md)
+2. [MICROSERVICES-REFERENCE.md](MICROSERVICES-REFERENCE.md)
+3. [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md)
+4. [API-REFERENCE.md](API-REFERENCE.md)
+5. [ERD.md](ERD.md)

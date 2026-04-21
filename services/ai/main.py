@@ -1,15 +1,25 @@
 """AI service — LLM, RAG, chat, commit analysis."""
 
 import logging
-from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from shared.database import init_db, close_db
 from routers.v1 import router as v1_router
 from routers.internal import router as internal_router
 
 logger = logging.getLogger(__name__)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+    await close_db()
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="OPPM AI Service", version="2.0.0")
+    app = FastAPI(title="OPPM AI Service", version="2.0.0", lifespan=lifespan)
 
     # Public API routes (proxied by gateway, CORS handled by nginx)
     app.include_router(v1_router, prefix="/api")

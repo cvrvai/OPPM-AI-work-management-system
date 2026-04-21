@@ -8,19 +8,18 @@ Deploy the OPPM AI system. Run these steps in order:
 3. Verify all environment variables are set in production `.env`
 
 ## Database
-1. Check for pending migrations in `supabase/schema.sql`
-2. Apply via Supabase Dashboard or MCP `apply_migration`
-3. Verify RLS policies are active on all tables
+1. Check for pending SQL migrations in `docs/ERD.md` or migration files
+2. Apply via `psql` or the MCP `execute_sql` tool
+3. Verify indexes are in place for workspace_id foreign keys
 
 ## Backend
-1. Build Docker image: `docker build -t oppm-backend ./backend`
-2. Run: `docker run -p 8000:8000 --env-file ./backend/.env oppm-backend`
+1. Build Docker images: `docker compose build`
+2. Run: `docker compose up -d`
 
 ## Frontend
 1. Build: `cd frontend && npm run build`
 2. Serve `dist/` via nginx or CDN
 3. Set `VITE_API_URL` to production backend URL
-4. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
 
 ## Post-deploy
 1. Test `/health` endpoint returns `{"status": "ok", "version": "2.0.0"}`

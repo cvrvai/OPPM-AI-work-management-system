@@ -2,6 +2,7 @@
 
 import logging
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.rag.embedder import generate_embedding
 from infrastructure.rag.retrievers.base_retriever import BaseRetriever, RetrievedChunk
 from repositories.vector_repo import VectorRepository
@@ -14,8 +15,8 @@ class VectorRetriever(BaseRetriever):
 
     name = "vector"
 
-    def __init__(self) -> None:
-        self._repo = VectorRepository()
+    def __init__(self, session: AsyncSession) -> None:
+        self._repo = VectorRepository(session)
 
     async def retrieve(
         self,
@@ -28,11 +29,14 @@ class VectorRetriever(BaseRetriever):
 
         query_embedding = await generate_embedding(query)
 
-        results = self._repo.similarity_search(
+        # VectorRepository.similarity_search accepts singular `entity_type`
+        entity_type = entity_types[0] if entity_types and len(entity_types) == 1 else None
+
+        results = await self._repo.similarity_search(
             workspace_id=workspace_id,
             query_embedding=query_embedding,
             top_k=top_k,
-            entity_types=entity_types,
+            entity_type=entity_type,
         )
 
         return [

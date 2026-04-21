@@ -1,13 +1,31 @@
-"""Project repository (read-only) for AI service."""
+"""Project repository for AI service."""
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.base import BaseRepository
+from shared.models.project import Project
 
 
 class ProjectRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("projects")
+    model = Project
 
-    def find_workspace_projects(self, workspace_id: str, limit: int = 500) -> list[dict]:
-        q = self._query().select("*").eq("workspace_id", workspace_id)
-        q = q.order("created_at", desc=True).range(0, limit - 1)
-        return q.execute().data or []
+    async def find_workspace_projects(self, workspace_id: str, limit: int = 500) -> list[Project]:
+        stmt = (
+            select(Project)
+            .where(Project.workspace_id == workspace_id)
+            .order_by(Project.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def create_project(self, data: dict) -> Project:
+        """Create a new project with defaults for optional fields."""
+        defaults: dict = {
+            "status": "planning",
+            "priority": "medium",
+            "progress": 0,
+        }
+        defaults.update(data)
+        return await self.create(defaults)

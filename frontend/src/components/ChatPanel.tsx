@@ -5,22 +5,34 @@
  * - Reads context from chatStore (workspace or project level)
  * - Workspace-level: cross-project questions, no tool execution
  * - Project-level: conversational AI + tool calls + suggest plan + weekly summary
+ * - File upload: .txt .md .csv .json .xml .yaml image/* .pdf .docx (text extracted client-side)
+ * - Chat history persisted to localStorage per workspace/project context
  * - Auto-refreshes queries when AI makes changes
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { api, parseFile } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { useChatStore } from '@/stores/chatStore'
+import { useChatStore, getContextKey, type FileAttachment, type PastSession, DEFAULT_PANEL_SIZE } from '@/stores/chatStore'
 import {
   X, Send, Loader2, Bot, User, Sparkles,
   AlertTriangle, CheckCircle2, Lightbulb,
-  FolderKanban, Building2,
+  FolderKanban, Building2, Paperclip, FileText,
+  ImageIcon, File, Clock, History, MessageSquarePlus, ChevronLeft, Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // ── Types ──
+
+interface PendingAttachment {
+  name: string
+  type: 'text' | 'image' | 'binary'
+  content: string   // text: raw text; image: data URL; binary: ''
+  size: number
+}
 
 interface ToolCallResult {
   tool: string
@@ -34,6 +46,8 @@ interface ChatResponse {
   message: string
   tool_calls: ToolCallResult[]
   updated_entities: string[]
+  low_confidence?: boolean
+  iterations?: number
 }
 
 interface SuggestPlanResponse {
@@ -50,7 +64,8 @@ interface WeeklySummaryResponse {
   suggested_actions: string[]
 }
 
-// ── Entity → query key mapping ──
+// ── Constants ──
+
 const ENTITY_QUERY_MAP: Record<string, string> = {
   oppm_objectives: 'oppm-objectives',
   oppm_timeline_entries: 'oppm-timeline',
@@ -59,11 +74,79 @@ const ENTITY_QUERY_MAP: Record<string, string> = {
   projects: 'project',
 }
 
+/** File extensions whose text content is extracted client-side */
+const TEXT_EXTENSIONS = new Set([
+  '.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.yml', '.log',
+  '.html', '.htm', '.py', '.js', '.ts', '.tsx', '.jsx', '.css', '.sh', '.sql',
+])
+
+const MAX_TEXT_CHARS = 10_000
+const MAX_FILES_PER_MSG = 5
+const MAX_FILE_BYTES = 10 * 1024 * 1024  // 10 MB
+
+/** Binary extensions that the backend can extract text from */
+const SERVER_PARSE_EXTENSIONS = new Set(['.xlsx', '.xls', '.pdf', '.docx', '.doc'])
+
+// ── Helpers ──
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1048576).toFixed(1)} MB`
+}
+
+function fileExt(name: string): string {
+  const idx = name.lastIndexOf('.')
+  return idx >= 0 ? name.slice(idx).toLowerCase() : ''
+}
+
+function readAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = (e) => resolve(e.target?.result as string)
+    r.onerror = () => reject(new Error(`Cannot read ${file.name}`))
+    r.readAsText(file)
+  })
+}
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = (e) => resolve(e.target?.result as string)
+    r.onerror = () => reject(new Error(`Cannot read ${file.name}`))
+    r.readAsDataURL(file)
+  })
+}
+
+function parseChoices(content: string): { displayContent: string; choices: string[]; hasCustom: boolean } {
+  const match = content.match(/\[CHOICES:\s*([^\]]+)\]\s*$/)
+  if (!match) return { displayContent: content, choices: [], hasCustom: false }
+  const raw = match[1].split('|').map(s => s.trim()).filter(Boolean)
+  const hasCustom = raw.length > 0 && raw[raw.length - 1].endsWith('...')
+  const choices = hasCustom ? raw.slice(0, -1) : raw
+  const displayContent = content.slice(0, match.index).trimEnd()
+  return { displayContent, choices, hasCustom }
+}
+
+// ── Component ──
+
 export function ChatPanel() {
   const [input, setInput] = useState('')
   const [pendingPlan, setPendingPlan] = useState<SuggestPlanResponse | null>(null)
+  const [showPlanInput, setShowPlanInput] = useState(false)
+  const [planGoal, setPlanGoal] = useState('')
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
+
+  // Track if currently dragging/resizing to suppress text selection
+  const [isDragging, setIsDragging] = useState(false)
+  const [sessionStartIdx, setSessionStartIdx] = useState(0)
+  const prevContextKeyRef = useRef('')
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const planInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isOpen = useChatStore((s) => s.isOpen)
   const messages = useChatStore((s) => s.messages)
@@ -71,23 +154,145 @@ export function ChatPanel() {
   const projectId = useChatStore((s) => s.projectId)
   const projectTitle = useChatStore((s) => s.projectTitle)
   const addMessage = useChatStore((s) => s.addMessage)
+  const clearContextHistory = useChatStore((s) => s.clearContextHistory)
   const close = useChatStore((s) => s.close)
+  const panelPosition = useChatStore((s) => s.panelPosition)
+  const panelSize = useChatStore((s) => s.panelSize)
+  const setPanelGeometry = useChatStore((s) => s.setPanelGeometry)
+  const saveAndNewChat = useChatStore((s) => s.saveAndNewChat)
+  const restoreSession = useChatStore((s) => s.restoreSession)
+  const deleteSession = useChatStore((s) => s.deleteSession)
+  const pastSessions = useChatStore((s) => s.pastSessions)
+
+  // ── History panel state ──
+  const [showHistory, setShowHistory] = useState(false)
+
+  // ── Drag / resize state ──
+  const dragState = useRef<{ startMX: number; startMY: number; startX: number; startY: number } | null>(null)
+  const resizeState = useRef<{
+    edge: 'right' | 'bottom' | 'corner'
+    startMX: number; startMY: number; startW: number; startH: number; startX: number; startY: number
+  } | null>(null)
+  // Live position/size tracked in refs during drag to avoid re-renders on every mousemove
+  const livePos = useRef({ x: 0, y: 0 })
+  const liveSize = useRef(DEFAULT_PANEL_SIZE)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  const MIN_W = 300
+  const MIN_H = 300
+  const MAX_W = 900
 
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const queryClient = useQueryClient()
 
   const isProjectContext = contextType === 'project' && !!projectId
+  const contextKey = getContextKey(contextType, projectId)
+
+  // Capture session start index when context key changes (to mark restored history)
+  useEffect(() => {
+    if (contextKey !== prevContextKeyRef.current) {
+      prevContextKeyRef.current = contextKey
+      setSessionStartIdx(messages.length)
+      setAttachments([])
+      setFileError(null)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextKey])
 
   // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Initialize panel position to right edge on first mount (when no persisted position)
+  useEffect(() => {
+    const defaultX = Math.max(0, window.innerWidth - (panelSize.width + 20))
+    const defaultY = 0
+    const pos = panelPosition ?? { x: defaultX, y: defaultY }
+    livePos.current = pos
+    liveSize.current = panelSize
+    if (panelRef.current) {
+      panelRef.current.style.left = `${pos.x}px`
+      panelRef.current.style.top = `${pos.y}px`
+      panelRef.current.style.width = `${panelSize.width}px`
+      panelRef.current.style.height = `${panelSize.height}px`
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+
+  // Global drag mousemove/mouseup
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragState.current || !panelRef.current) return
+      const { startMX, startMY, startX, startY } = dragState.current
+      const dx = e.clientX - startMX
+      const dy = e.clientY - startMY
+      const maxX = window.innerWidth - liveSize.current.width
+      const maxY = window.innerHeight - MIN_H
+      const newX = Math.max(0, Math.min(maxX, startX + dx))
+      const newY = Math.max(0, Math.min(maxY, startY + dy))
+      livePos.current = { x: newX, y: newY }
+      panelRef.current.style.left = `${newX}px`
+      panelRef.current.style.top = `${newY}px`
+    }
+    function onUp() {
+      if (!dragState.current) return
+      dragState.current = null
+      setIsDragging(false)
+      setPanelGeometry(livePos.current, liveSize.current)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [setPanelGeometry])
+
+  // Global resize mousemove/mouseup
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!resizeState.current || !panelRef.current) return
+      const { edge, startMX, startMY, startW, startH } = resizeState.current
+      const dx = e.clientX - startMX
+      const dy = e.clientY - startMY
+      const maxH = window.innerHeight - livePos.current.y
+      let newW = liveSize.current.width
+      let newH = liveSize.current.height
+      if (edge === 'right' || edge === 'corner') {
+        newW = Math.max(MIN_W, Math.min(MAX_W, startW + dx))
+      }
+      if (edge === 'bottom' || edge === 'corner') {
+        newH = Math.max(MIN_H, Math.min(maxH, startH + dy))
+      }
+      liveSize.current = { width: newW, height: newH }
+      panelRef.current.style.width = `${newW}px`
+      panelRef.current.style.height = `${newH}px`
+    }
+    function onUp() {
+      if (!resizeState.current) return
+      resizeState.current = null
+      setIsDragging(false)
+      setPanelGeometry(livePos.current, liveSize.current)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [setPanelGeometry])
+
   // Focus input when panel opens
   useEffect(() => {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 200)
   }, [isOpen])
+
+  // Focus plan goal input when shown
+  useEffect(() => {
+    if (showPlanInput) setTimeout(() => planInputRef.current?.focus(), 50)
+  }, [showPlanInput])
 
   // Invalidate queries for updated entities
   const invalidateEntities = useCallback(
@@ -102,37 +307,195 @@ export function ChatPanel() {
     [queryClient, projectId],
   )
 
-  // ── Chat mutation ──
-  const chatMutation = useMutation({
-    mutationFn: (msgs: { role: string; content: string }[]) => {
-      const path = isProjectContext
-        ? `${wsPath}/projects/${projectId}/ai/chat`
-        : `${wsPath}/ai/chat`
-      return api.post<ChatResponse>(path, { messages: msgs })
+  // ── File handling ──
+
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? [])
+      e.target.value = ''
+      setFileError(null)
+
+      const remaining = MAX_FILES_PER_MSG - attachments.length
+      if (remaining <= 0) {
+        setFileError(`Maximum ${MAX_FILES_PER_MSG} files per message.`)
+        return
+      }
+      const toProcess = files.slice(0, remaining)
+      if (files.length > remaining) {
+        setFileError(`Only the first ${remaining} file(s) added (max ${MAX_FILES_PER_MSG}).`)
+      }
+
+      const results: PendingAttachment[] = []
+      for (const file of toProcess) {
+        const ext = fileExt(file.name)
+        try {
+          if (file.size > MAX_FILE_BYTES) {
+            setFileError(`${file.name} exceeds 10 MB limit.`)
+            continue
+          }
+          if (file.type.startsWith('image/')) {
+            const dataUrl = await readAsDataURL(file)
+            results.push({ name: file.name, type: 'image', content: dataUrl, size: file.size })
+          } else if (TEXT_EXTENSIONS.has(ext) || file.type.startsWith('text/')) {
+            const text = await readAsText(file)
+            results.push({ name: file.name, type: 'text', content: text, size: file.size })
+          } else if (SERVER_PARSE_EXTENSIONS.has(ext) && ws) {
+            // Send binary file to backend for text extraction
+            const parsed = await parseFile(ws.id, file)
+            if (parsed.error) {
+              setFileError(`${file.name}: ${parsed.error}`)
+              continue
+            }
+            results.push({ name: file.name, type: 'text', content: parsed.extracted_text, size: file.size })
+            if (parsed.truncated) {
+              setFileError(`${file.name} was truncated due to size.`)
+            }
+          } else {
+            // Unsupported binary — store stub
+            results.push({ name: file.name, type: 'binary', content: '', size: file.size })
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unknown error'
+          setFileError(`Failed to process ${file.name}: ${msg}`)
+        }
+      }
+      setAttachments((prev) => [...prev, ...results])
     },
-    onSuccess: (data) => {
-      addMessage({
-        role: 'assistant',
-        content: data.message,
-        toolCalls: data.tool_calls,
-        updatedEntities: data.updated_entities,
-      })
-      if (data.updated_entities.length > 0) {
-        invalidateEntities(data.updated_entities)
+    [attachments.length, ws],
+  )
+
+  const removeAttachment = useCallback((idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx))
+  }, [])
+
+  // ── Streaming chat ──
+
+  const [isChatPending, setIsChatPending] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const sendChat = useCallback(
+    async (msgs: { role: string; content: string }[]) => {
+      if (!ws) return
+      setIsChatPending(true)
+      abortRef.current = new AbortController()
+
+      // Project-level uses the streaming endpoint; workspace-level falls back to blocking POST
+      const isStreamable = isProjectContext && !!projectId
+      const path = isStreamable
+        ? `${wsPath}/projects/${projectId}/ai/chat/stream`
+        : `${wsPath}/ai/chat`
+
+      if (!isStreamable) {
+        // Workspace-level: blocking POST (no streaming endpoint yet)
+        try {
+          const data = await api.post<ChatResponse>(path, { messages: msgs })
+          addMessage({
+            role: 'assistant',
+            content: data.message,
+            toolCalls: data.tool_calls,
+            updatedEntities: data.updated_entities,
+            lowConfidence: data.low_confidence ?? false,
+          })
+          if (data.updated_entities.length > 0) invalidateEntities(data.updated_entities)
+        } catch (err) {
+          addMessage({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` })
+        } finally {
+          setIsChatPending(false)
+        }
+        return
+      }
+
+      // Project-level: consume SSE stream
+      const token = localStorage.getItem('access_token')
+      const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || '/api'
+
+      try {
+        const res = await fetch(`${API_BASE}${path}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ messages: msgs }),
+          signal: abortRef.current.signal,
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }))
+          throw new Error(err.detail || 'AI chat failed')
+        }
+
+        const reader = res.body?.getReader()
+        if (!reader) throw new Error('No response body')
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          // Split on double-newline SSE boundary
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop() ?? ''
+
+          for (const part of parts) {
+            const lines = part.split('\n')
+            let event = 'message'
+            let dataStr = ''
+            for (const line of lines) {
+              if (line.startsWith('event: ')) event = line.slice(7).trim()
+              else if (line.startsWith('data: ')) dataStr = line.slice(6).trim()
+            }
+            if (!dataStr) continue
+
+            try {
+              const payload = JSON.parse(dataStr)
+              if (event === 'tool_call' && payload.updated_entities?.length > 0) {
+                invalidateEntities(payload.updated_entities as string[])
+              } else if (event === 'message') {
+                const data = payload as ChatResponse
+                addMessage({
+                  role: 'assistant',
+                  content: data.message,
+                  toolCalls: data.tool_calls,
+                  updatedEntities: data.updated_entities,
+                  lowConfidence: data.low_confidence ?? false,
+                })
+                if (data.updated_entities.length > 0) invalidateEntities(data.updated_entities)
+              } else if (event === 'error') {
+                addMessage({ role: 'assistant', content: `Error: ${payload.detail ?? 'Unknown error'}` })
+              }
+            } catch {
+              // malformed SSE chunk — ignore
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          addMessage({ role: 'assistant', content: `Error: ${err.message}` })
+        }
+      } finally {
+        setIsChatPending(false)
+        abortRef.current = null
       }
     },
-    onError: (err: Error) => {
-      addMessage({ role: 'assistant', content: `Error: ${err.message}` })
-    },
-  })
+    [ws, isProjectContext, projectId, wsPath, addMessage, invalidateEntities],
+  )
 
-  // ── Suggest plan mutation (project-only) ──
+  // ── Suggest plan mutation ──
+
   const suggestPlanMutation = useMutation({
     mutationFn: (description: string) =>
-      api.post<SuggestPlanResponse>(`${wsPath}/projects/${projectId}/ai/suggest-plan`, { description }),
+      api.post<SuggestPlanResponse>(
+        `${wsPath}/projects/${projectId}/ai/suggest-plan`,
+        { description },
+      ),
     onSuccess: (data) => {
       setPendingPlan(data)
-      const objList = data.suggested_objectives.map((o, i) => `${i + 1}. ${o.title} (${o.suggested_weeks.join(', ')})`).join('\n')
+      const objList = data.suggested_objectives
+        .map((o, i) => `${i + 1}. ${o.title} (${o.suggested_weeks.join(', ')})`)
+        .join('\n')
       addMessage({
         role: 'assistant',
         content: `${data.explanation}\n\n**Suggested objectives:**\n${objList}\n\nClick "Apply Plan" to create these objectives, or "Discard" to cancel.`,
@@ -144,6 +507,7 @@ export function ChatPanel() {
   })
 
   // ── Commit plan mutation ──
+
   const commitPlanMutation = useMutation({
     mutationFn: (commitToken: string) =>
       api.post<{ created_objectives: unknown[]; count: number }>(
@@ -161,7 +525,8 @@ export function ChatPanel() {
     },
   })
 
-  // ── Weekly summary mutation (project-only) ──
+  // ── Weekly summary mutation ──
+
   const weeklySummaryMutation = useMutation({
     mutationFn: () =>
       api.get<WeeklySummaryResponse>(`${wsPath}/projects/${projectId}/ai/weekly-summary`),
@@ -182,21 +547,79 @@ export function ChatPanel() {
   })
 
   // ── Send message handler ──
+
   const handleSend = useCallback(() => {
     const text = input.trim()
-    if (!text || chatMutation.isPending) return
+    if ((!text && attachments.length === 0) || isChatPending) return
+    if (!ws) return
 
-    addMessage({ role: 'user', content: text })
+    // Build attachments saved to chatStore (images stored as data URL, text stored as empty to save space)
+    const storedAttachments: FileAttachment[] = attachments.map((a) => ({
+      name: a.name,
+      type: a.type,
+      content: a.type === 'image' ? a.content : '',
+    }))
+
+    // Display content is just what the user typed
+    addMessage({
+      role: 'user',
+      content: text || '(attached files)',
+      ...(storedAttachments.length > 0 ? { attachments: storedAttachments } : {}),
+    })
+
+    // Build API content — embed file contents only for this message
+    let apiContent = text
+    if (attachments.length > 0) {
+      const blocks = attachments.map((a) => {
+        if (a.type === 'text') {
+          const body = a.content.length > MAX_TEXT_CHARS
+            ? a.content.slice(0, MAX_TEXT_CHARS) + '\n… (truncated)'
+            : a.content
+          return `[File: ${a.name}]\n\`\`\`\n${body}\n\`\`\``
+        }
+        if (a.type === 'image') {
+          return `[Image attached: ${a.name}]`
+        }
+        return `[Attached: ${a.name} — binary file, content extraction not supported]`
+      })
+      apiContent = [text, '\n\n--- Attached Files ---', ...blocks]
+        .filter(Boolean)
+        .join('\n')
+    }
+
     setInput('')
+    setAttachments([])
+    setFileError(null)
 
-    const allMsgs = [...messages, { role: 'user' as const, content: text }]
-    chatMutation.mutate(
-      allMsgs.map((m) => ({ role: m.role, content: m.content })),
-    )
-  }, [input, messages, chatMutation, addMessage])
+    // Pass history messages + new user message to the API
+    const allMsgs = [
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      { role: 'user' as const, content: apiContent },
+    ]
+    sendChat(allMsgs)
+  }, [input, attachments, messages, isChatPending, sendChat, addMessage, ws])
+
+  const handleQuickSend = useCallback((text: string) => {
+    if (!text.trim()) return
+    addMessage({ role: 'user', content: text })
+    const allMsgs = [
+      ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user' as const, content: text },
+    ]
+    sendChat(allMsgs)
+  }, [messages, sendChat, addMessage])
+
+  const handleSuggestPlan = useCallback(() => {
+    const goal = planGoal.trim()
+    if (!goal) return
+    setShowPlanInput(false)
+    setPlanGoal('')
+    addMessage({ role: 'user', content: `Generate a plan: ${goal}` })
+    suggestPlanMutation.mutate(goal)
+  }, [planGoal, addMessage, suggestPlanMutation])
 
   const isLoading =
-    chatMutation.isPending ||
+    isChatPending ||
     suggestPlanMutation.isPending ||
     commitPlanMutation.isPending ||
     weeklySummaryMutation.isPending
@@ -204,17 +627,142 @@ export function ChatPanel() {
   if (!isOpen) return null
 
   return (
-    <div className="fixed top-0 right-0 h-full w-[420px] bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+    <div
+      ref={panelRef}
+      className={cn(
+        'fixed bg-white border border-gray-200 shadow-2xl z-50 flex flex-col rounded-xl overflow-hidden',
+        isDragging && 'select-none',
+      )}
+      style={{
+        left: panelPosition ? panelPosition.x : Math.max(0, window.innerWidth - (panelSize.width + 20)),
+        top: panelPosition ? panelPosition.y : 0,
+        width: panelSize.width,
+        height: panelSize.height,
+        minWidth: MIN_W,
+        minHeight: MIN_H,
+      }}
+    >
+
+      {/* Header — drag handle */}
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 cursor-move shrink-0"
+        onMouseDown={(e) => {
+          // Don't start drag on buttons inside header
+          if ((e.target as HTMLElement).closest('button')) return
+          e.preventDefault()
+          setIsDragging(true)
+          dragState.current = {
+            startMX: e.clientX,
+            startMY: e.clientY,
+            startX: livePos.current.x,
+            startY: livePos.current.y,
+          }
+        }}
+      >
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-blue-600" />
           <span className="font-semibold text-sm text-gray-800">OPPM AI Assistant</span>
         </div>
-        <button onClick={close} className="text-gray-400 hover:text-gray-600">
-          <X className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            title="View history"
+            className={cn(
+              'p-1.5 rounded-lg transition-colors',
+              showHistory
+                ? 'bg-blue-100 text-blue-600'
+                : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50',
+            )}
+          >
+            <History className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => { saveAndNewChat(); setShowHistory(false) }}
+            title="New chat"
+            className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+          </button>
+          <button onClick={close} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
       </div>
+
+      {/* ── History overlay ── */}
+      {showHistory && (
+        <div className="absolute inset-0 z-30 flex flex-col bg-white rounded-xl overflow-hidden">
+          {/* History header */}
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
+            <button
+              onClick={() => setShowHistory(false)}
+              className="p-1 text-gray-400 hover:text-gray-700 rounded-lg"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <History className="h-4 w-4 text-gray-500" />
+            <span className="font-semibold text-sm text-gray-800">Chat History</span>
+            <span className="ml-auto text-xs text-gray-400">
+              {(pastSessions[contextKey] ?? []).length} session{(pastSessions[contextKey] ?? []).length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* Session list */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {(pastSessions[contextKey] ?? []).length === 0 ? (
+              <div className="text-center text-gray-400 text-sm mt-12">
+                <History className="h-10 w-10 mx-auto mb-3 text-gray-200" />
+                <p className="font-medium text-gray-500">No past sessions</p>
+                <p className="text-xs mt-1">Start a new chat and past conversations will appear here.</p>
+              </div>
+            ) : (
+              (pastSessions[contextKey] ?? []).map((session: PastSession, idx: number) => {
+                const firstUser = session.messages.find((m) => m.role === 'user')
+                const preview = firstUser?.content?.slice(0, 80) ?? '(empty)'
+                const date = new Date(session.savedAt)
+                const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+                return (
+                  <div
+                    key={idx}
+                    className="group flex items-start gap-3 p-3 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/40 cursor-pointer transition-colors"
+                    onClick={() => { restoreSession(contextKey, idx); setShowHistory(false) }}
+                  >
+                    <div className="shrink-0 mt-0.5 h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                      <Bot className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-gray-700">{dateStr} · {timeStr}</span>
+                        <span className="text-xs text-gray-400 shrink-0">{session.messages.length} msg{session.messages.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5 truncate">{preview}</p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteSession(contextKey, idx) }}
+                      title="Delete session"
+                      className="shrink-0 p-1 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 rounded transition-all"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {/* New Chat from history screen */}
+          <div className="shrink-0 px-4 py-3 border-t border-gray-100">
+            <button
+              onClick={() => { saveAndNewChat(); setShowHistory(false) }}
+              className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-2.5 text-sm font-medium text-gray-400 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <MessageSquarePlus className="h-4 w-4" />
+              New Chat
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Context badge */}
       <div className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-100 bg-gray-50/50 text-xs text-gray-500">
@@ -235,13 +783,7 @@ export function ChatPanel() {
       {isProjectContext && (
         <div className="flex gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50/50">
           <button
-            onClick={() => {
-              const desc = prompt('Describe the project goals for AI plan generation:')
-              if (desc) {
-                addMessage({ role: 'user', content: `Generate a plan: ${desc}` })
-                suggestPlanMutation.mutate(desc)
-              }
-            }}
+            onClick={() => setShowPlanInput(true)}
             disabled={isLoading}
             className="flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700 rounded-full px-3 py-1.5 hover:bg-blue-100 disabled:opacity-50 font-medium"
           >
@@ -264,71 +806,76 @@ export function ChatPanel() {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {messages.length === 0 && (
-          <div className="text-center text-gray-400 text-sm mt-12">
-            <Bot className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-            <p className="font-medium text-gray-500">
-              {isProjectContext ? 'Ask me about your project' : 'Ask me about your workspace'}
-            </p>
-            <p className="text-xs mt-1">
-              {isProjectContext
-                ? 'I can update objectives, timelines, generate plans, and analyze progress.'
-                : 'I can answer questions across all projects, tasks, and team members.'}
-            </p>
+
+        {/* History indicator */}
+        {sessionStartIdx > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0">
+              <Clock className="h-3 w-3" />
+              {sessionStartIdx} previous message{sessionStartIdx !== 1 ? 's' : ''}
+            </span>
+            <div className="flex-1 h-px bg-gray-200" />
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={cn(
-              'flex gap-2',
-              msg.role === 'user' ? 'justify-end' : 'justify-start',
-            )}
-          >
-            {msg.role === 'assistant' && (
-              <Bot className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
-            )}
-            <div
-              className={cn(
-                'max-w-[85%] rounded-xl px-3 py-2 text-sm',
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-800',
-              )}
-            >
-              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-
-              {/* Tool call results */}
-              {msg.toolCalls && msg.toolCalls.length > 0 && (
-                <div className="mt-2 space-y-1 border-t border-gray-200 pt-2">
-                  {msg.toolCalls.map((tc, j) => (
-                    <div
-                      key={j}
-                      className={cn(
-                        'flex items-center gap-1.5 text-xs rounded px-2 py-1',
-                        tc.success
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-red-50 text-red-700',
-                      )}
-                    >
-                      {tc.success ? (
-                        <CheckCircle2 className="h-3 w-3 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="h-3 w-3 shrink-0" />
-                      )}
-                      <span className="font-medium">{tc.tool}</span>
-                      {tc.error && <span className="ml-1">— {tc.error}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {msg.role === 'user' && (
-              <User className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
+        {/* Empty state */}
+        {messages.length === 0 && (
+          <div className="text-center text-gray-400 text-sm mt-12">
+            <Bot className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+            {!ws ? (
+              <>
+                <p className="font-medium text-gray-500">No workspace selected</p>
+                <p className="text-xs mt-1">Select a workspace from the sidebar to start chatting with the AI assistant.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium text-gray-500">
+                  {isProjectContext ? 'Ask me about your project' : 'Ask me about your workspace'}
+                </p>
+                <p className="text-xs mt-1">
+                  {isProjectContext
+                    ? 'I can update objectives, timelines, generate plans, and analyze progress.'
+                    : 'I can answer questions across all projects, tasks, and team members.'}
+                </p>
+                <p className="text-xs mt-2 text-gray-400">
+                  Attach files with the <Paperclip className="inline h-3 w-3" /> button below.
+                </p>
+              </>
             )}
           </div>
-        ))}
+        )}
+
+        {/* New session divider (when there is restored history) */}
+        {sessionStartIdx > 0 && messages.length > sessionStartIdx && (
+          <>
+            {messages.slice(0, sessionStartIdx).map((msg, i) => (
+              <MessageBubble key={`h-${i}`} msg={msg} />
+            ))}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-blue-100" />
+              <span className="text-xs text-blue-400 shrink-0">New session</span>
+              <div className="flex-1 h-px bg-blue-100" />
+            </div>
+            {messages.slice(sessionStartIdx).map((msg, i, arr) => (
+              <MessageBubble
+                key={`n-${i}`}
+                msg={msg}
+                onChoiceSelect={i === arr.length - 1 ? handleQuickSend : undefined}
+              />
+            ))}
+          </>
+        )}
+
+        {/* All messages when no divider needed */}
+        {(sessionStartIdx === 0 || messages.length <= sessionStartIdx) &&
+          messages.map((msg, i, arr) => (
+            <MessageBubble
+              key={i}
+              msg={msg}
+              onChoiceSelect={i === arr.length - 1 ? handleQuickSend : undefined}
+            />
+          ))}
 
         {/* Pending plan buttons */}
         {pendingPlan && (
@@ -364,36 +911,334 @@ export function ChatPanel() {
       </div>
 
       {/* Input area */}
-      <div className="border-t border-gray-200 px-4 py-3">
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                handleSend()
+      <div className="border-t border-gray-200 px-4 pt-2 pb-3">
+
+        {/* Pending attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachments.map((att, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 bg-gray-100 border border-gray-200 text-xs rounded-full px-2.5 py-1 max-w-[160px]"
+              >
+                {att.type === 'image' ? (
+                  <ImageIcon className="h-3 w-3 text-blue-500 shrink-0" />
+                ) : att.type === 'text' ? (
+                  <FileText className="h-3 w-3 text-green-600 shrink-0" />
+                ) : (
+                  <File className="h-3 w-3 text-orange-500 shrink-0" />
+                )}
+                <span className="truncate text-gray-700">{att.name}</span>
+                <span className="text-gray-400 shrink-0">({formatBytes(att.size)})</span>
+                <button
+                  onClick={() => removeAttachment(i)}
+                  className="text-gray-400 hover:text-gray-600 shrink-0 ml-0.5"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* File error */}
+        {fileError && (
+          <p className="text-xs text-orange-500 mb-1.5">{fileError}</p>
+        )}
+
+        {showPlanInput ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-gray-600">Describe the project goals for AI plan generation:</p>
+            <div className="flex items-center gap-2">
+              <input
+                ref={planInputRef}
+                value={planGoal}
+                onChange={(e) => setPlanGoal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); handleSuggestPlan() }
+                  if (e.key === 'Escape') { setShowPlanInput(false); setPlanGoal('') }
+                }}
+                placeholder="e.g. Build a healthcare data platform…"
+                className="flex-1 rounded-xl border border-blue-300 bg-blue-50/60 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 placeholder:text-blue-300"
+              />
+              <button
+                onClick={handleSuggestPlan}
+                disabled={!planGoal.trim()}
+                className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Generate plan"
+              >
+                <Sparkles className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => { setShowPlanInput(false); setPlanGoal('') }}
+                className="rounded-xl border border-gray-200 p-2 text-gray-500 hover:bg-gray-100"
+                title="Cancel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-end gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={attachments.length >= MAX_FILES_PER_MSG}
+              title="Attach files"
+              className={cn(
+                'rounded-xl border p-2 shrink-0 transition-colors',
+                attachments.length >= MAX_FILES_PER_MSG
+                  ? 'border-gray-100 text-gray-300 cursor-not-allowed'
+                  : 'border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-blue-600',
+              )}
+            >
+              <Paperclip className="h-4 w-4" />
+            </button>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+              placeholder={
+                !ws
+                  ? 'Select a workspace to start chatting…'
+                  : isProjectContext
+                  ? 'Ask about your project…'
+                  : 'Ask about your workspace…'
               }
-            }}
-            placeholder={
-              isProjectContext
-                ? 'Ask about your project…'
-                : 'Ask about your workspace…'
-            }
-            rows={1}
-            className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 placeholder:text-gray-400"
-            style={{ maxHeight: '120px' }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        </div>
+              rows={1}
+              className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 placeholder:text-gray-400"
+              style={{ maxHeight: '120px' }}
+            />
+            <button
+              onClick={handleSend}
+              disabled={(!input.trim() && attachments.length === 0) || isLoading || !ws}
+              className="rounded-xl bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {/* hidden multi-file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.html,.htm,.py,.js,.ts,.tsx,.jsx,.css,.sh,.sql,.pdf,.docx,.doc,.xlsx,.xls,.pptx,image/*"
+          onChange={handleFileChange}
+        />
       </div>
+
+      {/* ── Resize handles ── */}
+      {/* Right edge */}
+      <div
+        className="absolute top-0 right-0 w-2 h-full cursor-ew-resize z-10"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+          resizeState.current = {
+            edge: 'right',
+            startMX: e.clientX, startMY: e.clientY,
+            startW: liveSize.current.width, startH: liveSize.current.height,
+            startX: livePos.current.x, startY: livePos.current.y,
+          }
+        }}
+      />
+      {/* Bottom edge */}
+      <div
+        className="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize z-10"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+          resizeState.current = {
+            edge: 'bottom',
+            startMX: e.clientX, startMY: e.clientY,
+            startW: liveSize.current.width, startH: liveSize.current.height,
+            startX: livePos.current.x, startY: livePos.current.y,
+          }
+        }}
+      />
+      {/* Bottom-right corner */}
+      <div
+        className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-20"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+          resizeState.current = {
+            edge: 'corner',
+            startMX: e.clientX, startMY: e.clientY,
+            startW: liveSize.current.width, startH: liveSize.current.height,
+            startX: livePos.current.x, startY: livePos.current.y,
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+// ── MessageBubble sub-component ──
+
+function AttachmentChip({ att }: { att: FileAttachment }) {
+  if (att.type === 'image') {
+    return (
+      <img
+        src={att.content}
+        alt={att.name}
+        className="max-w-[200px] max-h-[140px] rounded-lg border border-white/30 object-cover mt-1"
+      />
+    )
+  }
+  return (
+    <div className="inline-flex items-center gap-1.5 bg-white/20 text-xs rounded-full px-2.5 py-1 mt-1">
+      {att.type === 'text' ? (
+        <FileText className="h-3 w-3 shrink-0" />
+      ) : (
+        <File className="h-3 w-3 shrink-0" />
+      )}
+      <span className="max-w-[140px] truncate">{att.name}</span>
+    </div>
+  )
+}
+
+function MessageBubble({ msg, onChoiceSelect }: { msg: { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallResult[]; attachments?: FileAttachment[]; lowConfidence?: boolean }; onChoiceSelect?: (text: string) => void }) {
+  const [customInput, setCustomInput] = useState('')
+  const { displayContent, choices, hasCustom } = msg.role === 'assistant'
+    ? parseChoices(msg.content)
+    : { displayContent: msg.content, choices: [], hasCustom: false }
+  return (
+    <div
+      className={cn(
+        'flex gap-2',
+        msg.role === 'user' ? 'justify-end' : 'justify-start',
+      )}
+    >
+      {msg.role === 'assistant' && (
+        <Bot className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
+      )}
+      <div className="flex flex-col gap-2">
+      <div
+        className={cn(
+          'max-w-[85%] rounded-xl px-3 py-2 text-sm',
+          msg.role === 'user'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-100 text-gray-800',
+        )}
+      >
+        {/* Attachments (user messages) */}
+        {msg.role === 'user' && msg.attachments && msg.attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {msg.attachments.map((att, i) => (
+              <AttachmentChip key={i} att={att} />
+            ))}
+          </div>
+        )}
+
+        {/* Message content */}
+        {msg.role === 'assistant' ? (
+          <div className="prose prose-sm max-w-none break-words
+            prose-p:my-1 prose-p:leading-relaxed
+            prose-headings:font-semibold prose-headings:mt-2 prose-headings:mb-1
+            prose-h1:text-base prose-h2:text-sm prose-h3:text-sm
+            prose-strong:font-semibold prose-strong:text-gray-900
+            prose-ul:my-1 prose-ul:pl-4 prose-ol:my-1 prose-ol:pl-4
+            prose-li:my-0.5
+            prose-code:bg-gray-200 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono
+            prose-pre:bg-gray-200 prose-pre:rounded-lg prose-pre:p-2 prose-pre:text-xs prose-pre:overflow-x-auto
+            prose-blockquote:border-l-2 prose-blockquote:border-gray-400 prose-blockquote:pl-2 prose-blockquote:italic prose-blockquote:text-gray-600
+            prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {displayContent}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+        )}
+
+        {/* Low-confidence warning */}
+        {msg.role === 'assistant' && msg.lowConfidence && (
+          <div className="flex items-center gap-1.5 mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            <span>Low confidence — please verify this answer</span>
+          </div>
+        )}
+
+        {/* Tool call results (assistant) */}
+        {msg.toolCalls && msg.toolCalls.length > 0 && (
+          <div className="mt-2 space-y-1 border-t border-gray-200 pt-2">
+            {msg.toolCalls.map((tc, j) => (
+              <div
+                key={j}
+                className={cn(
+                  'flex items-center gap-1.5 text-xs rounded px-2 py-1',
+                  tc.success
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'bg-red-50 text-red-700',
+                )}
+              >
+                {tc.success ? (
+                  <CheckCircle2 className="h-3 w-3 shrink-0" />
+                ) : (
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                )}
+                <span className="font-medium">{tc.tool}</span>
+                {tc.error && <span className="ml-1">— {tc.error}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {/* Choice buttons */}
+      {onChoiceSelect && choices.length > 0 && (
+        <div className="flex flex-wrap gap-2 max-w-[85%]">
+          {choices.map((c, ci) => (
+            <button
+              key={ci}
+              onClick={() => onChoiceSelect(c)}
+              className="px-3 py-1.5 text-xs rounded-full border border-blue-300 bg-white text-blue-700 hover:bg-blue-50 transition-colors"
+            >
+              {c}
+            </button>
+          ))}
+          {hasCustom && (
+            <div className="flex gap-1 w-full mt-1">
+              <input
+                type="text"
+                value={customInput}
+                onChange={e => setCustomInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && customInput.trim()) {
+                    onChoiceSelect(customInput.trim())
+                    setCustomInput('')
+                  }
+                }}
+                placeholder="Type your own..."
+                className="flex-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <button
+                onClick={() => {
+                  if (customInput.trim()) {
+                    onChoiceSelect(customInput.trim())
+                    setCustomInput('')
+                  }
+                }}
+                className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Send
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      </div>
+      {msg.role === 'user' && (
+        <User className="h-5 w-5 text-blue-500 shrink-0 mt-1" />
+      )}
     </div>
   )
 }
