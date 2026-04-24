@@ -299,12 +299,19 @@ export function ChatPanel() {
     (entities: string[]) => {
       for (const entity of entities) {
         const queryKey = ENTITY_QUERY_MAP[entity]
-        if (queryKey && projectId) {
+        if (!queryKey) continue
+        if (projectId) {
+          // Project context: invalidate by projectId
           queryClient.invalidateQueries({ queryKey: [queryKey, projectId] })
+        }
+        // Workspace context: invalidate workspace-scoped queries (e.g. projects list)
+        // Always run this so the Projects page refreshes in real time after create_project
+        if (ws?.id) {
+          queryClient.invalidateQueries({ queryKey: [queryKey, ws.id] })
         }
       }
     },
-    [queryClient, projectId],
+    [queryClient, projectId, ws?.id],
   )
 
   // ── File handling ──

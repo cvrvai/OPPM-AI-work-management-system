@@ -1,7 +1,9 @@
 """Task management tools — create, update, delete, assign tasks."""
 
 import logging
+import uuid as _uuid
 from datetime import date, datetime
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.tools.base import ToolDefinition, ToolParam, ToolResult
@@ -9,6 +11,54 @@ from infrastructure.tools.registry import get_registry
 from repositories.task_repo import TaskRepository
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_assignee_id(
+    session: AsyncSession,
+    val: str,
+    workspace_id: str,
+) -> tuple[str | None, str | None]:
+    """Resolve assignee_id to a users.id UUID.
+
+    Returns (resolved_user_id, warning_message).
+    - If val is already a valid UUID → (val, None)
+    - If val looks like a name/email → attempt ILIKE match on display_name, full_name, email → (user_id, None) if found
+    - If name not found in workspace → (None, warning message)
+    """
+    # Already a valid UUID — use as-is
+    try:
+        _uuid.UUID(str(val))
+        return val, None
+    except ValueError:
+        pass
+
+    # Attempt name/email lookup
+    from shared.models.workspace import WorkspaceMember
+    from shared.models.user import User
+    from sqlalchemy import or_, func
+
+    name_pattern = f"%{val}%"
+    row = await session.execute(
+        select(WorkspaceMember.user_id)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .where(
+            WorkspaceMember.workspace_id == workspace_id,
+            or_(
+                func.lower(WorkspaceMember.display_name).contains(val.lower()),
+                func.lower(User.full_name).contains(val.lower()),
+                func.lower(User.email).contains(val.lower()),
+            ),
+        )
+        .limit(1)
+    )
+    match = row.scalar_one_or_none()
+    if match:
+        logger.info("Resolved assignee name '%s' → user_id %s", val, match)
+        return str(match), None
+
+    warning = f"Assignee '{val}' not found in workspace — task created without assignee. Invite them to the workspace first."
+    logger.warning(warning)
+    return None, warning
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -37,13 +87,22 @@ async def _create_task(
         "title": tool_input["title"],
         "created_by": user_id,
     }
+    warnings: list[str] = []
     for field in ("description", "priority", "oppm_objective_id",
                   "assignee_id", "project_contribution", "parent_task_id"):
         if field in tool_input:
             val = tool_input[field]
-            # Validate UUID fields — reject short/truncated IDs
-            if val and field in ("oppm_objective_id", "assignee_id", "parent_task_id"):
-                import uuid as _uuid
+            if val and field == "assignee_id":
+                # Graceful resolution: accept name/email or UUID
+                resolved, warning = await _resolve_assignee_id(session, str(val), workspace_id)
+                if warning:
+                    warnings.append(warning)
+                if resolved:
+                    data["assignee_id"] = resolved
+                # If not resolved → skip assignee_id, task still gets created
+                continue
+            if val and field in ("oppm_objective_id", "parent_task_id"):
+                # These cannot be resolved by name — hard UUID validation
                 try:
                     _uuid.UUID(str(val))
                 except ValueError:
@@ -60,9 +119,17 @@ async def _create_task(
                 return ToolResult(success=False, error=f"Invalid {date_field} format. Use YYYY-MM-DD.")
 
     task = await repo.create(data)
+    result_data: dict = {
+        "id": str(task.id),
+        "title": task.title,
+        "project_id": str(task.project_id),
+        "status": task.status,
+    }
+    if warnings:
+        result_data["warnings"] = warnings
     return ToolResult(
         success=True,
-        result={"id": str(task.id), "title": task.title, "project_id": str(task.project_id), "status": task.status},
+        result=result_data,
         updated_entities=["tasks", "projects"],
     )
 
