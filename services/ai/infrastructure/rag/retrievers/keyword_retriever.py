@@ -33,17 +33,18 @@ class KeywordRetriever(BaseRetriever):
 
         # Search tasks (tasks don't have workspace_id — join through projects)
         try:
-            stmt = (
-                select(Task)
-                .join(Project, Task.project_id == Project.id)
-                .where(Project.workspace_id == workspace_id)
-                .where(Task.title.ilike(search_term) | Task.description.ilike(search_term))
-                .limit(top_k)
-            )
-            if project_id:
-                stmt = stmt.where(Task.project_id == project_id)
-            result = await self._session.execute(stmt)
-            tasks = result.scalars().all()
+            async with self._session.begin_nested():
+                stmt = (
+                    select(Task)
+                    .join(Project, Task.project_id == Project.id)
+                    .where(Project.workspace_id == workspace_id)
+                    .where(Task.title.ilike(search_term) | Task.description.ilike(search_term))
+                    .limit(top_k)
+                )
+                if project_id:
+                    stmt = stmt.where(Task.project_id == project_id)
+                result = await self._session.execute(stmt)
+                tasks = result.scalars().all()
 
             for t in tasks:
                 content = f"Task: {t.title}\nStatus: {t.status} | Progress: {t.progress or 0}%"
@@ -62,15 +63,16 @@ class KeywordRetriever(BaseRetriever):
 
         # Search objectives
         try:
-            stmt = (
-                select(OPPMObjective)
-                .where(OPPMObjective.title.ilike(search_term))
-                .limit(top_k)
-            )
-            if project_id:
-                stmt = stmt.where(OPPMObjective.project_id == project_id)
-            result = await self._session.execute(stmt)
-            objectives = result.scalars().all()
+            async with self._session.begin_nested():
+                stmt = (
+                    select(OPPMObjective)
+                    .where(OPPMObjective.title.ilike(search_term))
+                    .limit(top_k)
+                )
+                if project_id:
+                    stmt = stmt.where(OPPMObjective.project_id == project_id)
+                result = await self._session.execute(stmt)
+                objectives = result.scalars().all()
 
             for o in objectives:
                 chunks.append(RetrievedChunk(

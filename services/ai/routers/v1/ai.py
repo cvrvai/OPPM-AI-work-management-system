@@ -13,7 +13,7 @@ from shared.models.ai_model import AIModel
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-ALLOWED_PROVIDERS = {"ollama", "anthropic", "openai", "kimi", "custom"}
+ALLOWED_PROVIDERS = {"ollama", "anthropic", "openai", "kimi", "deepseek", "custom"}
 
 
 @router.get("/workspaces/{workspace_id}/ai/models")

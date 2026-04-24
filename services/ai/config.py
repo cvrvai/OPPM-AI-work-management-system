@@ -17,6 +17,10 @@ class AISettings(SharedSettings):
     # Kimi
     kimi_api_key: str = ""
 
+    # DeepSeek
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

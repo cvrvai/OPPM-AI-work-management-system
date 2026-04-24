@@ -9,6 +9,7 @@ from infrastructure.llm.ollama import OllamaAdapter
 from infrastructure.llm.kimi import KimiAdapter
 from infrastructure.llm.anthropic import AnthropicAdapter
 from infrastructure.llm.openai import OpenAIAdapter
+from infrastructure.llm.deepseek import DeepSeekAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ ADAPTERS: dict[str, type[LLMAdapter]] = {
     "kimi": KimiAdapter,
     "anthropic": AnthropicAdapter,
     "openai": OpenAIAdapter,
+    "deepseek": DeepSeekAdapter,
 }
 
 # Providers that support native function calling

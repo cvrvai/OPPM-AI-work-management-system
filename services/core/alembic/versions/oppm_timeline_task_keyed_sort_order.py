@@ -22,6 +22,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Widen alembic_version.version_num to accommodate long revision IDs (> 32 chars)
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)")
+
     # tasks.sort_order
     op.add_column('tasks', sa.Column('sort_order', sa.Integer(), nullable=False, server_default='0'))
     op.create_index('ix_tasks_project_sort_order', 'tasks', ['project_id', 'sort_order'])

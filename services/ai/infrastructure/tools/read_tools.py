@@ -207,7 +207,8 @@ async def _get_team_workload(
 
     members = [
         {
-            "member_id": str(m.id),   # full UUID — use this for assign_task
+            "member_id": str(m.id),   # workspace_members.id — use for assign_task
+            "user_id": str(m.user_id),  # users.id — use for create_task assignee_id
             "display_name": m.display_name or full_name or email or "(no name)",
             "email": email,
             "role": m.role,

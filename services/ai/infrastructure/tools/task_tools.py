@@ -40,7 +40,15 @@ async def _create_task(
     for field in ("description", "priority", "oppm_objective_id",
                   "assignee_id", "project_contribution", "parent_task_id"):
         if field in tool_input:
-            data[field] = tool_input[field]
+            val = tool_input[field]
+            # Validate UUID fields — reject short/truncated IDs
+            if val and field in ("oppm_objective_id", "assignee_id", "parent_task_id"):
+                import uuid as _uuid
+                try:
+                    _uuid.UUID(str(val))
+                except ValueError:
+                    return ToolResult(success=False, error=f"Invalid UUID for {field}: '{val}'. Use the full UUID returned by the previous tool call.")
+            data[field] = val
 
     # Parse date fields to datetime.date objects
     for date_field in ("due_date", "start_date"):
@@ -259,7 +267,7 @@ _registry.register(ToolDefinition(
         ToolParam("description", "string", "Task description", required=False),
         ToolParam("priority", "string", "Task priority", required=False, enum=["low", "medium", "high", "critical"]),
         ToolParam("oppm_objective_id", "string", "UUID of the OPPM objective this task belongs to", required=False),
-        ToolParam("assignee_id", "string", "UUID of the user to assign", required=False),
+        ToolParam("assignee_id", "string", "user_id of the member to assign (NOT member_id) — call get_team_workload first and use the 'user_id' field from the result. NEVER pass a person's display name or email here. If you do not have the UUID, omit this field and use assign_task afterwards.", required=False),
         ToolParam("due_date", "string", "Due date (YYYY-MM-DD)", required=False),
         ToolParam("project_contribution", "integer", "How much this task contributes to project progress (0-100)", required=False),
         ToolParam("start_date", "string", "Start date (YYYY-MM-DD)", required=False),

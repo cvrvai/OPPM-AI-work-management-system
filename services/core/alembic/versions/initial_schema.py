@@ -70,7 +70,7 @@ def upgrade() -> None:
     sa.Column('endpoint_url', sa.String(length=300), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.CheckConstraint("provider IN ('ollama', 'anthropic', 'openai', 'kimi', 'custom')", name='ck_ai_models_provider'),
+    sa.CheckConstraint("provider IN ('ollama', 'anthropic', 'openai', 'kimi', 'deepseek', 'custom')", name='ck_ai_models_provider'),
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
