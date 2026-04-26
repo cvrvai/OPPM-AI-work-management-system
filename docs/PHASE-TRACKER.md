@@ -1,329 +1,61 @@
 # Current Phase Tracker
 
 ## Task
-Docker Compose Google Service Account Wiring
+Google Sheet Status Recovery And OPPM Verification
 
 ## Goal
-Add concrete Docker compose wiring for `GOOGLE_SERVICE_ACCOUNT_FILE` so the core container can read a mounted Google service-account key from a fixed in-container path.
+Prevent missing Google service-account files from crashing the OPPM Google Sheet status endpoint, restore the OPPM page to a usable state, and run focused verification of the project/task OPPM surfaces against the live Docker stack.
 
 ## Plan
 
-### Phase 1: Compose Wiring
-- [ ] Mount a repo-local secrets directory into the core container
-- [ ] Set a fixed `GOOGLE_SERVICE_ACCOUNT_FILE` path in the core container environment
+### Phase 1: Failure Analysis
+- [x] Capture the failing OPPM Google Sheet route and inspect the controlling backend code path
+- [x] Confirm the live Docker `core` container is configured with a missing Google service-account file path
 
-### Phase 2: Repo Safety
-- [ ] Ignore service-account JSON files in the repo
-- [ ] Add a placeholder secrets directory for the Docker mount
-- [ ] Update env examples to match the Docker path
+### Phase 2: Backend Recovery
+- [x] Make Google Sheets status checks treat missing credentials as "not configured" instead of raising 500
+- [x] Expose any non-fatal backend configuration warning in the link-state response
 
-### Phase 3: Validation
-- [ ] Validate the merged Docker compose configuration
-- [ ] Record usage notes for the mounted service-account file
+### Phase 3: Frontend Recovery
+- [x] Surface the backend configuration warning without breaking the OPPM page
 
-## Status
-Phase 1 in progress
-
-## Expected Files
-- `docker-compose.microservices.yml`
-- `services/.env.example`
-- `.gitignore`
-- `services/secrets/.gitkeep`
-- `docs/PHASE-TRACKER.md`
-
-## Verification
-- Pending
-
-## Notes
-- Use a directory mount rather than a single-file bind mount so Docker Desktop has a stable host path.
-- Keep the in-container path fixed at `/run/secrets/google-service-account.json`.# Current Phase Tracker
-
-## Task
-Google Sheet Browser Fallback For Docker Runtime
-
-## Goal
-Keep the linked Google Sheet visible inside OPPMView even when the Docker backend cannot yet export the sheet as XLSX, and document the Docker env variables needed for the full backend path.
-
-## Plan
-
-### Phase 1: Frontend Fallback
-- [ ] Detect linked-sheet backend export failures
-- [ ] Show an embedded browser preview fallback for the linked Google Sheet
-- [ ] Keep clear messaging about backend limitations and read-only fallback behavior
-
-### Phase 2: Docker Setup Guidance
-- [ ] Add Google service-account env placeholders to the shared services env example
-
-### Phase 3: Validation
-- [ ] Run focused frontend validation
-- [ ] Record notes and limitations
+### Phase 4: Validation
+- [x] Run focused backend validation
+- [x] Rebuild or restart the affected Docker service
+- [x] Verify the OPPM page and key project/task endpoints with the live stack
 
 ## Status
-Phase 1 in progress
-
- [x] Detect linked-sheet backend export failures
- [x] Show an embedded browser preview fallback for the linked Google Sheet
- [x] Keep clear messaging about backend limitations and read-only fallback behavior
-- `docs/PHASE-TRACKER.md`
-
- [x] Add Google service-account env placeholders to the shared services env example
-- Pending
-
- [x] Run focused frontend validation
- [x] Record notes and limitations
-- The backend service-account path remains the preferred full-fidelity option.
-- Browser fallback is mainly for viewing when Docker runtime setup is incomplete.# Current Phase Tracker
- Complete
-## Task
-Display Linked Google Sheet In OPPM View
-
-## Goal
-Remove the hardcoded OPPM scaffold from the OPPM page and, when a project is linked to an existing Google Sheet, fetch that sheet through the backend and display it inside the app.
-
-## Plan
-
-### Phase 1: Backend Export
- [x] Add a core Google Sheets export helper for linked project sheets
- [x] Add an OPPM route that returns the linked Google Sheet as XLSX bytes
-
-### Phase 2: Frontend Rendering
- [x] Remove the default hardcoded scaffold as the primary display path
- [x] Load linked Google Sheet XLSX bytes through the backend
- [x] Convert the XLSX to FortuneSheet data and render it in OPPMView
- [x] Show a no-link placeholder when no Google Sheet is connected
-
-### Phase 3: Validation
- [x] Run targeted backend validation
- [x] Run targeted frontend validation
- [x] Record implementation notes and limitations
-
-## Status
- Complete
+Complete
 
 ## Expected Files
 - `services/core/services/google_sheets_service.py`
-- `services/core/routers/v1/oppm.py`
-- `frontend/src/lib/api.ts`
+- `services/core/schemas/google_sheets.py`
 - `frontend/src/pages/OPPMView.tsx`
 - `docs/PHASE-TRACKER.md`
 
 ## Verification
- `python -m py_compile services\google_sheets_service.py routers\v1\oppm.py` in `services/core` passed.
- `npx tsc -p tsconfig.app.json --noEmit` in `frontend` passed.
- `get_errors` reported no issues in the touched backend and frontend files.
-
-## Notes
-- Keep the Google Sheet link project-scoped.
-- Display should prefer the linked Google Sheet over any generated scaffold.
-- This task is about display and fetch; it does not add pull-back editing into the database.# Current Phase Tracker
- The backend now exports the linked Google Sheet as XLSX through the OPPM router and the frontend converts that XLSX into FortuneSheet data for in-app rendering.
- A linked Google Sheet must still be shared with the configured backend service-account email so the backend can fetch it.
-
-## Task
-Google Sheets OPPM Push MVP
-
-## Goal
-Implement a minimal project-level Google Sheets integration that lets the system store a linked spreadsheet URL/ID and push AI-filled OPPM data from the backend into that spreadsheet.
-
-## Plan
-
-### Phase 1: Backend Linking
-- [x] Store a per-project Google Sheet link in project metadata
-- [x] Add workspace-scoped OPPM routes to get, set, and clear the linked sheet
-- [x] Add core configuration for Google service-account credentials
-
-### Phase 2: Backend Push
-- [x] Add a core Google Sheets service that validates the linked spreadsheet
-- [x] Add a push route that writes AI-filled OPPM data into Google Sheets tabs
-- [x] Record audit entries for link and push actions
-
-### Phase 3: Frontend OPPM Actions
-- [x] Load the linked Google Sheet state in the OPPM page
-- [x] Allow linking or unlinking a Google Sheet URL/ID
-- [x] Allow pushing AI-filled OPPM data to the linked spreadsheet
-
-### Phase 4: Validation
-- [x] Run targeted backend validation
-- [x] Run targeted frontend validation
-- [x] Record verification notes and remaining limitations
-
-## Status
- Complete
-
-- `python -m py_compile config.py schemas\google_sheets.py services\google_sheets_service.py routers\v1\oppm.py` in `services/core` passed.
-- `npx tsc -p tsconfig.app.json --noEmit` in `frontend` passed.
+- Confirmed `GET /api/v1/workspaces/.../oppm/google-sheet` calls `_is_backend_configured()` and `_service_account_email()`.
+- Confirmed the running `core` container has `GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json` but that file does not exist inside the container.
 - `get_errors` reported no issues in the touched backend and frontend files.
-- Full `npm run build` in `frontend` is still blocked by a pre-existing `vite.config.ts` proxy typing error unrelated to this feature.
-- `services/core/config.py`
-- `services/core/requirements.txt`
-- The backend writes AI-filled data into three tabs inside the linked spreadsheet: `OPPM Summary`, `OPPM Tasks`, and `OPPM Members`.
-- Users must share the target spreadsheet with the configured service-account email before pushing.
-- `services/core/repositories/notification_repo.py` (if audit helper reuse is needed)
-- `frontend/src/pages/OPPMView.tsx`
-- `docs/PHASE-TRACKER.md`
-
-## Verification
- `npx tsc -p tsconfig.app.json --noEmit` in `frontend` passed.
- `get_errors` reported no issues in the touched frontend file and env example.
+- `python -m py_compile schemas\google_sheets.py services\google_sheets_service.py` in `services/core` passed.
+- `npx tsc -p tsconfig.app.json --noEmit` in `frontend` passed.
+- Rebuilt the live Docker `core` container with `docker compose -f docker-compose.microservices.yml up -d --build core`.
+- Reloaded the live OPPM page and confirmed the Google Sheet link-state route now returns usable data instead of crashing the page.
+- Verified the current project OPPM API surface via the authenticated browser session:
+	- Combined OPPM route returned `200` with project `3d Enhancement Project`, `6` objectives, `11` tasks, `1` member, and `14` weeks.
+	- Objectives route returned `200` with `6` items.
+	- Sub-objectives, timeline, deliverables, forecasts, and risks routes returned `200` with empty data for this project.
+	- Costs route returned `200` with the expected aggregate shape.
+	- Header route returned `200` with `null`.
+	- Task-items route returned `200` with an empty array.
+	- Spreadsheet route returned `404` with `No spreadsheet template for this project`.
+	- Template export returned `200`.
+	- OPPM export returned `200`.
+	- Google Sheet link-state route returned `200` with `connected=true`, `backend_configured=false`, and `backend_configuration_error="Google service account file does not exist"`.
+- Confirmed the page now skips the failing backend XLSX request when backend Google credentials are absent and goes straight to the browser preview fallback.
+- Verified the live `Save Link` action succeeds and updates project metadata without backend exceptions even while Google credentials are missing.
 
 ## Notes
-- MVP scope is one-way sync from the OPPM system to Google Sheets.
-- Use a backend service account from environment configuration instead of workspace OAuth for this first cut.
-- Keep the link project-scoped to avoid broader workspace integration complexity in the initial release.# Current Phase Tracker
- The frontend now falls back to an embedded Google Sheet preview when backend XLSX export fails.
- The running Docker `core` container was verified to be missing both Google libraries and Google service-account env vars, so a container rebuild plus env setup is still required for the full backend render path.
-
-## Task
-GraphQL API Implementation for OPPM AI Service
-
-## Goal
-Implement GraphQL as a parallel API for the OPPM AI service to reduce mobile payload by 30-40% through selective field queries, while maintaining 100% backward compatibility with existing REST endpoints.
-
-## Plan
-
-### Phase 1: GraphQL Schema & Router Setup (COMPLETE ✅)
-- [x] Create Strawberry GraphQL schema with type definitions
-  - StatusItem (title, description)
-  - WeeklySummaryResult (summary, at_risk, on_track, blocked, suggested_actions)
-  - SuggestedObjective (title, suggested_weeks)
-  - SuggestPlanResult (suggested_objectives, explanation, commit_token)
-- [x] Create GraphQL router with Query and Mutation resolvers
-  - Query.weekly_status_summary(project_id: str) → WeeklySummaryResult
-  - Query.suggest_oppm_plan(project_id, description) → SuggestPlanResult
-  - Mutation.commit_oppm_plan(project_id, commit_token) → bool
-- [x] Update router aggregator to include GraphQL routes
-- [x] Add strawberry-graphql[asgi]>=0.240 to requirements.txt
-- [x] Verify no syntax errors in created files
-
-### Phase 2: Resolver Implementation (COMPLETE ✅)
-- [x] Implement weekly_status_summary resolver to call ai_chat_service
-- [x] Implement suggest_oppm_plan resolver with LLM integration
-- [x] Implement commit_oppm_plan resolver with plan persistence
-- [x] Add proper error handling and logging to resolvers
-- [x] Integrate workspace context validation
-
-### Phase 3: Testing & Validation (COMPLETE ✅)
-- [x] Test GraphQL endpoint availability
-- [x] Verify GraphQL Playground loads
-- [x] Test queries with workspace context
-- [x] Measure payload reduction vs REST endpoints
-- [x] Verify authentication and workspace scoping
-- [x] Run comprehensive verification script (`verify_graphql_implementation.py`)
-  - ✓ Dependencies installed (strawberry-graphql 0.314.3)
-  - ✓ Schema types defined with correct fields
-  - ✓ Resolver methods async and properly named
-  - ✓ GraphQL schema object and ASGI router created
-  - ✓ Router properly integrated in __init__.py
-
-### Phase 4: Documentation & Deployment (COMPLETE ✅)
-- [x] Document GraphQL schema in API reference
-- [x] Create GraphQL query examples
-- [x] Add deployment notes
-- [x] Verify backend service startup with new dependency
-
-## Status
-Phase 1-4 Complete (FULLY IMPLEMENTED ✅)
-
-## Files Created
-- `services/ai/schemas/graphql_schema.py` — 35 lines, Strawberry type definitions
-- `services/ai/routers/v1/graphql.py` — 41 lines, Query and Mutation resolvers
-- `verify_graphql_implementation.py` — Comprehensive verification script with 5 test cases (all passing)
-
-## Files Modified
-- `services/ai/routers/v1/__init__.py` — Added graphql_router import and registration
-- `services/ai/requirements.txt` — Added strawberry-graphql[asgi]>=0.240
-- `services/ai/routers/v1/graphql.py` — Implemented resolver functions with service integration
-- `docs/API-REFERENCE.md` — Added comprehensive GraphQL documentation with examples
-
-## Verification
-
-### Phase 2 Verification (Complete)
-- ✅ weekly_status_summary resolver calls ai_chat_service.weekly_summary()
-- ✅ suggest_oppm_plan resolver calls ai_chat_service.suggest_plan()
-- ✅ commit_oppm_plan resolver calls ai_chat_service.commit_plan()
-- ✅ All resolvers extract session and workspace context from info parameter
-- ✅ Error handling implemented with logging for all resolvers
-- ✅ Context passed to GraphQL app with session, workspace_id, user_id
-- ✅ No syntax errors detected in updated graphql.py
-
-### Phase 3 Verification (Complete)
-- ✅ Python files compile without syntax errors
-- ✅ Service functions (weekly_summary, suggest_plan, commit_plan) verified to exist
-- ✅ All imports for schema types work correctly
-- ✅ strawberry-graphql[asgi]==0.314.3 installed successfully
-- ✅ Resolver error handling tested
-- ✅ GraphQL schema valid and loadable
-
-## Next Steps (for implementation team)
-
-1. **Install dependencies** (required before service restart)
-   ```bash
-   cd services/ai
-   pip install -r requirements.txt
-   ```
-
-2. **Implement resolver functions** (Phase 2)
-   - Call existing ai_chat_service functions from resolvers
-   - Integrate with repository layer for data access
-   - Add workspace_id scoping to queries
-
-3. **Test GraphQL endpoint** (Phase 3)
-   - Restart AI service
-   - Navigate to `/api/v1/workspaces/{ws_id}/graphql`
-   - Use GraphQL Playground to test queries
-
-4. **Measure performance** (Phase 3)
-   - Compare REST vs GraphQL payload sizes for typical queries
-   - Verify 30-40% reduction for mobile clients
-
-5. **Document in API reference** (Phase 4)
-   - Add GraphQL schema documentation
-   - Include query examples
-   - Update deployment guide
-
-## Remaining Work
-
-**Phase 2 (Resolver Implementation):**
-- ✅ Resolvers now call actual ai_chat_service functions
-- ✅ Session and workspace context properly integrated
-- ✅ Error handling and logging implemented
-- ✅ Ready for Phase 3 testing
-
-**Phase 3 (Testing):**
-- ✅ Functional testing of syntax and imports completed
-- ✅ strawberry-graphql dependency installed and verified
-- ✅ All service functions verified to exist
-- ✅ Error handling tested and working
-
-**Phase 4 (Documentation):**
-- ✅ GraphQL endpoints documented in API-REFERENCE.md
-- ✅ Query examples provided (weeklyStatusSummary, suggestOppmPlan)
-- ✅ Mutation examples provided (commitOppmPlan)
-- ✅ Type definitions documented
-- ✅ Benefits (30-40% payload reduction) highlighted
-
-## Risks
-- strawberry-graphql dependency may have compatibility issues (need to verify after install)
-- Resolvers need proper LLM integration (not implemented yet)
-- GraphQL Playground requires GET support (already configured)
-
-## Outcome
-GraphQL API implementation successfully completed. All 4 phases finished:
-- Phase 1: Schema and router infrastructure created and integrated
-- Phase 2: Resolver functions implemented with ai_chat_service integration
-- Phase 3: Code verified, dependencies installed, imports tested
-- Phase 4: API documentation completed
-
-The implementation provides:
-- **Parallel GraphQL API** alongside existing REST endpoints (100% backward compatible)
-- **30-40% mobile payload reduction** through selective field queries
-- **Full workspace scoping** via require_write authentication
-- **Comprehensive error handling** and logging in all resolvers
-- **Production-ready code** following OPPM architecture conventions
-
-### Deployment Steps (for ops team)
-1. Deploy updated services/ai code
-2. Run `pip install -r services/ai/requirements.txt` in AI service container
-3. Restart AI service
-4. Navigate to `/api/v1/workspaces/{workspace_id}/graphql` to access GraphQL Playground
-5. Test queries using examples in docs/API-REFERENCE.md
+- The page should still be able to link a Google Sheet and show the browser fallback even when backend Google credentials are absent.
+- Missing credentials should block export and push, not the basic link-state read path.
+- The native system OPPM form is not currently available for this project through `header`, `task-items`, or `spreadsheet`; the backend data still exists, but the current page is using the linked Google Sheet display path.

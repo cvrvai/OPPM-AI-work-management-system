@@ -22,6 +22,7 @@ class GoogleSheetLinkResponse(BaseModel):
     spreadsheet_url: Optional[str] = None
     backend_configured: bool
     service_account_email: Optional[str] = None
+    backend_configuration_error: Optional[str] = None
 
 
 class GoogleSheetPushTaskOwner(BaseModel):

@@ -23,6 +23,7 @@ interface GoogleSheetLinkState {
   spreadsheet_url: string | null
   backend_configured: boolean
   service_account_email: string | null
+  backend_configuration_error?: string | null
 }
 
 interface GoogleSheetPushResult {
@@ -145,6 +146,13 @@ export function OPPMView() {
       return
     }
 
+    if (!googleSheet.backend_configured) {
+      setSheetData([])
+      setSheetLoadState('error')
+      setSheetLoadError(googleSheet.backend_configuration_error || 'Google integration is not configured on the backend.')
+      return
+    }
+
     let cancelled = false
     setSheetLoadState('loading')
     setSheetLoadError(null)
@@ -174,7 +182,16 @@ export function OPPMView() {
     return () => {
       cancelled = true
     }
-  }, [googleSheet?.connected, googleSheet?.spreadsheet_id, id, ws, wsPath, sheetRefreshToken])
+  }, [
+    googleSheet?.backend_configuration_error,
+    googleSheet?.backend_configured,
+    googleSheet?.connected,
+    googleSheet?.spreadsheet_id,
+    id,
+    ws,
+    wsPath,
+    sheetRefreshToken,
+  ])
 
   return (
     <div className="font-['Inter',system-ui,sans-serif]">
@@ -213,6 +230,8 @@ export function OPPMView() {
                 <p className="mt-1.5 text-xs text-blue-800/80">
                   {googleSheet?.service_account_email
                     ? `Share the target spreadsheet with ${googleSheet.service_account_email} before pushing.`
+                    : googleSheet?.backend_configuration_error
+                      ? `${googleSheet.backend_configuration_error}. Save and browser preview can still work without backend Google credentials.`
                     : 'The backend must be configured with a Google service account before push is available.'}
                 </p>
               </div>
@@ -276,6 +295,12 @@ export function OPPMView() {
             {actionNotice ? (
               <p className="mt-2 rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm text-gray-700">
                 {actionNotice}
+              </p>
+            ) : null}
+
+            {!actionNotice && googleSheet?.backend_configuration_error ? (
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {googleSheet.backend_configuration_error}
               </p>
             ) : null}
           </div>

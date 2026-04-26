@@ -49,37 +49,56 @@ def _canonical_spreadsheet_url(spreadsheet_id: str) -> str:
     return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
 
 
-def _load_service_account_info() -> dict[str, Any] | None:
+def _resolve_service_account_info(strict: bool = True) -> tuple[dict[str, Any] | None, str | None]:
     settings = get_settings()
     if settings.google_service_account_json.strip():
         try:
-            return json.loads(settings.google_service_account_json)
+            return json.loads(settings.google_service_account_json), None
         except json.JSONDecodeError as error:
             logger.warning("Invalid GOOGLE_SERVICE_ACCOUNT_JSON: %s", error)
-            raise HTTPException(status_code=500, detail="Invalid Google service account JSON configuration")
+            detail = "Invalid Google service account JSON configuration"
+            if strict:
+                raise HTTPException(status_code=500, detail=detail)
+            return None, detail
 
     if settings.google_service_account_file.strip():
         file_path = Path(settings.google_service_account_file)
         if not file_path.exists():
-            raise HTTPException(status_code=500, detail="Google service account file does not exist")
+            detail = "Google service account file does not exist"
+            if strict:
+                raise HTTPException(status_code=500, detail=detail)
+            return None, detail
         try:
-            return json.loads(file_path.read_text(encoding="utf-8"))
+            return json.loads(file_path.read_text(encoding="utf-8")), None
         except (OSError, json.JSONDecodeError) as error:
             logger.warning("Failed to read Google service account file: %s", error)
-            raise HTTPException(status_code=500, detail="Invalid Google service account file configuration")
+            detail = "Invalid Google service account file configuration"
+            if strict:
+                raise HTTPException(status_code=500, detail=detail)
+            return None, detail
 
-    return None
+    return None, None
+
+
+def _load_service_account_info(strict: bool = True) -> dict[str, Any] | None:
+    info, _ = _resolve_service_account_info(strict=strict)
+    return info
+
+
+def _backend_configuration_error() -> str | None:
+    _, error = _resolve_service_account_info(strict=False)
+    return error
 
 
 def _service_account_email() -> str | None:
-    info = _load_service_account_info()
+    info = _load_service_account_info(strict=False)
     if not info:
         return None
     return info.get("client_email")
 
 
 def _is_backend_configured() -> bool:
-    return _load_service_account_info() is not None
+    return _load_service_account_info(strict=False) is not None
 
 
 def _build_google_credentials():
@@ -291,6 +310,7 @@ async def get_google_sheet_link(session: AsyncSession, project_id: str, workspac
         "spreadsheet_url": link.get("spreadsheet_url") if link else None,
         "backend_configured": _is_backend_configured(),
         "service_account_email": _service_account_email(),
+        "backend_configuration_error": _backend_configuration_error(),
     }
 
 
@@ -330,6 +350,7 @@ async def upsert_google_sheet_link(
         "spreadsheet_url": spreadsheet_url,
         "backend_configured": _is_backend_configured(),
         "service_account_email": _service_account_email(),
+        "backend_configuration_error": _backend_configuration_error(),
     }
 
 

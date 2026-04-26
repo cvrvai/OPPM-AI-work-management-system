@@ -16,6 +16,37 @@ docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up 
 docker compose -f docker-compose.microservices.yml up --build
 ```
 
+### Infrastructure only (database + redis only)
+```powershell
+docker compose -f docker-compose.yml up -d
+```
+
+If you are not sure which one to use, choose **Development (hot-reload)**.
+
+---
+
+## Which Compose Command Should I Choose?
+
+| What you want | Command | Choose this when |
+|---|---|---|
+| Full app for normal coding | `docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up --build` | You are actively editing backend or frontend code and want hot reload, source mounts, and direct ports |
+| Full app in a more production-like container setup | `docker compose -f docker-compose.microservices.yml up --build` | You want the full stack running in containers without live source mounts |
+| Only PostgreSQL and Redis | `docker compose -f docker-compose.yml up -d` | You plan to run the Python services or frontend natively on your machine |
+
+### Short answer
+
+- Use `docker-compose.microservices.yml` when you want the **full app**.
+- Add `docker-compose.dev.yml` when you want **development convenience**: hot reload, direct host ports, and mounted source code.
+- Use `docker-compose.yml` by itself only for **infrastructure**. It does **not** start the full OPPM application.
+
+### Recommended default for most developers
+
+If you are coding locally on Windows and want the least friction, use:
+
+```powershell
+docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up --build
+```
+
 ---
 
 ## Compose File Overview
@@ -27,6 +58,8 @@ docker compose -f docker-compose.microservices.yml up --build
 | `docker-compose.dev.yml` | Dev overrides — hot-reload commands, source volume mounts, direct port exposure |
 
 Compose files are layered. Settings in a later `-f` file override the earlier one.
+
+`docker-compose.microservices.yml` is the base application stack. `docker-compose.dev.yml` does not replace it; it only overrides parts of it for development.
 
 ---
 
@@ -128,12 +161,54 @@ Variables injected by `docker-compose.microservices.yml` (override `.env`):
 |---|---|---|
 | core | `DATABASE_URL` | `postgresql+asyncpg://oppm:<DB_PASSWORD>@postgres:5432/oppm` |
 | core | `REDIS_URL` | `redis://:<REDIS_PASSWORD>@redis:6379/0` |
+| core | `GOOGLE_SERVICE_ACCOUNT_FILE` | `/run/secrets/google-service-account.json` |
 | ai | `DATABASE_URL` | same pattern |
 | git | `DATABASE_URL` | same pattern |
 | git | `AI_SERVICE_URL` | `http://ai:8001` |
 | mcp | `DATABASE_URL` | same pattern |
 
 Passwords default to `oppm_dev_password` if the env var is not set.
+
+### Google Sheets service-account file
+
+The Google Sheets integration expects the service-account key file at this host path:
+
+```text
+services/secrets/google-service-account.json
+```
+
+Docker mounts that directory into the `core` container here:
+
+```text
+/run/secrets/google-service-account.json
+```
+
+This mount is defined in `docker-compose.microservices.yml`, so it is available in both:
+
+- `docker compose -f docker-compose.microservices.yml up ...`
+- `docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up ...`
+
+After the stack is running, verify the file path and Python dependency from inside `core`.
+Use the same compose file combination you used to start the stack.
+
+Example for development mode:
+
+```powershell
+docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml exec core python -c "import os, googleapiclient; print('deps ok'); print(os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE'))"
+```
+
+Example for the base microservices stack:
+
+```powershell
+docker compose -f docker-compose.microservices.yml exec core python -c "import os, googleapiclient; print('deps ok'); print(os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE'))"
+```
+
+Expected output:
+
+```text
+deps ok
+/run/secrets/google-service-account.json
+```
 
 ---
 
@@ -185,11 +260,17 @@ Alternatively, use `start-all.ps1 -Tunnel` which auto-detects the URL, writes it
 ## Common Commands
 
 ```powershell
-# Start dev stack (hot-reload, all ports exposed)
+# Start full app in development mode (recommended for local coding)
 docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up --build
 
-# Start detached
+# Start full app in development mode, detached
 docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up -d --build
+
+# Start full app in production-like mode (no source mounts, no hot reload)
+docker compose -f docker-compose.microservices.yml up -d --build
+
+# Start only infrastructure if you run services natively
+docker compose -f docker-compose.yml up -d
 
 # Stop and remove containers
 docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml down
@@ -200,8 +281,8 @@ docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml bui
 # View logs for one service
 docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml logs -f core
 
-# Open a shell inside a running container
-docker exec -it oppmaiworkmanagementsystem-core-1 bash
+# Open a shell inside the core container
+docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml exec core bash
 
 # Check health
 curl http://localhost:8000/health   # core
@@ -238,4 +319,18 @@ docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml log
 ```powershell
 copy services\.env.example services\.env
 # then edit services\.env and fill in JWT_SECRET_KEY, INTERNAL_API_KEY, etc.
+```
+
+### Google Sheets says the service-account file is missing
+
+Make sure all of these are true:
+
+1. The file exists on the host at `services/secrets/google-service-account.json`
+2. You started the full app with `docker-compose.microservices.yml` (with or without the dev override)
+3. The `core` container is rebuilt or restarted after the compose change
+
+Verify from inside the container:
+
+```powershell
+docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml exec core python -c "import os; print(os.path.exists('/run/secrets/google-service-account.json')); print(os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE'))"
 ```
