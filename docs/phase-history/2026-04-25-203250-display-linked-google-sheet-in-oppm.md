@@ -1,125 +1,6 @@
 # Current Phase Tracker
 
 ## Task
-Docker Compose Google Service Account Wiring
-
-## Goal
-Add concrete Docker compose wiring for `GOOGLE_SERVICE_ACCOUNT_FILE` so the core container can read a mounted Google service-account key from a fixed in-container path.
-
-## Plan
-
-### Phase 1: Compose Wiring
-- [ ] Mount a repo-local secrets directory into the core container
-- [ ] Set a fixed `GOOGLE_SERVICE_ACCOUNT_FILE` path in the core container environment
-
-### Phase 2: Repo Safety
-- [ ] Ignore service-account JSON files in the repo
-- [ ] Add a placeholder secrets directory for the Docker mount
-- [ ] Update env examples to match the Docker path
-
-### Phase 3: Validation
-- [ ] Validate the merged Docker compose configuration
-- [ ] Record usage notes for the mounted service-account file
-
-## Status
-Phase 1 in progress
-
-## Expected Files
-- `docker-compose.microservices.yml`
-- `services/.env.example`
-- `.gitignore`
-- `services/secrets/.gitkeep`
-- `docs/PHASE-TRACKER.md`
-
-## Verification
-- Pending
-
-## Notes
-- Use a directory mount rather than a single-file bind mount so Docker Desktop has a stable host path.
-- Keep the in-container path fixed at `/run/secrets/google-service-account.json`.# Current Phase Tracker
-
-## Task
-Google Sheet Browser Fallback For Docker Runtime
-
-## Goal
-Keep the linked Google Sheet visible inside OPPMView even when the Docker backend cannot yet export the sheet as XLSX, and document the Docker env variables needed for the full backend path.
-
-## Plan
-
-### Phase 1: Frontend Fallback
-- [ ] Detect linked-sheet backend export failures
-- [ ] Show an embedded browser preview fallback for the linked Google Sheet
-- [ ] Keep clear messaging about backend limitations and read-only fallback behavior
-
-### Phase 2: Docker Setup Guidance
-- [ ] Add Google service-account env placeholders to the shared services env example
-
-### Phase 3: Validation
-- [ ] Run focused frontend validation
-- [ ] Record notes and limitations
-
-## Status
-Phase 1 in progress
-
- [x] Detect linked-sheet backend export failures
- [x] Show an embedded browser preview fallback for the linked Google Sheet
- [x] Keep clear messaging about backend limitations and read-only fallback behavior
-- `docs/PHASE-TRACKER.md`
-
- [x] Add Google service-account env placeholders to the shared services env example
-- Pending
-
- [x] Run focused frontend validation
- [x] Record notes and limitations
-- The backend service-account path remains the preferred full-fidelity option.
-- Browser fallback is mainly for viewing when Docker runtime setup is incomplete.# Current Phase Tracker
- Complete
-## Task
-Display Linked Google Sheet In OPPM View
-
-## Goal
-Remove the hardcoded OPPM scaffold from the OPPM page and, when a project is linked to an existing Google Sheet, fetch that sheet through the backend and display it inside the app.
-
-## Plan
-
-### Phase 1: Backend Export
- [x] Add a core Google Sheets export helper for linked project sheets
- [x] Add an OPPM route that returns the linked Google Sheet as XLSX bytes
-
-### Phase 2: Frontend Rendering
- [x] Remove the default hardcoded scaffold as the primary display path
- [x] Load linked Google Sheet XLSX bytes through the backend
- [x] Convert the XLSX to FortuneSheet data and render it in OPPMView
- [x] Show a no-link placeholder when no Google Sheet is connected
-
-### Phase 3: Validation
- [x] Run targeted backend validation
- [x] Run targeted frontend validation
- [x] Record implementation notes and limitations
-
-## Status
- Complete
-
-## Expected Files
-- `services/core/services/google_sheets_service.py`
-- `services/core/routers/v1/oppm.py`
-- `frontend/src/lib/api.ts`
-- `frontend/src/pages/OPPMView.tsx`
-- `docs/PHASE-TRACKER.md`
-
-## Verification
- `python -m py_compile services\google_sheets_service.py routers\v1\oppm.py` in `services/core` passed.
- `npx tsc -p tsconfig.app.json --noEmit` in `frontend` passed.
- `get_errors` reported no issues in the touched backend and frontend files.
-
-## Notes
-- Keep the Google Sheet link project-scoped.
-- Display should prefer the linked Google Sheet over any generated scaffold.
-- This task is about display and fetch; it does not add pull-back editing into the database.# Current Phase Tracker
- The backend now exports the linked Google Sheet as XLSX through the OPPM router and the frontend converts that XLSX into FortuneSheet data for in-app rendering.
- A linked Google Sheet must still be shared with the configured backend service-account email so the backend can fetch it.
-
-## Task
 Google Sheets OPPM Push MVP
 
 ## Goal
@@ -163,15 +44,12 @@ Implement a minimal project-level Google Sheets integration that lets the system
 - `docs/PHASE-TRACKER.md`
 
 ## Verification
- `npx tsc -p tsconfig.app.json --noEmit` in `frontend` passed.
- `get_errors` reported no issues in the touched frontend file and env example.
+- Pending
 
 ## Notes
 - MVP scope is one-way sync from the OPPM system to Google Sheets.
 - Use a backend service account from environment configuration instead of workspace OAuth for this first cut.
 - Keep the link project-scoped to avoid broader workspace integration complexity in the initial release.# Current Phase Tracker
- The frontend now falls back to an embedded Google Sheet preview when backend XLSX export fails.
- The running Docker `core` container was verified to be missing both Google libraries and Google service-account env vars, so a container rebuild plus env setup is still required for the full backend render path.
 
 ## Task
 GraphQL API Implementation for OPPM AI Service

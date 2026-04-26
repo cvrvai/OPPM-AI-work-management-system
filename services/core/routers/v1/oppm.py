@@ -16,6 +16,7 @@ from schemas.oppm import (
     OPPMHeaderUpsert,
     OPPMTaskItemsReplace,
 )
+from schemas.google_sheets import GoogleSheetLinkResponse, GoogleSheetLinkUpsert, GoogleSheetPushRequest, GoogleSheetPushResponse
 from shared.schemas.common import SuccessResponse
 from services.oppm_service import (
     get_oppm_data,
@@ -54,6 +55,13 @@ from services.oppm_service import (
     replace_oppm_task_items,
 )
 from services.export_service import export_oppm_xlsx, import_oppm_xlsx, import_oppm_json, parse_oppm_xlsx_to_preview
+from services.google_sheets_service import (
+    get_google_sheet_link,
+    upsert_google_sheet_link,
+    delete_google_sheet_link,
+    push_google_sheet_fill,
+    download_linked_google_sheet_xlsx,
+)
 from repositories.oppm_repo import OPPMTemplateRepository
 
 router = APIRouter()
@@ -350,6 +358,70 @@ async def delete_spreadsheet_route(
     repo = OPPMTemplateRepository(session)
     await repo.delete_by_project(project_id)
     return {"deleted": True}
+
+
+# ── Google Sheets MVP ──
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet", response_model=GoogleSheetLinkResponse)
+async def get_google_sheet_link_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await get_google_sheet_link(session, project_id, ws.workspace_id)
+
+
+@router.put("/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet", response_model=GoogleSheetLinkResponse)
+async def upsert_google_sheet_link_route(
+    project_id: str,
+    data: GoogleSheetLinkUpsert,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    spreadsheet_input = data.spreadsheet_url or data.spreadsheet_id or ""
+    return await upsert_google_sheet_link(session, project_id, ws.workspace_id, ws.user.id, spreadsheet_input)
+
+
+@router.delete("/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet")
+async def delete_google_sheet_link_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    await delete_google_sheet_link(session, project_id, ws.workspace_id, ws.user.id)
+    return SuccessResponse()
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/push", response_model=GoogleSheetPushResponse)
+async def push_google_sheet_fill_route(
+    project_id: str,
+    data: GoogleSheetPushRequest,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    return await push_google_sheet_fill(
+        session,
+        project_id,
+        ws.workspace_id,
+        ws.user.id,
+        data.fills,
+        data.tasks,
+        data.members,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/xlsx")
+async def download_linked_google_sheet_xlsx_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    xlsx_bytes, file_name = await download_linked_google_sheet_xlsx(session, project_id, ws.workspace_id)
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
 
 
 # ── OPPM Header ──

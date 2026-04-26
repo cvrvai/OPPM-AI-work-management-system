@@ -17,6 +17,10 @@ class CoreSettings(SharedSettings):
     # Embedding (for document_indexer)
     openai_api_key: str = ""
 
+    # Google Sheets MVP (service account)
+    google_service_account_json: str = ""
+    google_service_account_file: str = ""
+
     # App
     debug: bool = True
 

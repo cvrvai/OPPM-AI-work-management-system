@@ -42,11 +42,14 @@ services:
       dockerfile: services/core/Dockerfile
     expose:
       - "8000"
+    volumes:
+      - ./services/secrets:/run/secrets:ro
     env_file:
       - services/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
       - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+      - GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json
     depends_on:
       postgres:
         condition: service_healthy

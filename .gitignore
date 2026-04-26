@@ -22,6 +22,8 @@ frontend/.vite/
 
 # Docker
 *.log
+services/secrets/*.json
+!services/secrets/.gitkeep
 
 # IDE
 .vscode/settings.json

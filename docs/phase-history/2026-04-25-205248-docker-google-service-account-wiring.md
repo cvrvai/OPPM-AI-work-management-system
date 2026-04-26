@@ -1,44 +1,6 @@
 # Current Phase Tracker
 
 ## Task
-Docker Compose Google Service Account Wiring
-
-## Goal
-Add concrete Docker compose wiring for `GOOGLE_SERVICE_ACCOUNT_FILE` so the core container can read a mounted Google service-account key from a fixed in-container path.
-
-## Plan
-
-### Phase 1: Compose Wiring
-- [ ] Mount a repo-local secrets directory into the core container
-- [ ] Set a fixed `GOOGLE_SERVICE_ACCOUNT_FILE` path in the core container environment
-
-### Phase 2: Repo Safety
-- [ ] Ignore service-account JSON files in the repo
-- [ ] Add a placeholder secrets directory for the Docker mount
-- [ ] Update env examples to match the Docker path
-
-### Phase 3: Validation
-- [ ] Validate the merged Docker compose configuration
-- [ ] Record usage notes for the mounted service-account file
-
-## Status
-Phase 1 in progress
-
-## Expected Files
-- `docker-compose.microservices.yml`
-- `services/.env.example`
-- `.gitignore`
-- `services/secrets/.gitkeep`
-- `docs/PHASE-TRACKER.md`
-
-## Verification
-- Pending
-
-## Notes
-- Use a directory mount rather than a single-file bind mount so Docker Desktop has a stable host path.
-- Keep the in-container path fixed at `/run/secrets/google-service-account.json`.# Current Phase Tracker
-
-## Task
 Google Sheet Browser Fallback For Docker Runtime
 
 ## Goal
