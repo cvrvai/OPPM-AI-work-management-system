@@ -157,7 +157,7 @@ Current pages:
 - `ProjectDetail.tsx`
   Per-project task board/list/Gantt, task CRUD with main-task/sub-task hierarchy, task reports, summary cards. Create Task form includes a task-type toggle (Main Task vs Sub-Task), parent task selector, and a quick-start guide explaining OPPM task structure. Table view renders tasks hierarchically with visual indentation for sub-tasks.
 - `OPPMView.tsx`
-  OPPM spreadsheet-style sheet view with project metadata rows, objective timeline matrix, summary block, cost tracking, and AI planning flows. Includes a collapsible how-to guide explaining AI Fill (auto-fills project name, leader, dates, objective, deliverable) and Download OPPM (generates full report from database). Toolbar buttons have descriptive tooltips.
+  Project-scoped linked Google Sheet view for OPPM. Loads saved Google Sheet link state, supports save/unlink/push actions, prefers backend FortuneSheet render when credentials exist, and falls back to live browser preview mode when backend render is unavailable.
 - `Team.tsx`
   Workspace members, invite management, and member skills UI.
 - `Commits.tsx`
@@ -219,7 +219,7 @@ Sidebar navigation currently exposes:
 | `/` | `pages/Dashboard.tsx` | Workspace summary |
 | `/projects` | `pages/Projects.tsx` | Project list and project creation wizard |
 | `/projects/:id` | `pages/ProjectDetail.tsx` | Task management and per-project summary |
-| `/projects/:id/oppm` | `pages/OPPMView.tsx` | Spreadsheet-style OPPM sheet with metadata rows, objective timeline, summary, risks, costs, AI plan workflows |
+| `/projects/:id/oppm` | `pages/OPPMView.tsx` | Linked Google Sheet OPPM view with save/unlink/push actions, backend app render, and browser preview mode |
 | `/team` | `pages/Team.tsx` | Member roles, invites, and skill matrix |
 | `/commits` | `pages/Commits.tsx` | Commit history and analysis UI |
 | `/settings` | `pages/Settings.tsx` | Profile, workspace settings, GitHub, AI model config |
@@ -364,17 +364,16 @@ Start with:
 
 Important current behavior:
 
-- the page renders as a classic OPPM template matching the oppmi.com methodology
-- project header section shows owner, dates, and objective summary
-- objectives support A/B/C priority toggle and owner assignment
-- tasks are auto-filled from linked tasks per objective
-- weekly timeline uses SVG status dots (planned, in_progress, completed, at_risk, blocked)
-- X-diagram summary area shows deliverables and risk register
-- cost section uses bar charts comparing planned vs actual amounts
-- AI plan suggestion creates objectives and tasks from an LLM-generated plan
-- **AI Fill** button auto-fills 6 fields (Project Name, Leader, Objective, Deliverable Output, Start Date, Deadline) from project data
-- **Download OPPM** generates a complete XLSX report from the database: objectives, tasks (main + sub with hierarchical numbering), timeline dots, owner priorities, costs, deliverables, forecasts, risks
-- A collapsible **how-to guide** explains the recommended workflow: create tasks in Project Detail → use AI Fill → edit cells → save → download OPPM report
+- the page is now centered on a **linked Google Sheet** per project instead of the older default scaffold path
+- it loads link state from the core `oppm/google-sheet` routes using React Query
+- **Save Link** stores a Google Sheet URL or spreadsheet ID in project metadata
+- **Unlink** removes the saved project-level Google Sheet reference
+- **Push AI Fill** calls the AI fill route and writes the generated OPPM summary, task, and member data into Google Sheets tabs
+- when backend Google credentials are configured, the page fetches linked-sheet XLSX bytes and renders them through FortuneSheet
+- when backend app render is unavailable, the page switches to **browser preview mode** and embeds the live Google Sheet preview in an `iframe`
+- browser preview mode is read-only inside the app, but it is the reason Google Sheet edits can appear after reload
+- the current page surfaces backend configuration warnings without crashing the route or breaking the rest of the page
+- see [docs/oppm/google-sheets-linked-form.md](../oppm/google-sheets-linked-form.md) for the full feature walkthrough and UI-state reference
 
 ### Team And Skills
 

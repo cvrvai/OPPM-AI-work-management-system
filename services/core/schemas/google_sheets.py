@@ -25,6 +25,17 @@ class GoogleSheetLinkResponse(BaseModel):
     backend_configuration_error: Optional[str] = None
 
 
+class GoogleSheetsSetupStatusResponse(BaseModel):
+    backend_configured: bool
+    service_account_email: Optional[str] = None
+    backend_configuration_error: Optional[str] = None
+    credential_source: Optional[str] = None
+
+
+class GoogleSheetsSetupUpsert(BaseModel):
+    service_account_json: str = Field(min_length=20)
+
+
 class GoogleSheetPushTaskOwner(BaseModel):
     member_id: str
     priority: str

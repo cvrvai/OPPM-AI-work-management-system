@@ -15,7 +15,7 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import AsyncGenerator
 
 from fastapi import HTTPException
@@ -28,14 +28,17 @@ from infrastructure.rag.agent_loop import run_agent_loop
 from infrastructure.rag.guardrails import check_input, sanitize_output
 from shared.models.ai_model import AIModel
 from shared.models.workspace import Workspace, WorkspaceMember, MemberSkill
-from shared.models.project import Project
+from shared.models.project import Project, ProjectMember
+from shared.models.oppm import OPPMHeader
 from shared.models.git import CommitEvent, CommitAnalysis
+from shared.models.user import User
 from repositories.oppm_repo import (
     ObjectiveRepository, TimelineRepository, CostRepository,
     DeliverableRepository, ForecastRepository, RiskRepository,
     TaskDetailRepository,
 )
 from repositories.project_repo import ProjectRepository
+from repositories.task_repo import TaskRepository
 from repositories.notification_repo import AuditRepository
 from services import rag_service
 
@@ -43,6 +46,116 @@ logger = logging.getLogger(__name__)
 
 # In-memory store for plan previews (simple approach; could use Redis/DB for production)
 _plan_cache: dict[str, dict] = {}
+
+
+def _resolve_member_name(workspace_member: WorkspaceMember | None, user: User | None) -> str | None:
+    if workspace_member and workspace_member.display_name:
+        return workspace_member.display_name
+    if user and user.full_name:
+        return user.full_name
+    if user and user.email:
+        return user.email.split("@", 1)[0]
+    return None
+
+
+def _extract_json_payload(raw_text: str) -> dict | None:
+    result = None
+    try:
+        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.DOTALL).strip()
+        result = json.loads(clean)
+    except (json.JSONDecodeError, ValueError):
+        match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if match:
+            try:
+                result = json.loads(match.group(0))
+            except (json.JSONDecodeError, ValueError):
+                result = None
+    return result if isinstance(result, dict) else None
+
+
+def _normalize_title(value: str | None) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+
+def _normalize_priority(value: str | None) -> str:
+    priority = (value or "medium").strip().lower()
+    if priority not in {"low", "medium", "high", "critical"}:
+        return "medium"
+    return priority
+
+
+def _normalize_week_labels(values: list[str] | None) -> list[str]:
+    labels: list[str] = []
+    for value in values or []:
+        match = re.fullmatch(r"W(\d{1,2})", str(value).strip().upper())
+        if not match:
+            continue
+        week_number = int(match.group(1))
+        if week_number < 1 or week_number > 52:
+            continue
+        label = f"W{week_number}"
+        if label not in labels:
+            labels.append(label)
+    labels.sort(key=lambda item: int(item[1:]))
+    return labels
+
+
+def _week_sort_key(label: str) -> int:
+    return int(label[1:]) if re.fullmatch(r"W\d{1,2}", label) else 999
+
+
+def _project_week_anchor(project: Project) -> date:
+    return project.start_date or datetime.utcnow().date()
+
+
+def _week_label_to_date(project: Project, label: str) -> date | None:
+    match = re.fullmatch(r"W(\d{1,2})", label)
+    if not match:
+        return None
+    return _project_week_anchor(project) + timedelta(weeks=max(int(match.group(1)) - 1, 0))
+
+
+def _task_start_date(project: Project, task_weeks: list[str], objective_weeks: list[str]) -> date | None:
+    weeks = task_weeks or objective_weeks
+    if not weeks:
+        return project.start_date
+    first = min(weeks, key=_week_sort_key)
+    return _week_label_to_date(project, first)
+
+
+def _task_due_date(project: Project, task_weeks: list[str], objective_weeks: list[str]) -> date | None:
+    weeks = task_weeks or objective_weeks
+    if not weeks:
+        return project.deadline
+    last = max(weeks, key=_week_sort_key)
+    return _week_label_to_date(project, last)
+
+
+async def _upsert_oppm_header(
+    session: AsyncSession,
+    project_id: str,
+    workspace_id: str,
+    data: dict,
+) -> OPPMHeader | None:
+    clean = {k: v for k, v in data.items() if v is not None}
+    if not clean:
+        return None
+
+    result = await session.execute(
+        select(OPPMHeader).where(OPPMHeader.project_id == project_id).limit(1)
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        for key, value in clean.items():
+            setattr(existing, key, value)
+        existing.updated_at = datetime.utcnow()
+        await session.flush()
+        return existing
+
+    header = OPPMHeader(project_id=project_id, workspace_id=workspace_id, **clean)
+    session.add(header)
+    await session.flush()
+    return header
 
 
 async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | None = None) -> list[dict]:
@@ -628,26 +741,94 @@ async def suggest_plan(
     if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
+    lead_name: str | None = None
+    if project.lead_id:
+        lead_result = await session.execute(
+            select(WorkspaceMember, User)
+            .join(User, User.id == WorkspaceMember.user_id)
+            .where(WorkspaceMember.id == project.lead_id)
+            .limit(1)
+        )
+        lead_row = lead_result.first()
+        if lead_row:
+            lead_name = _resolve_member_name(lead_row[0], lead_row[1])
+
+    member_result = await session.execute(
+        select(ProjectMember, WorkspaceMember, User)
+        .join(WorkspaceMember, WorkspaceMember.id == ProjectMember.member_id)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .where(ProjectMember.project_id == project_id)
+        .order_by(ProjectMember.joined_at)
+    )
+    member_names = [
+        _resolve_member_name(workspace_member, user)
+        for _, workspace_member, user in member_result.all()
+    ]
+    member_names = [name for name in member_names if name]
+    if not member_names and lead_name:
+        member_names = [lead_name]
+
+    task_repo = TaskRepository(session)
+    existing_tasks = await task_repo.find_project_tasks(project_id, limit=500)
+    existing_tasks = sorted(
+        existing_tasks,
+        key=lambda task: (task.parent_task_id is not None, task.sort_order or 0, str(task.created_at)),
+    )
+
     models = await _get_models(session, workspace_id)
     if not models:
         raise HTTPException(status_code=400, detail="No active AI model configured.")
 
-    prompt = f"""You are an OPPM project planning assistant. Generate a structured project plan.
+    task_context = "\n".join(f"- {task.title}" for task in existing_tasks[:30]) or "- No current tasks"
+    team_context = "\n".join(f"- {name}" for name in member_names[:12]) or "- Team not assigned"
+    people_count = len(member_names) if member_names else None
+
+    prompt = f"""You are an OPPM project planning assistant. Generate a structured native OPPM draft.
 
 Project: "{project.title}"
 Start: {project.start_date or 'not set'}
 Deadline: {project.deadline or 'not set'}
+Project leader: {lead_name or 'not set'}
+Team members:
+{team_context}
+
+Current project tasks (reuse these titles exactly when they already fit the plan):
+{task_context}
+
 Description from user: {description}
 
 Return ONLY valid JSON with this structure:
 {{
-  "objectives": [
-    {{"title": "Objective name", "suggested_weeks": ["W1", "W2"]}}
-  ],
+    "header": {{
+        "project_leader": "Project leader name",
+        "project_objective": "One sentence describing what this project aims to achieve.",
+        "deliverable_output": "One sentence describing the final output.",
+        "completed_by_text": "Short completion target text",
+        "people_count": 3
+    }},
+    "objectives": [
+        {{
+            "title": "Objective name",
+            "suggested_weeks": ["W1", "W2"],
+            "tasks": [
+                {{
+                    "title": "Task title",
+                    "priority": "medium",
+                    "suggested_weeks": ["W1"],
+                    "subtasks": ["Sub-task one", "Sub-task two"]
+                }}
+            ]
+        }}
+    ],
   "explanation": "Brief explanation of the plan"
 }}
 
-Generate 3-7 objectives with logical week assignments. Use W1-W8 format."""
+Rules:
+- Generate 3-6 objectives with logical week assignments. Use W1-W8 format.
+- Prefer the current project task titles when they already describe the work well.
+- Keep `project_objective` and `deliverable_output` under 120 characters each.
+- Do not invent IDs.
+- Keep task lists concise and practical for an OPPM summary view."""
 
     try:
         response = await call_with_fallback(models, prompt)
@@ -658,24 +839,56 @@ Generate 3-7 objectives with logical week assignments. Use W1-W8 format."""
         logger.warning("Suggest plan LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
 
-    # Extract JSON from the text response (model may wrap it in ```json ... ``` blocks)
     raw_text = response.text.strip() if response else ""
-    result = None
-    try:
-        # Strip markdown code fences if present
-        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.DOTALL).strip()
-        result = json.loads(clean)
-    except (json.JSONDecodeError, ValueError):
-        # Last resort: find first {...} block
-        m = re.search(r"\{.*\}", raw_text, re.DOTALL)
-        if m:
-            try:
-                result = json.loads(m.group(0))
-            except (json.JSONDecodeError, ValueError):
-                pass
+    result = _extract_json_payload(raw_text)
 
     if not result:
         raise HTTPException(status_code=502, detail="AI returned empty response")
+
+    raw_header = result.get("header") if isinstance(result.get("header"), dict) else {}
+    normalized_header = {
+        "project_leader": raw_header.get("project_leader") or lead_name,
+        "project_objective": raw_header.get("project_objective") or project.objective_summary,
+        "deliverable_output": raw_header.get("deliverable_output") or project.deliverable_output,
+        "completed_by_text": raw_header.get("completed_by_text") or (str(project.deadline) if project.deadline else None),
+        "people_count": raw_header.get("people_count") if isinstance(raw_header.get("people_count"), int) else people_count,
+    }
+
+    normalized_objectives = []
+    for raw_objective in result.get("objectives", result.get("suggested_objectives", [])):
+        if not isinstance(raw_objective, dict):
+            continue
+        title = str(raw_objective.get("title") or "").strip()
+        if not title:
+            continue
+
+        tasks = []
+        for raw_task in raw_objective.get("tasks", []):
+            if not isinstance(raw_task, dict):
+                continue
+            task_title = str(raw_task.get("title") or "").strip()
+            if not task_title:
+                continue
+            subtasks = [
+                str(item).strip()
+                for item in raw_task.get("subtasks", [])
+                if str(item).strip()
+            ]
+            tasks.append({
+                "title": task_title,
+                "priority": _normalize_priority(raw_task.get("priority")),
+                "suggested_weeks": _normalize_week_labels(raw_task.get("suggested_weeks")),
+                "subtasks": subtasks,
+            })
+
+        normalized_objectives.append({
+            "title": title,
+            "suggested_weeks": _normalize_week_labels(raw_objective.get("suggested_weeks")),
+            "tasks": tasks,
+        })
+
+    if not normalized_objectives:
+        raise HTTPException(status_code=502, detail="AI returned no usable objectives")
 
     # Store preview with a commit token
     token = str(uuid.uuid4())
@@ -683,13 +896,16 @@ Generate 3-7 objectives with logical week assignments. Use W1-W8 format."""
         "project_id": project_id,
         "workspace_id": workspace_id,
         "user_id": user_id,
-        "objectives": result.get("objectives", []),
+        "header": normalized_header,
+        "objectives": normalized_objectives,
     }
 
     return {
-        "suggested_objectives": result.get("objectives", []),
+        "header": normalized_header,
+        "suggested_objectives": normalized_objectives,
         "explanation": result.get("explanation", ""),
         "commit_token": token,
+        "existing_task_count": len(existing_tasks),
     }
 
 
@@ -708,27 +924,159 @@ async def commit_plan(
         raise HTTPException(status_code=403, detail="Not authorized to commit this plan")
 
     project_id = plan["project_id"]
-    objective_repo = ObjectiveRepository(session)
-    audit_repo = AuditRepository(session)
-    created_objectives = []
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
+        raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
-    for i, obj_data in enumerate(plan.get("objectives", [])):
-        obj = await objective_repo.create({
-            "project_id": project_id,
-            "title": obj_data["title"],
-            "sort_order": i + 1,
-        })
-        created_objectives.append(obj)
+    objective_repo = ObjectiveRepository(session)
+    task_repo = TaskRepository(session)
+    timeline_repo = TimelineRepository(session)
+    audit_repo = AuditRepository(session)
+    await project_repo.update(project_id, {
+        "objective_summary": plan.get("header", {}).get("project_objective"),
+        "deliverable_output": plan.get("header", {}).get("deliverable_output"),
+    })
+    await _upsert_oppm_header(
+        session,
+        project_id,
+        workspace_id,
+        {
+            "project_leader_text": plan.get("header", {}).get("project_leader"),
+            "completed_by_text": plan.get("header", {}).get("completed_by_text"),
+            "people_count": plan.get("header", {}).get("people_count"),
+        },
+    )
+
+    existing_objectives = await objective_repo.find_with_tasks(project_id)
+    existing_objective_map = {
+        _normalize_title(objective.get("title")): objective
+        for objective in existing_objectives
+        if objective.get("title")
+    }
+    existing_tasks = await task_repo.find_project_tasks(project_id, limit=1000)
+    root_task_map: dict[str, list] = {}
+    child_task_map: dict[tuple[str, str], list] = {}
+    for task in existing_tasks:
+        title_key = _normalize_title(task.title)
+        if task.parent_task_id is None:
+            root_task_map.setdefault(title_key, []).append(task)
+        else:
+            child_task_map.setdefault((str(task.parent_task_id), title_key), []).append(task)
+
+    claimed_root_ids: set[str] = set()
+    claimed_child_ids: set[str] = set()
+
+    def _take_unclaimed(candidates: list, claimed: set[str]):
+        for candidate in candidates:
+            candidate_id = str(candidate.id)
+            if candidate_id not in claimed:
+                claimed.add(candidate_id)
+                return candidate
+        return None
+
+    created_objective_count = 0
+    updated_objective_count = 0
+    created_task_count = 0
+    updated_task_count = 0
+    created_timeline_entries = 0
+
+    for objective_index, obj_data in enumerate(plan.get("objectives", []), start=1):
+        objective_title = obj_data["title"]
+        objective_key = _normalize_title(objective_title)
+        existing_objective = existing_objective_map.get(objective_key)
+        if existing_objective:
+            objective = await objective_repo.update(existing_objective["id"], {
+                "title": objective_title,
+                "sort_order": objective_index,
+            })
+            updated_objective_count += 1
+        else:
+            objective = await objective_repo.create({
+                "project_id": project_id,
+                "title": objective_title,
+                "sort_order": objective_index,
+            })
+            created_objective_count += 1
+
+        objective_id = objective.id if objective else existing_objective["id"]
+        objective_weeks = _normalize_week_labels(obj_data.get("suggested_weeks"))
+
+        for task_index, task_data in enumerate(obj_data.get("tasks", []), start=1):
+            task_title = task_data["title"]
+            task_key = _normalize_title(task_title)
+            existing_root = _take_unclaimed(root_task_map.get(task_key, []), claimed_root_ids)
+            root_payload = {
+                "title": task_title,
+                "project_id": project_id,
+                "oppm_objective_id": objective_id,
+                "priority": _normalize_priority(task_data.get("priority")),
+                "sort_order": objective_index * 100 + task_index,
+                "start_date": _task_start_date(project, task_data.get("suggested_weeks", []), objective_weeks),
+                "due_date": _task_due_date(project, task_data.get("suggested_weeks", []), objective_weeks),
+                "created_by": user_id,
+            }
+            if existing_root:
+                root_task = await task_repo.update(existing_root.id, root_payload)
+                updated_task_count += 1
+            else:
+                root_task = await task_repo.create(root_payload)
+                created_task_count += 1
+
+            task_weeks = _normalize_week_labels(task_data.get("suggested_weeks")) or objective_weeks
+            for week_label in task_weeks:
+                week_start = _week_label_to_date(project, week_label)
+                if not week_start:
+                    continue
+                await timeline_repo.upsert_entry({
+                    "project_id": project_id,
+                    "task_id": root_task.id,
+                    "week_start": week_start,
+                    "status": "planned",
+                })
+                created_timeline_entries += 1
+
+            for subtask_index, subtask_title in enumerate(task_data.get("subtasks", []), start=1):
+                subtask_key = _normalize_title(subtask_title)
+                existing_child = _take_unclaimed(
+                    child_task_map.get((str(root_task.id), subtask_key), []),
+                    claimed_child_ids,
+                )
+                child_payload = {
+                    "title": subtask_title,
+                    "project_id": project_id,
+                    "oppm_objective_id": objective_id,
+                    "parent_task_id": root_task.id,
+                    "priority": root_payload["priority"],
+                    "sort_order": root_payload["sort_order"] * 10 + subtask_index,
+                    "created_by": user_id,
+                }
+                if existing_child:
+                    await task_repo.update(existing_child.id, child_payload)
+                    updated_task_count += 1
+                else:
+                    await task_repo.create(child_payload)
+                    created_task_count += 1
 
     await audit_repo.log(
         workspace_id, user_id,
         "ai_commit_plan", "oppm_plan",
-        new_data={"objectives_created": len(created_objectives)},
+        new_data={
+            "objectives_created": created_objective_count,
+            "objectives_updated": updated_objective_count,
+            "tasks_created": created_task_count,
+            "tasks_updated": updated_task_count,
+            "timeline_entries_upserted": created_timeline_entries,
+        },
     )
 
     return {
-        "created_objectives": created_objectives,
-        "count": len(created_objectives),
+        "count": created_objective_count + updated_objective_count,
+        "objectives_created": created_objective_count,
+        "objectives_updated": updated_objective_count,
+        "tasks_created": created_task_count,
+        "tasks_updated": updated_task_count,
+        "timeline_entries_upserted": created_timeline_entries,
     }
 
 

@@ -50,10 +50,36 @@ interface ChatResponse {
   iterations?: number
 }
 
+interface SuggestedPlanTask {
+  title: string
+  priority?: string | null
+  suggested_weeks: string[]
+  subtasks: string[]
+}
+
+interface SuggestedPlanHeader {
+  project_leader?: string | null
+  project_objective?: string | null
+  deliverable_output?: string | null
+  completed_by_text?: string | null
+  people_count?: number | null
+}
+
 interface SuggestPlanResponse {
-  suggested_objectives: { title: string; suggested_weeks: string[] }[]
+  header: SuggestedPlanHeader
+  suggested_objectives: { title: string; suggested_weeks: string[]; tasks: SuggestedPlanTask[] }[]
   explanation: string
   commit_token: string
+  existing_task_count: number
+}
+
+interface CommitPlanResponse {
+  count: number
+  objectives_created: number
+  objectives_updated: number
+  tasks_created: number
+  tasks_updated: number
+  timeline_entries_upserted: number
 }
 
 interface WeeklySummaryResponse {
@@ -499,13 +525,32 @@ export function ChatPanel() {
         { description },
       ),
     onSuccess: (data) => {
-      setPendingPlan(data)
-      const objList = data.suggested_objectives
-        .map((o, i) => `${i + 1}. ${o.title} (${o.suggested_weeks.join(', ')})`)
+      const normalizedPlan: SuggestPlanResponse = {
+        ...data,
+        header: data.header ?? {},
+        suggested_objectives: (data.suggested_objectives ?? []).map((objective) => ({
+          ...objective,
+          tasks: objective.tasks ?? [],
+        })),
+        existing_task_count: data.existing_task_count ?? 0,
+      }
+      setPendingPlan(normalizedPlan)
+      const taskCount = normalizedPlan.suggested_objectives.reduce((count, objective) => count + objective.tasks.length, 0)
+      const objList = normalizedPlan.suggested_objectives
+        .map((o, i) => {
+          const weeks = o.suggested_weeks.length > 0 ? o.suggested_weeks.join(', ') : 'No weeks suggested'
+          const tasks = o.tasks.length > 0 ? `\n   Tasks: ${o.tasks.map((task) => task.title).join(', ')}` : ''
+          return `${i + 1}. ${o.title} (${weeks})${tasks}`
+        })
         .join('\n')
+      const headerLines = [
+        normalizedPlan.header.project_objective ? `**Objective:** ${normalizedPlan.header.project_objective}` : null,
+        normalizedPlan.header.deliverable_output ? `**Deliverable:** ${normalizedPlan.header.deliverable_output}` : null,
+        normalizedPlan.header.project_leader ? `**Leader:** ${normalizedPlan.header.project_leader}` : null,
+      ].filter(Boolean)
       addMessage({
         role: 'assistant',
-        content: `${data.explanation}\n\n**Suggested objectives:**\n${objList}\n\nClick "Apply Plan" to create these objectives, or "Discard" to cancel.`,
+        content: `${normalizedPlan.explanation}\n\n${headerLines.join('\n')}\n\n**Suggested objectives:**\n${objList}\n\nCurrent project tasks considered: ${normalizedPlan.existing_task_count}\nSuggested root tasks: ${taskCount}\n\nClick "Apply Plan" to commit this native OPPM draft, or "Discard" to cancel.`,
       })
     },
     onError: (err: Error) => {
@@ -517,13 +562,18 @@ export function ChatPanel() {
 
   const commitPlanMutation = useMutation({
     mutationFn: (commitToken: string) =>
-      api.post<{ created_objectives: unknown[]; count: number }>(
+      api.post<CommitPlanResponse>(
         `${wsPath}/projects/${projectId}/ai/suggest-plan/commit`,
         { commit_token: commitToken },
       ),
     onSuccess: (data) => {
       setPendingPlan(null)
-      addMessage({ role: 'assistant', content: `Plan applied! Created ${data.count} objectives.` })
+      addMessage({
+        role: 'assistant',
+        content: `Plan applied. Objectives touched: ${data.count}. Tasks created: ${data.tasks_created}. Tasks updated: ${data.tasks_updated}. Timeline rows upserted: ${data.timeline_entries_upserted}.`,
+      })
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', projectId] })
       queryClient.invalidateQueries({ queryKey: ['oppm-objectives', projectId] })
       queryClient.invalidateQueries({ queryKey: ['oppm-timeline', projectId] })
     },

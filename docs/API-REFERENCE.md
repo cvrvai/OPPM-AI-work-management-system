@@ -261,6 +261,24 @@ Treat this field as a workspace member identifier, even though the public field 
 
 ## OPPM Routes (Core Service)
 
+### Combined OPPM And Spreadsheet Routes
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm` | Yes | Member | Returns the combined OPPM payload for the project, including project metadata, objectives, tasks, members, header, timeline, costs, deliverables, forecasts, risks, and weeks. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/export` | Yes | Member | Exports the current OPPM data as XLSX. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/template` | Yes | Member | Returns a template XLSX for OPPM import or spreadsheet bootstrap workflows. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/import` | Yes | Write | Imports an uploaded XLSX into project OPPM data. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/preview-xlsx` | Yes | Member | Parses an uploaded XLSX into preview JSON without saving. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/import-json` | Yes | Write | Imports structured JSON produced by AI extraction flows. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/spreadsheet` | Yes | Member | Returns saved FortuneSheet JSON for this project, or `404` if no spreadsheet template exists. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/spreadsheet` | Yes | Write | Upserts FortuneSheet JSON for this project. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/spreadsheet` | Yes | Write | Deletes the saved FortuneSheet JSON for this project. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/header` | Yes | Member | Returns OPPM header fields, or `null` if none are stored. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/header` | Yes | Write | Creates or updates OPPM header fields. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/task-items` | Yes | Member | Returns the OPPM task-items tree for this project. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/task-items` | Yes | Write | Full replace of OPPM task-items for the project. |
+
 ### Objectives
 
 | Method | Path | Auth | Role |
@@ -286,12 +304,26 @@ Treat this field as a workspace member identifier, even though the public field 
 | `PUT` | `/api/v1/workspaces/{workspace_id}/oppm/costs/{cost_id}` | Yes | Write |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/oppm/costs/{cost_id}` | Yes | Write |
 
+### Google Sheets Linked Form
+
+| Method | Path | Auth | Role | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet` | Yes | Member | Returns whether a project is linked to a Google Sheet, the linked sheet ID/URL, whether backend Google credentials are configured, and any non-fatal backend configuration warning. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet` | Yes | Write | Stores a Google Sheet URL or spreadsheet ID in project metadata. |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet` | Yes | Write | Removes the linked Google Sheet from project metadata. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/push` | Yes | Write | Pushes AI-filled OPPM summary, task, and member data into the linked spreadsheet. |
+| `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/xlsx` | Yes | Member | Exports the linked Google Sheet as XLSX for in-app FortuneSheet rendering. Requires backend Google credentials and spreadsheet access. |
+
 ### OPPM Data Notes
 
 - timeline rows are keyed by `week_start` date, not separate year and month fields
 - objective/task linkage is handled through `tasks.oppm_objective_id`
 - objectives have an optional `priority` field (single character: `A`, `B`, or `C`)
 - costs are project-scoped and tracked independently from tasks
+- a linked Google Sheet is stored in `projects.metadata.google_sheet`
+- the Google Sheet link-state route should remain readable even when backend Google credentials are missing
+- backend Google credentials are required for XLSX export and Push AI Fill, but not for browser preview mode in the frontend
+- browser preview mode is a frontend behavior and does not have its own backend route
 
 ### Objective Create/Update Fields
 

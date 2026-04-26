@@ -1,5 +1,7 @@
 """OPPM repositories for AI service — needed for chat context building."""
 
+from datetime import date
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,12 +70,16 @@ class TimelineRepository(BaseRepository):
         )
 
     async def upsert_entry(self, data: dict) -> OPPMTimelineEntry:
+        week_start_val = data["week_start"]
+        if isinstance(week_start_val, str):
+            week_start_val = date.fromisoformat(week_start_val)
+
         stmt = (
             select(OPPMTimelineEntry)
             .where(
                 OPPMTimelineEntry.project_id == data["project_id"],
                 OPPMTimelineEntry.task_id == data["task_id"],
-                OPPMTimelineEntry.week_start == data["week_start"],
+                OPPMTimelineEntry.week_start == week_start_val,
             )
             .limit(1)
         )
@@ -81,10 +87,14 @@ class TimelineRepository(BaseRepository):
         existing = result.scalar_one_or_none()
         if existing:
             for k, v in data.items():
+                if k == "week_start" and isinstance(v, str):
+                    v = date.fromisoformat(v)
                 setattr(existing, k, v)
             await self.session.flush()
             return existing
-        return await self.create(data)
+
+        create_data = {**data, "week_start": week_start_val}
+        return await self.create(create_data)
 
 
 class CostRepository(BaseRepository):

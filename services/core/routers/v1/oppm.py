@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from shared.auth import WorkspaceContext, get_workspace_context, require_write
+from shared.auth import WorkspaceContext, get_workspace_context, require_admin, require_write
 from shared.database import get_session
 from schemas.oppm import (
     OPPMObjectiveCreate, OPPMObjectiveUpdate, TimelineEntryUpsert,
@@ -16,7 +16,14 @@ from schemas.oppm import (
     OPPMHeaderUpsert,
     OPPMTaskItemsReplace,
 )
-from schemas.google_sheets import GoogleSheetLinkResponse, GoogleSheetLinkUpsert, GoogleSheetPushRequest, GoogleSheetPushResponse
+from schemas.google_sheets import (
+    GoogleSheetLinkResponse,
+    GoogleSheetLinkUpsert,
+    GoogleSheetPushRequest,
+    GoogleSheetPushResponse,
+    GoogleSheetsSetupUpsert,
+    GoogleSheetsSetupStatusResponse,
+)
 from shared.schemas.common import SuccessResponse
 from services.oppm_service import (
     get_oppm_data,
@@ -56,7 +63,10 @@ from services.oppm_service import (
 )
 from services.export_service import export_oppm_xlsx, import_oppm_xlsx, import_oppm_json, parse_oppm_xlsx_to_preview
 from services.google_sheets_service import (
+    delete_google_sheets_workspace_credentials,
+    get_google_sheets_setup_status,
     get_google_sheet_link,
+    upsert_google_sheets_workspace_credentials,
     upsert_google_sheet_link,
     delete_google_sheet_link,
     push_google_sheet_fill,
@@ -65,6 +75,36 @@ from services.google_sheets_service import (
 from repositories.oppm_repo import OPPMTemplateRepository
 
 router = APIRouter()
+
+
+@router.get("/workspaces/{workspace_id}/google-sheets/setup-status", response_model=GoogleSheetsSetupStatusResponse)
+async def get_google_sheets_setup_status_route(
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    return await get_google_sheets_setup_status(session, ws.workspace_id)
+
+
+@router.put("/workspaces/{workspace_id}/google-sheets/setup", response_model=GoogleSheetsSetupStatusResponse)
+async def upsert_google_sheets_setup_route(
+    data: GoogleSheetsSetupUpsert,
+    ws: WorkspaceContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    return await upsert_google_sheets_workspace_credentials(
+        session,
+        ws.workspace_id,
+        ws.user.id,
+        data.service_account_json,
+    )
+
+
+@router.delete("/workspaces/{workspace_id}/google-sheets/setup", response_model=GoogleSheetsSetupStatusResponse)
+async def delete_google_sheets_setup_route(
+    ws: WorkspaceContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    return await delete_google_sheets_workspace_credentials(session, ws.workspace_id, ws.user.id)
 
 
 # ── Combined OPPM Data ──

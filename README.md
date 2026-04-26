@@ -148,6 +148,7 @@ Browser → Frontend (React/Vite :5173)
 | [docs/AI-SYSTEM-CONTEXT.md](docs/AI-SYSTEM-CONTEXT.md) | Fast start reference for future AI or human updates: feature flows, edit hotspots, schema design, and verified drift notes |
 | [docs/API-REFERENCE.md](docs/API-REFERENCE.md) | Current public route reference and contract notes |
 | [docs/frontend/FRONTEND-REFERENCE.md](docs/frontend/FRONTEND-REFERENCE.md) | Frontend folder map, route ownership, state flow, and feature entry points |
+| [docs/oppm/google-sheets-linked-form.md](docs/oppm/google-sheets-linked-form.md) | Detailed Google Sheets linked-form behavior for OPPM, including backend render, browser preview mode, and current UI states |
 | [docs/MICROSERVICES-REFERENCE.md](docs/MICROSERVICES-REFERENCE.md) | Service ownership, shared package map, gateway routing, and backend feature entry points |
 | [docs/services/README.md](docs/services/README.md) | Service-level feature inventory hub for core/ai/git/mcp/gateway and upgrade planning |
 | [docs/database/README.md](docs/database/README.md) | Database documentation hub by service plus ER diagram view |
