@@ -1,0 +1,54 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "oppm-core"
+    static_configs:
+      - targets: ["core:8000"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-auth"
+    static_configs:
+      - targets: ["auth:8004"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-workspace"
+    static_configs:
+      - targets: ["workspace:8005"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-project"
+    static_configs:
+      - targets: ["project:8006"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-oppm"
+    static_configs:
+      - targets: ["oppm-svc:8007"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-notification"
+    static_configs:
+      - targets: ["notification:8008"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-ai"
+    static_configs:
+      - targets: ["ai:8001"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-git"
+    static_configs:
+      - targets: ["git:8002"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-mcp"
+    static_configs:
+      - targets: ["mcp:8003"]
+    metrics_path: /metrics
+
+  - job_name: "oppm-gateway"
+    static_configs:
+      - targets: ["gateway-py:8080"]
+    metrics_path: /metrics

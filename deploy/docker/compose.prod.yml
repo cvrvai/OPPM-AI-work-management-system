@@ -1,0 +1,349 @@
+# Production Docker Compose — full microservices stack
+# Usage: docker compose -f deploy/docker/compose.prod.yml up --build
+
+services:
+  # ── Infrastructure ────────────────────────────────────────────────────────
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: oppm
+      POSTGRES_USER: oppm
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-oppm_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oppm"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - oppm-network
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-oppm_dev_password}
+    volumes:
+      - redis_data:/data
+    networks:
+      - oppm-network
+
+  # ── Migrations (run-once job before services start) ───────────────────────
+
+  migrate:
+    build:
+      context: ../../
+      dockerfile: services/core/Dockerfile
+    command: alembic -c migrations/alembic.ini upgrade head
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - oppm-network
+    restart: "no"
+
+  # ── Gateway ────────────────────────────────────────────────────────────────
+
+  gateway:
+    build:
+      context: ../../
+      dockerfile: deploy/nginx/Dockerfile
+    ports:
+      - "80:80"
+    restart: on-failure
+    depends_on:
+      core:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      workspace:
+        condition: service_healthy
+      project:
+        condition: service_healthy
+      oppm-svc:
+        condition: service_healthy
+      notification:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      git:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
+    networks:
+      - oppm-network
+
+  # ── Core service (legacy — kept for backward compat) ──────────────────────
+
+  core:
+    build:
+      context: ../../
+      dockerfile: services/core/Dockerfile
+    expose:
+      - "8000"
+    volumes:
+      - ../../services/secrets:/run/secrets:ro
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+      - GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    networks:
+      - oppm-network
+
+  # ── Domain services ───────────────────────────────────────────────────────
+
+  auth:
+    build:
+      context: ../../
+      dockerfile: services/auth/Dockerfile
+    expose:
+      - "8004"
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - oppm-network
+
+  workspace:
+    build:
+      context: ../../
+      dockerfile: services/workspace/Dockerfile
+    expose:
+      - "8005"
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - oppm-network
+
+  project:
+    build:
+      context: ../../
+      dockerfile: services/project/Dockerfile
+    expose:
+      - "8006"
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - oppm-network
+
+  oppm-svc:
+    build:
+      context: ../../
+      dockerfile: services/oppm/Dockerfile
+    expose:
+      - "8007"
+    volumes:
+      - ../../services/secrets:/run/secrets:ro
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+      - GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8007/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - oppm-network
+
+  notification:
+    build:
+      context: ../../
+      dockerfile: services/notification/Dockerfile
+    expose:
+      - "8008"
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - oppm-network
+
+  # ── Specialised services ───────────────────────────────────────────────────
+
+  ai:
+    build:
+      context: ../../
+      dockerfile: services/ai/Dockerfile
+    expose:
+      - "8001"
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - oppm-network
+
+  git:
+    build:
+      context: ../../
+      dockerfile: services/git/Dockerfile
+    expose:
+      - "8002"
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+      - AI_SERVICE_URL=http://ai:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - oppm-network
+
+  mcp:
+    build:
+      context: ../../
+      dockerfile: services/mcp/Dockerfile
+    expose:
+      - "8003"
+    env_file:
+      - ../../services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - oppm-network
+
+  # ── Observability ──────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - oppm-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - oppm-network
+
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ../../monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml
+    networks:
+      - oppm-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  grafana_data:
+
+networks:
+  oppm-network:
+    driver: bridge

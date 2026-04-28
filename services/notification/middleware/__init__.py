@@ -1,0 +1,1 @@
+"""Notification middleware package."""

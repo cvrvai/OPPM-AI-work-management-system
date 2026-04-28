@@ -1,0 +1,32 @@
+# Development Docker Compose — infrastructure only (postgres + redis)
+# Services run natively via start.ps1 in each service folder.
+# Usage: docker compose -f deploy/docker/compose.dev.yml up -d
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: oppm
+      POSTGRES_USER: oppm
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-oppm_dev_password}
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oppm"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-oppm_dev_password}
+    volumes:
+      - redis_dev_data:/data
+
+volumes:
+  postgres_dev_data:
+  redis_dev_data:

@@ -1,41 +1,46 @@
 # Current Phase Tracker
 
 ## Task
-Tighten visible OPPM header-field mapping and remap the date/timeline area for the linked Google Sheet layout
+Organize the startup helper and fix native microservice startup
 
 ## Goal
-Detect the linked workbook's merged summary block and visible timeline layout directly from the sheet so `Push AI Fill` writes header fields into the actual visible OPPM area instead of relying on classic fallback cells.
+Move the main startup logic into `deploy/scripts/start-all.ps1`, keep `start-all.ps1` at the repo root as the stable entrypoint, and make native mode launch the full local stack: gateway, core, ai, git, mcp, and the frontend using the gateway-based proxy.
 
 ## Plan
 
-### Phase 1: Confirm the workbook-specific layout
-- [x] Inspect the live linked workbook header merges and visible timeline columns
-- [x] Verify the visible summary fields live in a merged block instead of standalone label cells
+### Phase 1: Tracker handoff
+- [x] Archive the previous task tracker into `docs/phase-history/`
+- [x] Create a new tracker for the startup fix
 
-### Phase 2: Patch mapping and writes
-- [x] Detect workbook-specific merged summary blocks for project objective, deliverable output, start date, and deadline
-- [x] Write the visible summary block into the merged OPPM area
-- [x] Tighten the visible timeline/date mapping for the grouped template without regressing helper-sheet output
+### Phase 2: Startup script organization
+- [x] Move the main script body under `deploy/scripts/`
+- [x] Keep the root `start-all.ps1` as a thin compatibility wrapper
 
-### Phase 3: Validate
-- [x] Add focused backend tests for merged summary-block detection and writing
-- [x] Run targeted Google Sheets mapping tests
-- [x] Run a live write against the linked workbook and inspect the linked workbook again
+### Phase 3: Native startup behavior
+- [x] Start the Python gateway before the frontend
+- [x] Start the missing `mcp` service in native mode
+- [x] Use the native frontend command that proxies through `http://127.0.0.1:8080`
+- [x] Align the tunnel target with the native gateway instead of the git service directly
+- [x] Keep failed service windows open and write launcher logs under `logs/dev-startup/`
+
+### Phase 4: Validation
+- [ ] Validate PowerShell script syntax for both startup files
+- [ ] Run the updated root entrypoint and confirm it launches the intended services
 
 ## Status
-Completed and validated.
+In progress - Phase 4 validation
 
 ## Expected Files
-- services/core/services/google_sheets_service.py
-- services/core/tests/test_google_sheets_mapping.py
-- docs/PHASE-TRACKER.md
+- `start-all.ps1`
+- `deploy/scripts/start-all.ps1`
+- `docs/PHASE-TRACKER.md`
 
 ## Verification
-- `Set-Location "c:\Users\cheon\work project\internal\OPPM-AI-work-management-system" ; $env:PYTHONPATH = (Get-Location).Path ; pytest services/core/tests/test_google_sheets_mapping.py`
-- Direct live Google Sheets write probe under the same env-loading logic as `services/core/start.ps1`, which resolved the real workbook mapping and wrote to the linked sheet successfully
-- Linked workbook XLSX inspection after the successful direct write, confirming the visible summary block at `H3:AI4` and the compact grouped task rows remain correct
+- [ ] PowerShell parse check for `start-all.ps1`
+- [ ] PowerShell parse check for `deploy/scripts/start-all.ps1`
+- [ ] Manual startup run opens gateway/core/ai/git/mcp/frontend processes in native mode
+- [ ] Failed child service launch leaves its window open with an error and writes to `logs/dev-startup/*.log`
 
 ## Notes
-- The linked workbook uses `H3:AI4` as one merged summary block containing `Project Objective`, `Deliverable Output`, `Start Date`, and `Deadline` labels.
-- The resolved visible OPPM mapping now uses `summary_block_range = H3:AI4` and does not emit null scalar anchors for the summary-block fields, which prevents invalid Google Sheets batch ranges like `'OPPM'!None`.
-- The currently running backend process behind `localhost:8000` is stale and did not reload these changes during validation. The current code path itself is verified by the direct write probe, but the local core server should be restarted before relying on the UI `Push AI Fill` button to hit the updated implementation.
+- The frontend native dev path should use the gateway on port `8080`; the old startup path launched `npm run dev` and could leave the UI running without the gateway proxy.
+- The previous root script also omitted `services/gateway/start.ps1` and `services/mcp/start.ps1`, which is why the stack was incomplete in native mode.
