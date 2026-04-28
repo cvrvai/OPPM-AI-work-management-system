@@ -14,6 +14,7 @@ Use this file for system-level orientation. Use the supporting docs for detail:
 - [FLOWCHARTS.md](FLOWCHARTS.md)
 - [FRONTEND-REFERENCE.md](frontend/FRONTEND-REFERENCE.md)
 - [oppm/google-sheets-linked-form.md](oppm/google-sheets-linked-form.md)
+- [oppm/google-sheet-edit-session-recovery.md](oppm/google-sheet-edit-session-recovery.md)
 - [MICROSERVICES-REFERENCE.md](MICROSERVICES-REFERENCE.md)
 - [services/README.md](services/README.md)
 - [database/README.md](database/README.md)

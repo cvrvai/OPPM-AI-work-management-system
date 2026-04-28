@@ -9,12 +9,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { transformExcelToFortune } from '@corbe30/fortune-excel'
 import { ArrowLeft, CheckCircle2, ExternalLink, FileImage, Link2, Loader2, Send, ScanLine, Unplug, X, CloudDownload } from 'lucide-react'
 import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import { api } from '@/lib/api'
+import { buildOppmScratchSheet } from '@/lib/oppmSheetBuilder'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 interface GoogleSheetLinkState {
@@ -53,8 +53,6 @@ interface GoogleSheetPushResult {
     }
   }
 }
-
-const LINKED_SHEET_XLSX_TIMEOUT_MS = 8000
 
 interface SuggestedPlanTask {
   title: string
@@ -100,23 +98,6 @@ interface OppmTaskSnapshot {
   status?: string | null
 }
 
-interface OppmObjectiveSnapshot {
-  id: string
-  title: string
-  tasks?: OppmTaskSnapshot[]
-}
-
-interface OppmProjectSnapshot {
-  objective_summary?: string | null
-  deliverable_output?: string | null
-}
-
-interface OppmHeaderSnapshot {
-  project_leader_text?: string | null
-  completed_by_text?: string | null
-  people_count?: number | null
-}
-
 // ── OCR fill types ────────────────────────────────────────────────────────
 interface OcrFillTaskItem {
   index: string
@@ -134,13 +115,6 @@ interface OcrFillResponse {
 }
 
 type OcrStage = 'idle' | 'scanning' | 'mapping' | 'done' | 'error'
-
-interface OppmCombinedSnapshot {
-  project?: OppmProjectSnapshot
-  header?: OppmHeaderSnapshot
-  objectives?: OppmObjectiveSnapshot[]
-  timeline?: Array<unknown>
-}
 
 type SheetTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 
@@ -162,7 +136,6 @@ function StatusTile({
     warning: 'border-amber-200 bg-amber-50 text-amber-700',
     danger: 'border-red-200 bg-red-50 text-red-700',
   }
-
   return (
     <div className={`rounded-xl border p-3 ${toneClasses[tone]}`}>
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-current/70">{label}</p>
@@ -220,7 +193,7 @@ function extractSpreadsheetId(value: string | null | undefined): string | null {
 
 function getGoogleSheetEmbedUrl(spreadsheetId: string | null): string | null {
   if (!spreadsheetId) return null
-  return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/preview?rm=minimal&single=true&widget=true&headers=false`
+  return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?rm=minimal&single=true&widget=true&headers=false`
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -228,141 +201,7 @@ function getGoogleSheetEmbedUrl(spreadsheetId: string | null): string | null {
 // ══════════════════════════════════════════════════════════════
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createBlankOppmTemplate(): any[] {
-  // Column layout (0-indexed):
-  //  0–5  : Sub objective     (6 cols, A–F)
-  //  6–12 : Major Tasks       (7 cols, G–M)
-  // 13–25 : Week timeline W1–W13 (13 cols, N–Z)
-  // 26–28 : People / owner    (3 cols, AA–AC)
-  const SUB_COLS = 6
-  const TASK_COLS = 7
-  const WEEK_COLS = 13
-  const TASK_COL = SUB_COLS           // 6
-  const WEEK_START = SUB_COLS + TASK_COLS  // 13
-  const PEOPLE_START = WEEK_START + WEEK_COLS  // 26
-  const TOTAL_COLS = PEOPLE_START + 3  // 29
-
-  const HEADER_ROW = 1
-  const COL_HEADER_ROW = 2
-  const TASK_START_ROW = 3
-  const ROWS_PER_OBJ = 4
-  const OBJ_COUNT = 5
-  const FOOTER_ROW = TASK_START_ROW + OBJ_COUNT * ROWS_PER_OBJ
-  const TOTAL_ROWS = FOOTER_ROW + 4
-
-  const WEEK_LABELS = ['W1','W2','W3','W4','W5','W6','W7','W8','W9','W10','W11','W12','W13']
-  const PEOPLE_LABELS = ['Member 1', 'Member 2', 'Member 3']
-  const OBJ_LABELS = ['1. Documentation', '2. Data', '3. Training', '4. Deployment', '5. Review']
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const celldata: Array<{ r: number; c: number; v: any }> = []
-  const config: {
-    merge: Record<string, { r: number; c: number; rs: number; cs: number }>
-    borderInfo: unknown[]
-    rowlen: Record<string, number>
-    columnlen: Record<string, number>
-  } = { merge: {}, borderInfo: [], rowlen: {}, columnlen: {} }
-
-  // Column widths
-  for (let c = 0; c < SUB_COLS; c++) config.columnlen[String(c)] = 72
-  for (let c = TASK_COL; c < TASK_COL + TASK_COLS; c++) config.columnlen[String(c)] = 88
-  for (let c = WEEK_START; c < WEEK_START + WEEK_COLS; c++) config.columnlen[String(c)] = 40
-  for (let c = PEOPLE_START; c < PEOPLE_START + 3; c++) config.columnlen[String(c)] = 65
-
-  // Row heights
-  config.rowlen['0'] = 18
-  config.rowlen[String(HEADER_ROW)] = 44
-  config.rowlen[String(COL_HEADER_ROW)] = 32
-  for (let r = TASK_START_ROW; r <= FOOTER_ROW + 1; r++) config.rowlen[String(r)] = 26
-
-  // Helpers
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const push = (r: number, c: number, v: any) => celldata.push({ r, c, v })
-  const merge = (r: number, c: number, rs: number, cs: number) => {
-    config.merge[`${r}_${c}`] = { r, c, rs, cs }
-    for (let dr = 0; dr < rs; dr++) {
-      for (let dc = 0; dc < cs; dc++) {
-        if (dr > 0 || dc > 0) celldata.push({ r: r + dr, c: c + dc, v: { mc: { r, c } } })
-      }
-    }
-  }
-
-  // ── Row 1: project header ───────────────────────────────────
-  push(HEADER_ROW, 0, {
-    v: 'Project Name', m: 'Project Name', bl: 1, ht: 1, vt: 0,
-    mc: { r: HEADER_ROW, c: 0, rs: 1, cs: SUB_COLS },
-  })
-  merge(HEADER_ROW, 0, 1, SUB_COLS)
-
-  push(HEADER_ROW, TASK_COL, {
-    v: 'Project Leader: Project Manager', m: 'Project Leader: Project Manager',
-    bl: 1, ht: 1, vt: 0,
-    mc: { r: HEADER_ROW, c: TASK_COL, rs: 1, cs: TASK_COLS },
-  })
-  merge(HEADER_ROW, TASK_COL, 1, TASK_COLS)
-
-  // ── Row 2: column headers ───────────────────────────────────
-  push(COL_HEADER_ROW, 0, {
-    v: 'Sub objective', m: 'Sub objective', bl: 1, ht: 1, vt: 0,
-    bg: '#D0E4F5',
-    mc: { r: COL_HEADER_ROW, c: 0, rs: 1, cs: SUB_COLS },
-  })
-  merge(COL_HEADER_ROW, 0, 1, SUB_COLS)
-
-  push(COL_HEADER_ROW, TASK_COL, {
-    v: 'Major Tasks    (Deadline)', m: 'Major Tasks    (Deadline)',
-    bl: 1, ht: 1, vt: 0, bg: '#D0E4F5',
-    mc: { r: COL_HEADER_ROW, c: TASK_COL, rs: 1, cs: TASK_COLS },
-  })
-  merge(COL_HEADER_ROW, TASK_COL, 1, TASK_COLS)
-
-  WEEK_LABELS.forEach((week, i) => {
-    push(COL_HEADER_ROW, WEEK_START + i, {
-      v: week, m: week, bl: 1, ht: 1, vt: 0, bg: '#1E3A5F', fc: '#FFFFFF',
-    })
-  })
-
-  PEOPLE_LABELS.forEach((person, i) => {
-    push(COL_HEADER_ROW, PEOPLE_START + i, {
-      v: person, m: person, bl: 1, ht: 1, vt: 0, bg: '#D0E4F5',
-    })
-  })
-
-  // ── Task rows ───────────────────────────────────────────────
-  OBJ_LABELS.forEach((label, objIdx) => {
-    const objRow = TASK_START_ROW + objIdx * ROWS_PER_OBJ
-    const bg = objIdx % 2 === 0 ? '#F9FAFB' : '#FFFFFF'
-
-    push(objRow, 0, {
-      v: label, m: label, bl: 1, ht: 1, vt: 0, bg,
-      mc: { r: objRow, c: 0, rs: ROWS_PER_OBJ, cs: SUB_COLS },
-    })
-    merge(objRow, 0, ROWS_PER_OBJ, SUB_COLS)
-
-    for (let t = 0; t < ROWS_PER_OBJ; t++) {
-      const r = objRow + t
-      push(r, TASK_COL, {
-        v: '', m: '', ht: 0, bg,
-        mc: { r, c: TASK_COL, rs: 1, cs: TASK_COLS },
-      })
-      merge(r, TASK_COL, 1, TASK_COLS)
-    }
-  })
-
-  // ── Footer ──────────────────────────────────────────────────
-  push(FOOTER_ROW, 0, {
-    v: 'Project Completed By:', m: 'Project Completed By:', bl: 1, ht: 0, vt: 0,
-    mc: { r: FOOTER_ROW, c: 0, rs: 1, cs: SUB_COLS },
-  })
-  merge(FOOTER_ROW, 0, 1, SUB_COLS)
-
-  push(FOOTER_ROW, TASK_COL, {
-    v: '', m: '', ht: 0, mc: { r: FOOTER_ROW, c: TASK_COL, rs: 1, cs: TASK_COLS },
-  })
-  merge(FOOTER_ROW, TASK_COL, 1, TASK_COLS)
-
-  push(FOOTER_ROW, PEOPLE_START, { v: 'People Working: 0', m: 'People Working: 0', bl: 1, ht: 0, vt: 0 })
-
-  return [{ name: 'OPPM', celldata, config, row: TOTAL_ROWS, column: TOTAL_COLS }]
+  return buildOppmScratchSheet()
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -383,17 +222,17 @@ export function OPPMView() {
   const [sheetKey, setSheetKey] = useState(0)
   const [sheetInput, setSheetInput] = useState('')
   const [actionNotice, setActionNotice] = useState<string | null>(null)
-  const [sheetLoadState, setSheetLoadState] = useState<'idle' | 'loading' | 'ready' | 'preview' | 'error'>('idle')
+  const [sheetLoadState, setSheetLoadState] = useState<'idle' | 'loading' | 'preview' | 'error'>('idle')
   const [sheetLoadError, setSheetLoadError] = useState<string | null>(null)
   const [sheetRefreshToken, setSheetRefreshToken] = useState(0)
   const [inAppEditMode, setInAppEditMode] = useState(false)
-  const [isEditLoading, setIsEditLoading] = useState(false)
-  const [editLoadError, setEditLoadError] = useState<string | null>(null)
+  // Ref so the sheet-load effect can check edit mode without adding it as a dependency
+  const inAppEditModeRef = useRef(false)
+  useEffect(() => { inAppEditModeRef.current = inAppEditMode }, [inAppEditMode])
   const [showDraftComposer, setShowDraftComposer] = useState(false)
   const [draftBrief, setDraftBrief] = useState('')
   const [pendingDraft, setPendingDraft] = useState<SuggestPlanResponse | null>(null)
   const [showControlPanel, setShowControlPanel] = useState(false)
-  const [showNativeSnapshot, setShowNativeSnapshot] = useState(true)
 
   // OCR Import state
   const [showOcrPanel, setShowOcrPanel] = useState(false)
@@ -410,12 +249,6 @@ export function OPPMView() {
   const googleSheetQuery = useQuery({
     queryKey: ['oppm-google-sheet', id, ws?.id],
     queryFn: () => api.get<GoogleSheetLinkState>(`${wsPath}/projects/${id}/oppm/google-sheet`),
-    enabled: !!ws && !!id,
-  })
-
-  const oppmSnapshotQuery = useQuery({
-    queryKey: ['oppm-combined', id, ws?.id],
-    queryFn: () => api.get<OppmCombinedSnapshot>(`${wsPath}/projects/${id}/oppm`),
     enabled: !!ws && !!id,
   })
 
@@ -575,54 +408,24 @@ export function OPPMView() {
   })
 
   const handleToggleEditMode = async () => {
+    if (hasLinkedSheet) {
+      if (linkedSheetUrl) {
+        window.open(linkedSheetUrl, '_blank', 'noopener,noreferrer')
+      }
+      return
+    }
+
     if (inAppEditMode) {
       setInAppEditMode(false)
-      setEditLoadError(null)
       return
     }
-    setEditLoadError(null)
-    // If we already have sheet data loaded from the background XLSX fetch, go straight into edit mode.
-    if (sheetData.length > 0) {
-      setInAppEditMode(true)
-      return
-    }
-    // If a linked Google Sheet exists, download its XLSX.
-    // Use a 45-second timeout because the user explicitly requested edit mode and is willing to wait.
-    if (hasLinkedSheet && ws && id) {
-      setIsEditLoading(true)
-      const EDIT_XLSX_TIMEOUT_MS = 45_000
-      try {
-        const blob = await Promise.race([
-          api.getBlob(`${wsPath}/projects/${id}/oppm/google-sheet/xlsx`),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error('Google Sheet download timed out after 45 s — the sheet may be too large or the server is slow. Try again or use a blank template.')),
-              EDIT_XLSX_TIMEOUT_MS,
-            )
-          ),
-        ])
-        const file = new File([blob], `edit-linked-sheet-${id}.xlsx`, {
-          type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        })
-        await transformExcelToFortune(file, setSheetData, setSheetKey, sheetRef)
-        setIsEditLoading(false)
-        setInAppEditMode(true)
-      } catch (err) {
-        setIsEditLoading(false)
-        const reason = err instanceof Error ? err.message : 'Unknown error.'
-        // Stay in preview mode and show a retry banner — do NOT silently open a blank template.
-        setEditLoadError(reason)
-      }
-    } else {
-      // No linked sheet — open a blank OPPM template
-      setSheetData(createBlankOppmTemplate())
-      setSheetKey((k) => k + 1)
-      setInAppEditMode(true)
-    }
+
+    setSheetData(createBlankOppmTemplate())
+    setSheetKey((k) => k + 1)
+    setInAppEditMode(true)
   }
 
   const handleOpenBlankTemplate = () => {
-    setEditLoadError(null)
     setSheetData(createBlankOppmTemplate())
     setSheetKey((k) => k + 1)
     setInAppEditMode(true)
@@ -635,10 +438,12 @@ export function OPPMView() {
   const previewSrc = embedPreviewUrl ? `${embedPreviewUrl}${embedPreviewUrl.includes('?') ? '&' : '?'}refresh=${sheetRefreshToken}` : null
   const buttonsDisabled = !ws || !id
   const hasLinkedSheet = !!googleSheet?.connected
-  const oppmSnapshot = oppmSnapshotQuery.data
-  const snapshotObjectives = oppmSnapshot?.objectives ?? []
-  const snapshotTasks = snapshotObjectives.flatMap((objective) => objective.tasks ?? [])
-  const snapshotCompletedTasks = snapshotTasks.filter((task) => task.status === 'completed').length
+
+  const handleOpenLinkedSheet = () => {
+    if (!linkedSheetUrl) return
+    window.open(linkedSheetUrl, '_blank', 'noopener,noreferrer')
+  }
+
   const primaryNotice = actionNotice ?? googleSheet?.backend_configuration_error ?? null
   const primaryNoticeTone: Exclude<SheetTone, 'success'> = actionNotice
     ? 'info'
@@ -665,56 +470,33 @@ export function OPPMView() {
       }, [hasLinkedSheet])
 
   useEffect(() => {
+    if (hasLinkedSheet && inAppEditMode) {
+      setInAppEditMode(false)
+    }
+  }, [hasLinkedSheet, inAppEditMode])
+
+  useEffect(() => {
     if (!ws || !id || !googleSheet?.connected) {
-      setSheetData([])
+      if (!inAppEditModeRef.current) setSheetData([])
       setSheetLoadState('idle')
       setSheetLoadError(null)
       return
     }
 
     if (!googleSheet.backend_configured) {
-      setSheetData([])
+      if (!inAppEditModeRef.current) setSheetData([])
       setSheetLoadState('preview')
       setSheetLoadError(googleSheet.backend_configuration_error || 'Google integration is not configured on the backend.')
       return
     }
 
-    let cancelled = false
-    setSheetLoadState('loading')
+    if (!inAppEditModeRef.current) {
+      setSheetData([])
+    }
     setSheetLoadError(null)
-    const linkedPreviewId = googleSheet?.spreadsheet_id ?? null
-
-    const loadLinkedSheet = async () => {
-      try {
-        const blob = await Promise.race([
-          api.getBlob(`${wsPath}/projects/${id}/oppm/google-sheet/xlsx`),
-          new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error('Linked sheet download timed out. Falling back to browser preview.')), LINKED_SHEET_XLSX_TIMEOUT_MS)
-          }),
-        ])
-        if (cancelled) return
-        const file = new File([blob], `linked-google-sheet-${id}.xlsx`, {
-          type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        })
-
-        await transformExcelToFortune(file, setSheetData, setSheetKey, sheetRef)
-        if (!cancelled) {
-          setSheetLoadState('ready')
-        }
-      } catch (error) {
-        if (cancelled) return
-        setSheetData([])
-        const message = error instanceof Error ? error.message : 'Failed to load the linked Google Sheet.'
-        setSheetLoadError(message)
-        setSheetLoadState(linkedPreviewId ? 'preview' : 'error')
-      }
-    }
-
-    loadLinkedSheet()
-
-    return () => {
-      cancelled = true
-    }
+    // Keep linked sheets on the stable Google preview by default.
+    // The Fortune workbook path is reserved for explicit edit-mode entry.
+    setSheetLoadState('preview')
   }, [
     googleSheet?.backend_configuration_error,
     googleSheet?.backend_configured,
@@ -754,71 +536,77 @@ export function OPPMView() {
             {showControlPanel ? 'Hide controls' : 'Show controls'}
           </button>
 
-          <button
-            type="button"
-            onClick={handleToggleEditMode}
-            disabled={isEditLoading}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-70 ${
-              inAppEditMode
-                ? 'border-blue-300 bg-blue-600 text-white hover:bg-blue-700'
-                : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-            }`}
-          >
-            {isEditLoading ? (
-              <><Loader2 className="h-3 w-3 animate-spin" /> Loading…</>
-            ) : inAppEditMode ? 'Exit Editor' : 'Edit in App'}
-          </button>
+          {hasLinkedSheet ? (
+            <button
+              type="button"
+              onClick={handleOpenLinkedSheet}
+              disabled={!linkedSheetUrl}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Open in New Tab
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleToggleEditMode}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                inAppEditMode
+                  ? 'border-blue-300 bg-blue-600 text-white hover:bg-blue-700'
+                  : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              {inAppEditMode ? 'Exit Editor' : 'Edit in App'}
+            </button>
+          )}
         </div>
 
         <div className="pb-3">
           <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/60 px-4 py-4 shadow-sm">
             {showControlPanel ? (
-              <div className="grid gap-3">
-                <div className="rounded-xl border border-blue-100 bg-white px-4 py-4 shadow-sm">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">Sheet Source</p>
-                  <label className="mt-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500">
-                    Google Sheet URL or Spreadsheet ID
-                  </label>
+              <div className="rounded-xl border border-blue-100 bg-white px-4 py-4 shadow-sm">
+                <div className="flex flex-col gap-3">
                   <input
                     value={sheetInput}
                     onChange={(e) => setSheetInput(e.target.value)}
-                    placeholder="https://docs.google.com/spreadsheets/d/... or spreadsheet ID"
-                    className="mt-1.5 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500"
+                    placeholder="Google Sheet URL or Spreadsheet ID"
+                    className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500"
                   />
-                  <p className="mt-2 text-xs text-gray-600">
-                    {googleSheet?.service_account_email
-                      ? `Share the target spreadsheet with ${googleSheet.service_account_email} before using Push AI Fill.`
-                      : googleSheet?.backend_configuration_error
-                        ? 'Backend Google push is unavailable right now, but linked-sheet browser preview can still work.'
-                        : 'The backend must be configured with a Google service account before Push AI Fill can run.'}
-                  </p>
-                  <p className="mt-1 text-xs text-gray-600">
-                    Push AI Fill now auto-targets the workbook's stable helper sheets when they are present, then refreshes the linked Summary, Tasks, and Members data without requiring manual mapping.
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                    <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-700">
                       {googleSheetQuery.isLoading
-                        ? 'Loading link state...'
+                        ? 'Loading...'
                         : googleSheet?.connected
-                          ? `Linked spreadsheet: ${googleSheet.spreadsheet_id}`
-                          : 'No Google Sheet linked yet'}
+                          ? `Linked: ${googleSheet.spreadsheet_id}`
+                          : 'No linked sheet'}
                     </span>
-                    {linkedSheetUrl ? (
+                    {googleSheet?.service_account_email ? (
                       <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-blue-700">
-                        Existing linked form active
+                        Share with {googleSheet.service_account_email}
+                      </span>
+                    ) : null}
+                    {!googleSheet?.backend_configured ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">
+                        Google write not configured
+                      </span>
+                    ) : null}
+                    {pushToGoogleSheetDisabledReason ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">
+                        Push unavailable
                       </span>
                     ) : null}
                   </div>
-                </div>
 
-                <div className="rounded-xl border border-emerald-100 bg-white px-4 py-4 shadow-sm">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">Automatic Sheet Targeting</p>
-                  <p className="mt-2 text-sm text-gray-700">
-                    Push AI Fill now looks for pre-labeled helper tabs such as <span className="font-medium">OPPM Summary</span> and <span className="font-medium">OPPM Tasks</span> and writes into those stable cells first. When the workbook exposes that structure, the visual OPPM tab can update through its existing formulas.
-                  </p>
-                  <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                    No manual JSON setup is required. The backend chooses the safest detected write surface automatically and falls back to the older OPPM-tab placement only when the helper-sheet profile is unavailable.
-                  </div>
+                  {primaryNotice ? (
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${
+                      primaryNoticeTone === 'warning'
+                        ? 'border-amber-200 bg-amber-50 text-amber-800'
+                        : 'border-blue-100 bg-slate-50 text-slate-700'
+                    }`}>
+                      {primaryNotice}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : (
@@ -826,12 +614,16 @@ export function OPPMView() {
                 <span className="rounded-full border border-blue-100 bg-white px-2.5 py-1 text-gray-700">
                   {hasLinkedSheet ? `Linked: ${googleSheet?.spreadsheet_id}` : 'No linked sheet'}
                 </span>
-                <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700">
-                  Tasks: {snapshotCompletedTasks}/{snapshotTasks.length} completed
-                </span>
-                <span className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-emerald-700">
-                  Auto target enabled
-                </span>
+                {googleSheet?.service_account_email ? (
+                  <span className="rounded-full border border-blue-100 bg-white px-2.5 py-1 text-blue-700">
+                    {googleSheet.service_account_email}
+                  </span>
+                ) : null}
+                {primaryNotice ? (
+                  <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700">
+                    {primaryNotice}
+                  </span>
+                ) : null}
               </div>
             )}
 
@@ -906,7 +698,7 @@ export function OPPMView() {
                 className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ExternalLink className="h-4 w-4" />
-                Open Sheet
+                Open in New Tab
               </button>
 
               <button
@@ -921,85 +713,15 @@ export function OPPMView() {
             </div>
 
             {pushToGoogleSheetDisabledReason ? (
-              <p id="push-ai-fill-disabled-reason" className="mt-2 text-xs text-amber-700">
+              <p id="push-ai-fill-disabled-reason" className="sr-only">
                 Push AI Fill is unavailable: {pushToGoogleSheetDisabledReason}
               </p>
-            ) : null}
-
-            {primaryNotice ? (
-              <div className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
-                primaryNoticeTone === 'warning'
-                  ? 'border-amber-200 bg-amber-50 text-amber-800'
-                  : 'border-blue-100 bg-white text-gray-700'
-              }`}>
-                {primaryNotice}
-              </div>
             ) : null}
           </div>
         </div>
       </div>
 
       <div className="mt-3">
-        {oppmSnapshot ? (
-          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setShowNativeSnapshot((value) => !value)}
-                className="text-left"
-              >
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Native App Data</p>
-                <h2 className="mt-1 text-base font-semibold text-gray-900">Live OPPM data snapshot</h2>
-              </button>
-              <div className="flex items-center gap-2">
-                <div className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700">
-                  Objectives: {snapshotObjectives.length} · Tasks: {snapshotTasks.length}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowNativeSnapshot((value) => !value)}
-                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  {showNativeSnapshot ? 'Hide' : 'Show'}
-                </button>
-              </div>
-            </div>
-
-            {showNativeSnapshot ? (
-              <>
-                <p className="mt-2 text-xs text-slate-600">
-                  This panel shows real project data stored in the app database. If the linked Google Sheet still shows placeholder text, it means the sheet itself has not been updated yet.
-                </p>
-
-                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                  <StatusTile
-                    label="Project Objective"
-                    value={oppmSnapshot.project?.objective_summary || 'Not set'}
-                    tone="info"
-                  />
-                  <StatusTile
-                    label="Deliverable Output"
-                    value={oppmSnapshot.project?.deliverable_output || 'Not set'}
-                    tone="neutral"
-                  />
-                  <StatusTile
-                    label="Project Leader"
-                    value={oppmSnapshot.header?.project_leader_text || 'Not set'}
-                    detail={oppmSnapshot.header?.completed_by_text ? `Completed by: ${oppmSnapshot.header.completed_by_text}` : undefined}
-                    tone="neutral"
-                  />
-                  <StatusTile
-                    label="Progress"
-                    value={`${snapshotCompletedTasks}/${snapshotTasks.length} tasks completed`}
-                    detail={`Timeline rows: ${oppmSnapshot.timeline?.length ?? 0}`}
-                    tone={snapshotCompletedTasks > 0 ? 'success' : 'warning'}
-                  />
-                </div>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-
         {/* ── OCR Import panel ──────────────────────────────────────── */}
         {showOcrPanel ? (
           <div className="mb-4 rounded-2xl border border-violet-200 bg-white shadow-sm overflow-hidden">
@@ -1390,27 +1112,40 @@ export function OPPMView() {
           </div>
         ) : null}
 
-        {inAppEditMode ? (
-          <div
-            className="bg-white border border-gray-300 rounded-lg overflow-hidden"
-            style={{ height: 'calc(100vh - 120px)', minHeight: 520 }}
-          >
-            <Workbook
-              key={sheetKey}
-              ref={sheetRef}
-              data={sheetData}
-              allowEdit={true}
-              showToolbar={true}
-              showFormulaBar={true}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              onChange={(data: any[]) => setSheetData(data)}
-              onOp={() => {}}
-            />
+        {!hasLinkedSheet && inAppEditMode ? (
+          <div className="space-y-2">
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+              Blank in-app editor only. Link or open a real Google Sheet to edit the live form safely.
+            </div>
+
+            <div
+              className="bg-white border border-gray-300 rounded-lg overflow-hidden"
+              style={{ height: 'calc(100vh - 160px)', minHeight: 520 }}
+            >
+              {sheetData.length > 0 ? (
+                <Workbook
+                  key={sheetKey}
+                  ref={sheetRef}
+                  data={sheetData}
+                  allowEdit={true}
+                  showToolbar={true}
+                  showFormulaBar={true}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  onChange={(data: any[]) => { if (data.length > 0) setSheetData(data) }}
+                  onOp={() => {}}
+                />
+              ) : (
+                <div className="flex items-center justify-center gap-3 h-full">
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                  <span className="text-sm text-gray-400">Preparing editor…</span>
+                </div>
+              )}
+            </div>
           </div>
         ) : !hasLinkedSheet ? (
           <MessagePanel
             title="No linked Google Sheet yet"
-            description="Link a Google Sheet above to load your existing OPPM form, or click 'Edit in App' to create and edit a blank OPPM template directly here."
+            description="Link a Google Sheet above to work on the real OPPM form in Google Sheets, or click 'Edit in App' to sketch a blank template locally."
             tone="neutral"
             actions={(
               <button
@@ -1422,59 +1157,29 @@ export function OPPMView() {
               </button>
             )}
           />
-        ) : sheetLoadState === 'loading' ? (
-          <div className="flex items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white py-24">
-            <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-            <span className="text-sm text-gray-500">Loading linked Google Sheet…</span>
-          </div>
         ) : sheetLoadState === 'preview' && previewSrc ? (
           <div className="space-y-4">
-            {editLoadError ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4">
-                <p className="text-sm font-semibold text-red-800">Could not load Google Sheet for editing</p>
-                <p className="mt-1 text-xs text-red-700">{editLoadError}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => { setEditLoadError(null); handleToggleEditMode() }}
-                    disabled={isEditLoading}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-                  >
-                    {isEditLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                    Retry
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenBlankTemplate}
-                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
-                  >
-                    Open blank OPPM template
-                  </button>
-                </div>
-              </div>
-            ) : null}
             <div className="overflow-hidden rounded-xl border border-sky-200 bg-white shadow-sm">
               <div className="border-b border-sky-100 bg-sky-50 px-4 py-3 flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-sky-900">Live Browser Preview</p>
+                  <p className="text-sm font-semibold text-sky-900">Live Google Sheet Editor</p>
                   <p className="mt-1 text-xs text-sky-800">
-                    This preview is read-only inside the app. Click <strong>Edit in App</strong> to open a fully editable spreadsheet editor with border, color, and formatting tools.
+                    Edit the linked Google Sheet directly inside this page. Changes are written by Google Sheets in real time, so the original form stays intact.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={handleToggleEditMode}
-                  disabled={isEditLoading}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70"
+                  onClick={handleOpenLinkedSheet}
+                  disabled={!linkedSheetUrl}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {isEditLoading ? (
-                    <><Loader2 className="h-3 w-3 animate-spin" /> Loading Sheet…</>
-                  ) : 'Edit in App'}
+                  <ExternalLink className="h-3 w-3" />
+                  Open in New Tab
                 </button>
               </div>
               <iframe
                 key={previewSrc}
-                title="Linked Google Sheet Preview"
+                title="Linked Google Sheet Editor"
                 src={previewSrc}
                 className="h-[70vh] min-h-[520px] w-full border-0 bg-white"
                 loading="lazy"
@@ -1485,23 +1190,23 @@ export function OPPMView() {
         ) : sheetLoadState === 'preview' ? (
           <MessagePanel
             title="Linked Google Sheet Preview Unavailable"
-            description="The page is in browser preview mode, but no preview URL could be built from the current Google Sheet link."
-            detail={sheetLoadError || 'Save a valid Google Sheet URL or spreadsheet ID to enable live preview inside the OPPM page.'}
+            description="A linked Google Sheet exists, but the app could not build an embeddable preview for it."
+            detail={sheetLoadError || 'Open the linked Google Sheet directly to edit the live form.'}
             tone="info"
-            actions={(
+            actions={linkedSheetUrl ? (
               <button
                 type="button"
-                onClick={handleToggleEditMode}
-                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                onClick={handleOpenLinkedSheet}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
               >
-                Edit blank OPPM in App
+                Open in Google Sheets
               </button>
-            )}
+            ) : undefined}
           />
         ) : sheetLoadState === 'error' ? (
           <MessagePanel
             title="Linked Google Sheet unavailable"
-            description={sheetLoadError || 'The linked Google Sheet could not be loaded into the app.'}
+            description={sheetLoadError || 'The linked Google Sheet could not be prepared inside the app.'}
             tone="danger"
             actions={(
               <>
@@ -1510,11 +1215,11 @@ export function OPPMView() {
                   onClick={() => setSheetRefreshToken((value) => value + 1)}
                   className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
                 >
-                  Retry App Render
+                  Retry Preview
                 </button>
                 <button
                   type="button"
-                  onClick={() => linkedSheetUrl && window.open(linkedSheetUrl, '_blank', 'noopener,noreferrer')}
+                  onClick={handleOpenLinkedSheet}
                   disabled={!linkedSheetUrl}
                   className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50"
                 >
@@ -1536,7 +1241,7 @@ export function OPPMView() {
               showToolbar={true}
               showFormulaBar={true}
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              onChange={(data: any[]) => setSheetData(data)}
+              onChange={(data: any[]) => { if (data.length > 0) setSheetData(data) }}
               onOp={() => {}}
             />
           </div>

@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:native": "cross-env API_PROXY_BASE= vite",
+    "dev:native": "cross-env API_PROXY_BASE=http://127.0.0.1:8080 vite",
+    "dev:docker": "cross-env API_PROXY_BASE=http://127.0.0.1:80 vite",
+    "dev:direct": "cross-env API_PROXY_BASE= vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

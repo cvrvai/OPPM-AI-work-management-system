@@ -1,6 +1,6 @@
 """OPPM routes — objectives, timeline, costs, sub-objectives, task-owners, deliverables, forecasts, risks, export."""
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_admin, require_write
@@ -448,6 +448,17 @@ async def push_google_sheet_fill_route(
         data.tasks,
         data.members,
         data.explicit_mapping,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/save")
+async def save_fortune_sheet_to_google_sheet_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+):
+    raise HTTPException(
+        status_code=409,
+        detail="In-app Google Sheet saving is disabled. Open the linked Google Sheet directly to edit it safely.",
     )
 
 

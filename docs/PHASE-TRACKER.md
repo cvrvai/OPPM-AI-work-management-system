@@ -1,36 +1,40 @@
 # Current Phase Tracker
 
 ## Task
-Reject Unresolved Google Sheets Push Targets
+Embed live Google Sheets editing in the OPPM page
 
 ## Goal
-Prevent `Push AI Fill` from reporting success when the workbook does not match either the helper-sheet profile or the legacy OPPM layout, so unresolved pushes fail with a clear error before any write occurs.
+Keep linked OPPM sheets editable inside the website by embedding the real Google Sheets editor in the page, while still avoiding the destructive in-app save-back path.
 
 ## Plan
 
-### Phase 1: Trace And Scope
-- [x] Confirm the unresolved mapping path still writes helper/export sheets and returns success
-- [x] Verify this creates a false-positive success message when the visible OPPM sheet is not actually targeted
+### Phase 1: Confirm editor embedding is feasible
+- [x] Verify the real Google Sheets edit URL can load inside the page iframe
+- [x] Confirm this gives website-side editing with Google-backed real-time persistence
 
-### Phase 2: Backend Guard
-- [x] Fail fast when helper-sheet detection fails and the legacy OPPM mapping remains unresolved
-- [x] Return a clear error message that explains the workbook layout was not recognized
+### Phase 2: Switch the linked-sheet surface
+- [x] Replace preview-mode linked-sheet iframe URLs with edit-mode URLs
+- [x] Remove the click-through overlay so users can edit directly inside the website
+- [x] Keep the backend destructive save endpoint disabled
 
-### Phase 3: Regression Coverage
-- [x] Add a focused test proving unresolved pushes stop before any sheet write occurs
-- [x] Run the targeted backend mapping test suite
+### Phase 3: Validate
+- [x] Run focused frontend validation after the iframe change
+- [x] Re-check the live OPPM page to confirm the embedded editor is interactive
 
 ## Status
-Completed
+Completed and validated.
 
 ## Expected Files
-- services/core/services/google_sheets_service.py
-- services/core/tests/test_google_sheets_mapping.py
+- frontend/src/pages/OPPMView.tsx
+- docs/oppm/google-sheets-linked-form.md
 - docs/PHASE-TRACKER.md
 
 ## Verification
-- pytest services/core/tests/test_google_sheets_mapping.py (pass)
+- `Set-Location "c:\Users\cheon\work project\internal\OPPM-AI-work-management-system\frontend" ; npm run build`
+- Live page check on `http://localhost:5173/projects/300aa577-1281-4dd0-ab9f-50032edf13b1/oppm`
 
 ## Notes
-- Current user symptom: success toast reports `Auto-target: unresolved` with non-zero helper-sheet row counts, but the workbook does not visually update.
-- Scope is limited to backend push validation and its focused regression tests.
+- The Google Sheets edit URL was verified to load in the page iframe from the live OPPM route.
+- This satisfies the user requirement more directly than click-through launch behavior because editing stays inside the website while Google Sheets remains the source of truth.
+- The destructive custom save-back route remains disabled to protect the original form structure.
+- The live OPPM page now renders the embedded Google Sheets editor directly in the iframe and no longer depends on a click-through overlay for linked-sheet editing.

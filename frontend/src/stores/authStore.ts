@@ -1,4 +1,13 @@
 import { create } from 'zustand'
+import { getAccessToken, getRefreshToken } from '@/lib/tokens'
+import {
+  clearSession,
+  fetchWithSessionRetry,
+  hasStoredSession,
+  persistSession,
+  refreshSessionTokens,
+  subscribeToSessionEvents,
+} from '@/lib/sessionClient'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -29,58 +38,39 @@ interface AuthState {
   getToken: () => string | null
 }
 
+async function fetchCurrentUser(): Promise<User | null> {
+  const response = await fetchWithSessionRetry('/auth/me')
+  if (!response.ok) {
+    return null
+  }
+
+  return response.json() as Promise<User>
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   loading: true,
   isAuthenticated: false,
 
-  getToken: () => localStorage.getItem('access_token'),
+  getToken: () => getAccessToken(),
 
   initialize: async () => {
-    const token = localStorage.getItem('access_token')
-    if (!token) {
+    if (!hasStoredSession()) {
       set({ user: null, isAuthenticated: false, loading: false })
       return
     }
+
     try {
-      const res = await fetch(`${API_BASE}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.ok) {
-        const user = await res.json()
+      const user = await fetchCurrentUser()
+      if (user) {
         set({ user, isAuthenticated: true, loading: false })
-      } else if (res.status === 401) {
-        // Try refresh
-        const refreshToken = localStorage.getItem('refresh_token')
-        if (refreshToken) {
-          const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-          })
-          if (refreshRes.ok) {
-            const data = await refreshRes.json()
-            localStorage.setItem('access_token', data.access_token)
-            if (data.refresh_token) {
-              localStorage.setItem('refresh_token', data.refresh_token)
-            }
-            const retryRes = await fetch(`${API_BASE}/auth/me`, {
-              headers: { Authorization: `Bearer ${data.access_token}` },
-            })
-            if (retryRes.ok) {
-              const user = await retryRes.json()
-              set({ user, isAuthenticated: true, loading: false })
-              return
-            }
-          }
-        }
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        set({ user: null, isAuthenticated: false, loading: false })
-      } else {
-        set({ user: null, isAuthenticated: false, loading: false })
+        return
       }
+
+      clearSession()
+      set({ user: null, isAuthenticated: false, loading: false })
     } catch {
+      clearSession()
       set({ user: null, isAuthenticated: false, loading: false })
     }
   },
@@ -96,10 +86,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       throw new Error(err.detail)
     }
     const data = await res.json()
-    localStorage.setItem('access_token', data.access_token)
-    if (data.refresh_token) {
-      localStorage.setItem('refresh_token', data.refresh_token)
-    }
+    persistSession(data)
     set({ user: data.user, isAuthenticated: true })
   },
 
@@ -115,10 +102,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
     const data = await res.json()
     if (data.access_token) {
-      localStorage.setItem('access_token', data.access_token)
-      if (data.refresh_token) {
-        localStorage.setItem('refresh_token', data.refresh_token)
-      }
+      persistSession(data)
     }
     if (data.user) {
       set({ user: data.user, isAuthenticated: true })
@@ -126,38 +110,41 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
-    const token = localStorage.getItem('access_token')
+    const token = getAccessToken()
     await fetch(`${API_BASE}/auth/signout`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).catch(() => {})
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    clearSession()
     set({ user: null, isAuthenticated: false })
   },
 
   refreshSession: async () => {
-    const refreshToken = localStorage.getItem('refresh_token')
-    if (!refreshToken) {
+    if (!getRefreshToken()) {
       set({ user: null, isAuthenticated: false })
       return
     }
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      localStorage.setItem('access_token', data.access_token)
-      if (data.refresh_token) {
-        localStorage.setItem('refresh_token', data.refresh_token)
-      }
-    } else {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
+
+    const sessionTokens = await refreshSessionTokens()
+    if (!sessionTokens) {
       set({ user: null, isAuthenticated: false })
+      return
     }
+
+    const user = await fetchCurrentUser()
+    if (!user) {
+      clearSession()
+      set({ user: null, isAuthenticated: false })
+      return
+    }
+
+    set({ user, isAuthenticated: true })
   },
 }))
+
+subscribeToSessionEvents((event) => {
+  if (event.type === 'cleared') {
+    useAuthStore.setState({ user: null, isAuthenticated: false, loading: false })
+  }
+})
 

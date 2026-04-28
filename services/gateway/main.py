@@ -61,10 +61,6 @@ ROUTES: list[tuple[re.Pattern, str, int]] = [
     (re.compile(r"^/api/v1/workspaces/[^/]+/git/"),                "git",  30),
     (re.compile(r"^/api/v1/git/webhook"),                          "git",  30),
     (re.compile(r"^/mcp"),                                         "mcp", 300),
-    (re.compile(r"^/health/core"),                                 "core",  5),
-    (re.compile(r"^/health/ai"),                                   "ai",    5),
-    (re.compile(r"^/health/git"),                                  "git",   5),
-    (re.compile(r"^/health/mcp"),                                  "mcp",   5),
     (re.compile(r"^/api/"),                                        "core",  30),
 ]
 
@@ -77,6 +73,68 @@ app.add_middleware(
     allow_credentials=True,
     max_age=86400,
 )
+
+
+async def _forward_upstream_health(service: str) -> Response:
+    target_base = lb[service].next()
+    if target_base is None:
+        return Response(
+            content=f"Service '{service}' unavailable",
+            status_code=503,
+            headers={"Retry-After": "10"},
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            upstream = await client.get(f"{target_base}/health")
+
+        response = Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type"),
+        )
+        for key, value in upstream.headers.multi_items():
+            if key.lower() not in {"content-length", "transfer-encoding", "connection", "content-type"}:
+                response.headers.append(key, value)
+        return response
+    except httpx.ConnectError:
+        logger.warning("Gateway: cannot reach %s at %s", service, target_base)
+        return Response(
+            content=f"Service '{service}' is not running",
+            status_code=502,
+            headers={"Retry-After": "5"},
+        )
+    except httpx.TimeoutException:
+        logger.warning("Gateway: timeout reaching %s", service)
+        return Response(
+            content=f"Service '{service}' timed out",
+            status_code=504,
+        )
+
+
+@app.get("/health")
+async def gateway_health() -> dict:
+    return {"status": "ok", "service": "gateway"}
+
+
+@app.get("/health/core")
+async def core_health() -> Response:
+    return await _forward_upstream_health("core")
+
+
+@app.get("/health/ai")
+async def ai_health() -> Response:
+    return await _forward_upstream_health("ai")
+
+
+@app.get("/health/git")
+async def git_health() -> Response:
+    return await _forward_upstream_health("git")
+
+
+@app.get("/health/mcp")
+async def mcp_health() -> Response:
+    return await _forward_upstream_health("mcp")
 
 
 # ── Proxy handler ─────────────────────────────────────────────────────────────
@@ -155,6 +213,3 @@ async def proxy(request: Request, path: str) -> Response:
         )
 
 
-@app.get("/health")
-async def gateway_health() -> dict:
-    return {"status": "ok", "service": "gateway"}

@@ -6,7 +6,7 @@ Use this document when you need to understand:
 
 - how a project is linked to an existing Google Sheet
 - why edits made in Google Sheets can appear inside the app after reload
-- when the app uses backend rendering versus browser preview mode
+- how linked sheets are now edited directly inside the website
 - what the current buttons and UI states mean
 - which parts require backend Google credentials and which parts do not
 
@@ -14,21 +14,19 @@ Use this document when you need to understand:
 
 The OPPM page can use an existing Google Sheet as the primary project form display instead of the older in-app scaffold-only sheet flow.
 
-This is intentionally split into two rendering paths:
+Linked sheets now use one safe path inside the app:
 
-1. **Backend app render**
-   The backend exports the linked Google Sheet as XLSX, the frontend converts it to FortuneSheet data, and the app renders the sheet inside the page.
-2. **Browser preview mode**
-   If backend rendering is unavailable, the frontend embeds a live Google Sheets browser preview directly in an `iframe`.
+1. **Embedded Google Sheets editor**
+  The frontend embeds the real Google Sheets edit URL directly in an `iframe`, so users edit the linked spreadsheet inside the OPPM page while Google Sheets remains the source of truth.
 
-Browser preview mode is what makes the following behavior possible:
+This is what makes the following behavior possible:
 
 - edit a value in Google Sheets
 - return to the OPPM page
 - reload or refresh preview
 - see the latest Google Sheet content inside the app
 
-That works because the preview is reading the live Google Sheet from Google, not a stale local copy.
+That works because the embedded editor is the live Google Sheet itself, not a stale local copy or an in-app workbook export.
 
 ## Files And Ownership
 
@@ -90,38 +88,15 @@ That response tells the frontend:
 - which spreadsheet is linked
 - whether there is a non-fatal backend configuration warning
 
-### 3. Choose a render path
+### 3. Render and edit the linked sheet
 
-The frontend uses one of these paths:
+For linked sheets, the frontend now follows this flow:
 
-#### Path A: Backend app render
-
-Used when backend Google credentials are available.
-
-Flow:
-
-1. Frontend requests `GET /oppm/google-sheet/xlsx`
-2. Core uses Google Drive export to fetch XLSX bytes for the linked sheet
-3. Frontend converts the XLSX to FortuneSheet data with `@corbe30/fortune-excel`
-4. The page renders the sheet through `@fortune-sheet/react`
-
-This is the preferred in-app render path because it keeps the sheet inside the app’s spreadsheet renderer.
-
-#### Path B: Browser preview mode
-
-Used when backend render is unavailable, including these cases:
-
-- Google service-account file is missing
-- Google libraries are missing in the backend container
-- backend export fails but the Google Sheet URL/ID is still valid
-
-Flow:
-
-1. Frontend builds `https://docs.google.com/spreadsheets/d/<id>/preview?...`
+1. Frontend builds `https://docs.google.com/spreadsheets/d/<id>/edit?...`
 2. The page embeds that URL in an `iframe`
-3. The browser shows the live Google Sheet preview using the user’s own Google session
+3. Users edit the live spreadsheet directly inside the website
 
-This is why edits made directly in Google Sheets can appear in the OPPM page after reload.
+This keeps editing inside the website while all changes still happen on the original Google Sheet.
 
 ## Current UI States
 
@@ -135,37 +110,21 @@ UI behavior:
 - Save Link is available
 - page shows a no-link placeholder
 
-### Linked sheet with backend app render ready
+### Linked sheet in embedded editor mode
 
 Shown when:
 
 - a sheet is linked
-- backend Google credentials are configured
-- XLSX export succeeds
+- the frontend can build a Google preview URL
 
 UI behavior:
 
-- page shows linked sheet status
-- **Push AI Fill** is enabled
-- app attempts FortuneSheet render from backend XLSX
+- the page presents the embedded editor as the primary linked-sheet experience
+- users edit the live Google Sheet directly inside the page iframe
+- **Open in New Tab** opens the same live sheet in a separate browser tab when needed
+- **Push AI Fill** remains controlled by backend credential availability
 
-### Linked sheet in browser preview mode
-
-Shown when:
-
-- a sheet is linked
-- backend app render is unavailable
-- the frontend can still build a Google preview URL
-
-UI behavior:
-
-- the page presents preview mode as an intentional state, not a crash
-- preview text explains that changes made in Google Sheets can appear after refresh
-- **Refresh Preview** reloads the embedded browser preview
-- **Open in Google Sheets** opens the live sheet in a new tab
-- **Push AI Fill** remains disabled until backend credentials are configured
-
-This is the current recommended fallback for Docker setups that have not yet mounted a Google service-account key.
+This is now the recommended and safest linked-sheet workflow.
 
 ### Linked sheet unavailable
 
@@ -195,9 +154,16 @@ This is the true error state.
 
 This requires backend Google credentials and spreadsheet access.
 
-### Open Sheet
+### Open in New Tab
 
 - opens the linked Google Sheet in Google Sheets directly
+- useful when the user wants the full standalone Google Sheets window
+
+### Edit in App
+
+- only available when there is no linked Google Sheet yet
+- opens a blank local OPPM template for rough drafting inside the app
+- it is not used to write back into linked Google Sheets
 
 ### Unlink
 
@@ -215,14 +181,14 @@ This requires backend Google credentials and spreadsheet access.
 
 ## Backend Credential Requirements
 
-### Not required for browser preview mode
+### Not required for embedded editor mode
 
-The browser preview path does **not** require:
+The embedded editor path does **not** require:
 
 - backend Google service-account credentials
 - Google Drive export from the backend
 
-It depends on the browser being able to view the linked Google Sheet directly.
+It depends on the browser being able to open the linked Google Sheet directly in the user session.
 
 ### Required for backend app render and Push AI Fill
 
@@ -247,10 +213,6 @@ See `docs/docker/README.md` for the Docker wiring details.
 - `PUT /api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet`
 - `DELETE /api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet`
 
-### Render route
-
-- `GET /api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/xlsx`
-
 ### Push route
 
 - `POST /api/v1/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/push`
@@ -258,16 +220,17 @@ See `docs/docker/README.md` for the Docker wiring details.
 ## Important Current Behavior
 
 - The linked Google Sheet is now the primary display path for linked projects.
+- Linked-sheet editing happens in Google Sheets itself, not through an in-app save-back feature.
+- The old in-app linked-sheet save path was disabled because rebuilding the sheet from Fortune cell data could destroy the original form structure.
 - Missing backend Google credentials should block backend render and push, but they should not crash the basic link-state read path.
-- Browser preview mode is read-only inside the app.
+- The embedded editor keeps live Google Sheets behavior inside the app.
 - The current project/task OPPM data can still exist in the backend even when the page is showing the linked Google Sheet instead of the native OPPM form.
 - The native in-app OPPM form endpoints (`header`, `task-items`, `spreadsheet`) are separate from the linked Google Sheet display path.
 
 ## Known Limitations
 
-- Browser preview mode depends on the user already being signed in to Google in the browser.
-- Browser preview mode is not the same as full FortuneSheet render and may look slightly different.
-- In-app editing of Google Sheets is not implemented; edits happen in Google Sheets itself.
+- Embedded editing depends on the user already being signed in to Google in the browser.
+- The embedded editor is Google Sheets itself, so behavior and persistence follow Google Sheets.
 - Push AI Fill is one-way from the system to Google Sheets.
 - The backend does not currently sync arbitrary Google Sheet edits back into the app database models.
 

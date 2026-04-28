@@ -111,6 +111,15 @@ Open one terminal per service (6 total). Run each from the workspace root:
 cd frontend ; npm run dev
 ```
 
+`npm run dev` now proxies `/api` through the native Python gateway on `http://127.0.0.1:8080`, which matches the service startup scripts above.
+
+If you need a different frontend proxy mode:
+
+```powershell
+cd frontend ; npm run dev:docker  # proxy through the Docker gateway on port 80
+cd frontend ; npm run dev:direct  # bypass the gateway and proxy to ports 8000-8003
+```
+
 If you're already inside a service folder (e.g. `services/core/`), just run:
 
 ```powershell
