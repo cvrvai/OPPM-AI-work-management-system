@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from services.google_sheets_service import (
     _push_to_google_sheet,
+    _resolve_oppm_mapping_profile,
     _resolve_explicit_oppm_mapping,
     _resolve_helper_sheet_profile,
     _write_oppm_sheet_values,
@@ -210,6 +211,7 @@ def test_write_oppm_sheet_values_omits_unmapped_fields() -> None:
         "sheet-5",
         fills,
         [],
+        [],
         {
             "source": "explicit_mapping",
             "anchors": {
@@ -231,6 +233,320 @@ def test_write_oppm_sheet_values_omits_unmapped_fields() -> None:
     assert written_ranges == ["'OPPM'!G3", "'OPPM'!G4"]
     assert "'OPPM'!A1" not in written_ranges
     assert "'OPPM'!U1" not in written_ranges
+
+
+def test_resolve_mapping_profile_detects_task_regions_and_people_count(monkeypatch):
+    layout = _build_layout(
+        cells={
+            (1, 1): "Project Leader: Jane Doe",
+            (1, 21): "Project Name: Store Revamp",
+            (3, 1): "Project Objective:",
+            (4, 1): "Deliverable Output:",
+            (5, 1): "Start Date:",
+            (6, 1): "Deadline:",
+            (7, 1): "Sub Objective",
+            (7, 7): "Major Tasks (Deadline)",
+            (7, 21): "Project Completed By: 2026-06-01",
+            (7, 25): "Owner / Priority",
+            (12, 1): "# People working on the project: 3",
+        },
+        merges=[
+            {"startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 6},
+            {"startRowIndex": 3, "endRowIndex": 4, "startColumnIndex": 0, "endColumnIndex": 6},
+            {"startRowIndex": 4, "endRowIndex": 5, "startColumnIndex": 0, "endColumnIndex": 6},
+            {"startRowIndex": 5, "endRowIndex": 6, "startColumnIndex": 0, "endColumnIndex": 6},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 0, "endColumnIndex": 6},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 6, "endColumnIndex": 20},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 20, "endColumnIndex": 24},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 24, "endColumnIndex": 30},
+        ],
+        max_row=80,
+        max_col=40,
+    )
+
+    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+
+    profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-layout")
+
+    assert profile["source"] == "layout_detected"
+    assert profile["task_anchor"]["column"] == "G"
+    assert profile["task_anchor"]["first_row"] == 8
+    assert profile["task_anchor"]["max_rows"] == 4
+    assert profile["anchors"]["people_count"] == "A12"
+    assert profile["regions"]["sub_objectives"]["start_col"] == 1
+    assert profile["regions"]["sub_objectives"]["end_col"] == 6
+    assert profile["regions"]["timeline"]["start_col"] == 21
+    assert profile["regions"]["timeline"]["end_col"] == 24
+    assert profile["regions"]["owners"]["start_col"] == 25
+    assert profile["regions"]["owners"]["end_col"] == 30
+
+
+def test_resolve_mapping_profile_detects_grouped_task_rows(monkeypatch):
+    layout = _build_layout(
+        cells={
+            (1, 8): "Project Leader:",
+            (1, 11): "Project Name:",
+            (2, 8): "Project Objective:",
+            (3, 8): "Deliverable Output:",
+            (4, 8): "Start Date:",
+            (5, 8): "Deadline:",
+            (7, 2): "Sub objective",
+            (7, 9): "Major Tasks (Deadline)",
+            (7, 13): "Project Completed By:",
+            (7, 17): "Owner / Priority",
+            (24, 1): "# People working on the project: 3",
+        },
+        merges=[
+            {"startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 7, "endColumnIndex": 10},
+            {"startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 10, "endColumnIndex": 20},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 1, "endColumnIndex": 7},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 12, "endColumnIndex": 16},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 16, "endColumnIndex": 22},
+            {"startRowIndex": 7, "endRowIndex": 8, "startColumnIndex": 7, "endColumnIndex": 12},
+            {"startRowIndex": 8, "endRowIndex": 9, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 9, "endRowIndex": 10, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 10, "endRowIndex": 11, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 11, "endRowIndex": 12, "startColumnIndex": 7, "endColumnIndex": 12},
+            {"startRowIndex": 12, "endRowIndex": 13, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 13, "endRowIndex": 14, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 14, "endRowIndex": 15, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 15, "endRowIndex": 16, "startColumnIndex": 7, "endColumnIndex": 12},
+            {"startRowIndex": 16, "endRowIndex": 17, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 17, "endRowIndex": 18, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 18, "endRowIndex": 19, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 19, "endRowIndex": 20, "startColumnIndex": 7, "endColumnIndex": 12},
+            {"startRowIndex": 20, "endRowIndex": 21, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 21, "endRowIndex": 22, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 22, "endRowIndex": 23, "startColumnIndex": 8, "endColumnIndex": 12},
+        ],
+        max_row=40,
+        max_col=30,
+    )
+
+    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+
+    profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-grouped")
+
+    assert profile["source"] == "layout_detected"
+    assert profile["task_anchor"]["column"] == "H"
+    assert profile["task_anchor"]["first_row"] == 8
+    assert profile["task_rows"][:5] == [
+        {"row": 8, "kind": "main", "write_col": 8},
+        {"row": 9, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+        {"row": 10, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+        {"row": 11, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+        {"row": 12, "kind": "main", "write_col": 8},
+    ]
+
+
+def test_write_oppm_sheet_values_writes_grouped_task_rows() -> None:
+    service = _FakeService()
+    tasks = [
+        types.SimpleNamespace(index="1", title="Sales Order Modification", deadline=None, status=None, is_sub=False, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="2", title="Stock Management Enhancement", deadline=None, status=None, is_sub=False, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="2.1", title="Update beginning stock", deadline="2026-04-26", status="completed", is_sub=True, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="2.2", title="Stock alert configuration", deadline="2026-05-03", status="todo", is_sub=True, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="2.3", title="Build stock alert", deadline="2026-05-03", status="todo", is_sub=True, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="3", title="Mobile App New Features", deadline=None, status=None, is_sub=False, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="4", title="Purchase Order & Route Optimization", deadline=None, status=None, is_sub=False, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="4.1", title="Key in PO in the system", deadline="2026-05-10", status="todo", is_sub=True, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="4.2", title="Route planning", deadline="2026-05-17", status="todo", is_sub=True, sub_objective_positions=[], owners=[], timeline=[]),
+        types.SimpleNamespace(index="4.3", title="Route planning module", deadline="2026-05-17", status="todo", is_sub=True, sub_objective_positions=[], owners=[], timeline=[]),
+    ]
+
+    rows_written, diagnostics = _write_oppm_sheet_values(
+        service,
+        "sheet-grouped-write",
+        {},
+        tasks,
+        [],
+        {
+            "source": "layout_detected",
+            "anchors": {},
+            "task_anchor": {"column": "H", "first_row": 8, "max_rows": 16},
+            "task_rows": [
+                {"row": 8, "kind": "main", "write_col": 8},
+                {"row": 9, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 10, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 11, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 12, "kind": "main", "write_col": 8},
+                {"row": 13, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 14, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 15, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 16, "kind": "main", "write_col": 8},
+                {"row": 17, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 18, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 19, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 20, "kind": "main", "write_col": 8},
+                {"row": 21, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 22, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+                {"row": 23, "kind": "sub", "index_col": 8, "title_col": 9, "write_col": 9},
+            ],
+            "regions": {},
+            "clear_anchors": [],
+        },
+    )
+
+    assert rows_written == 10
+    assert diagnostics["writes"]["skipped"] == 0
+    assert len(service.values_api.batch_updates) == 1
+
+    written_values = {
+        item["range"]: item["values"]
+        for item in service.values_api.batch_updates[0]["body"]["data"]
+    }
+    assert written_values["'OPPM'!H8"] == [["1  Sales Order Modification"]]
+    assert written_values["'OPPM'!H12"] == [["2  Stock Management Enhancement"]]
+    assert written_values["'OPPM'!H13"] == [["2.1"]]
+    assert written_values["'OPPM'!I13"] == [["Update beginning stock  (2026-04-26)"]]
+    assert written_values["'OPPM'!H14"] == [["2.2"]]
+    assert written_values["'OPPM'!I14"] == [["Stock alert configuration  (2026-05-03)"]]
+    assert written_values["'OPPM'!H15"] == [["2.3"]]
+    assert written_values["'OPPM'!I15"] == [["Build stock alert  (2026-05-03)"]]
+    assert written_values["'OPPM'!H16"] == [["3  Mobile App New Features"]]
+    assert written_values["'OPPM'!H20"] == [["4  Purchase Order & Route Optimization"]]
+    assert written_values["'OPPM'!H21"] == [["4.1"]]
+    assert written_values["'OPPM'!I21"] == [["Key in PO in the system  (2026-05-10)"]]
+    assert written_values["'OPPM'!H23"] == [["4.3"]]
+    assert written_values["'OPPM'!I23"] == [["Route planning module  (2026-05-17)"]]
+
+
+def test_partial_layout_fallback_prefers_detected_leader_anchor_over_stale_a1(monkeypatch):
+    layout = _build_layout(
+        cells={
+            (1, 1): "Project Leader: Project Manager",
+            (2, 9): "Project Leader:",
+            (3, 9): "Project Objective: Text",
+            (4, 9): "Deliverable Output:",
+            (5, 9): "Start Date:",
+            (6, 9): "Deadline:",
+            (7, 7): "Major Tasks (Deadline)",
+            (7, 21): "Project Completed By:",
+        },
+        merges=[
+            {"startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 8, "endColumnIndex": 19},
+            {"startRowIndex": 3, "endRowIndex": 4, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 4, "endRowIndex": 5, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 5, "endRowIndex": 6, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 20, "endColumnIndex": 24},
+        ],
+        max_row=80,
+        max_col=40,
+    )
+
+    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+
+    profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-partial")
+
+    assert profile["source"] == "classic_fallback"
+    assert profile["anchors"]["project_leader"] == "I2"
+    assert "A1" in profile["clear_anchors"]
+    assert "project_name" not in profile["anchors"]
+    assert "project_objective" not in profile["anchors"]
+    assert profile["task_anchor"]["column"] == "G"
+    assert profile["task_anchor"]["first_row"] == 8
+
+
+def test_write_oppm_sheet_values_clears_stale_fallback_anchor() -> None:
+    service = _FakeService()
+
+    _write_oppm_sheet_values(
+        service,
+        "sheet-stale",
+        {"project_leader": "Project Manager"},
+        [],
+        [],
+        {
+            "source": "classic_fallback",
+            "anchors": {"project_leader": "I2"},
+            "task_anchor": {"column": "G", "first_row": 8, "max_rows": 4},
+            "regions": {},
+            "clear_anchors": ["A1"],
+        },
+    )
+
+    assert service.values_api.clears[0]["range"] == "'OPPM'!A1"
+
+
+def test_write_oppm_sheet_values_writes_task_regions() -> None:
+    service = _FakeService()
+    fills = {
+        "project_name": "Store Revamp",
+        "project_objective": "Modernize the storefront",
+        "start_date": "2026-05-04",
+        "deadline": "2026-05-25",
+        "people_count": "2",
+    }
+    tasks = [
+        types.SimpleNamespace(
+            index="1.1",
+            title="Discovery",
+            deadline="2026-05-05",
+            status="in_progress",
+            is_sub=True,
+            sub_objective_positions=[1, 3],
+            owners=[types.SimpleNamespace(member_id="m-1", priority="A")],
+            timeline=[types.SimpleNamespace(week_start="2026-05-04", status="in_progress")],
+        ),
+        types.SimpleNamespace(
+            index="1.2",
+            title="Build",
+            deadline="2026-05-19",
+            status="completed",
+            is_sub=True,
+            sub_objective_positions=[2],
+            owners=[types.SimpleNamespace(member_id="m-2", priority="B")],
+            timeline=[types.SimpleNamespace(week_start="2026-05-18", status="completed")],
+        ),
+    ]
+    members = [
+        types.SimpleNamespace(id="m-1", slot=0, name="Alice"),
+        types.SimpleNamespace(id="m-2", slot=1, name="Bob"),
+    ]
+
+    rows_written, diagnostics = _write_oppm_sheet_values(
+        service,
+        "sheet-6",
+        fills,
+        tasks,
+        members,
+        {
+            "source": "layout_detected",
+            "anchors": {
+                "project_objective": "G3",
+                "people_count": "A12",
+            },
+            "task_anchor": {
+                "column": "G",
+                "first_row": 8,
+                "max_rows": 4,
+            },
+            "regions": {
+                "sub_objectives": {"start_col": 1, "end_col": 3, "first_row": 8, "max_rows": 4},
+                "task_text": {"start_col": 7, "end_col": 20, "first_row": 8, "max_rows": 4},
+                "timeline": {"start_col": 21, "end_col": 24, "first_row": 8, "max_rows": 4},
+                "owners": {"start_col": 25, "end_col": 26, "first_row": 8, "max_rows": 4},
+            },
+        },
+    )
+
+    assert rows_written == 2
+    assert diagnostics["writes"]["skipped"] == 0
+    assert len(service.values_api.batch_updates) == 1
+
+    anchor_ranges = [item["range"] for item in service.values_api.batch_updates[0]["body"]["data"]]
+    assert "'OPPM'!G3" in anchor_ranges
+    assert "'OPPM'!A12" in anchor_ranges
+
+    updates_by_range = {item["range"]: item["body"]["values"] for item in service.values_api.updates}
+    assert updates_by_range["'OPPM'!A8:C9"] == [["✓", "", "✓"], ["", "✓", ""]]
+    assert updates_by_range["'OPPM'!G8:G9"] == [
+        ["      1.1  Discovery  (2026-05-05)"],
+        ["      1.2  Build  (2026-05-19)"],
+    ]
+    assert updates_by_range["'OPPM'!U8:X9"] == [["●", "", "", ""], ["", "", "■", ""]]
+    assert updates_by_range["'OPPM'!Y8:Z9"] == [["A", ""], ["", "B"]]
 
 
 def test_resolve_helper_sheet_profile_uses_summary_labels(monkeypatch):
@@ -341,3 +657,69 @@ def test_push_to_google_sheet_rejects_unresolved_mapping(monkeypatch) -> None:
     assert service.values_api.batch_updates == []
     assert service.values_api.updates == []
     assert service.values_api.clears == []
+
+def test_push_to_google_sheet_writes_oppm_alongside_helper_sheets(monkeypatch) -> None:
+    service = _FakeService()
+    task_sheet_calls: list[str] = []
+
+    monkeypatch.setattr("services.google_sheets_service._build_sheets_service", lambda *_args, **_kwargs: service)
+    monkeypatch.setattr("services.google_sheets_service._ensure_sheet_tabs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "services.google_sheets_service._resolve_helper_sheet_profile",
+        lambda *_args, **_kwargs: {
+            "source": "helper_sheet_profile",
+            "summary_anchors": {"project_name": "B2"},
+            "resolved_fields": {"project_name": {"source": "helper_sheet", "target": "OPPM Summary!B2"}},
+        },
+    )
+    monkeypatch.setattr(
+        "services.google_sheets_service._write_summary_helper_sheet_values",
+        lambda *_args, **_kwargs: (
+            9,
+            {
+                "mapping": {"source": "helper_sheet_profile"},
+                "writes": {"attempted": 1, "applied": 1, "skipped": 0},
+            },
+        ),
+    )
+
+    oppm_mapping = {
+        "source": "classic_fallback",
+        "task_anchor": {"column": "H", "first_row": 6, "max_rows": 16},
+        "regions": {},
+        "task_rows": [{"row": 6, "kind": "main", "write_col": 8}],
+        "anchors": {},
+        "clear_anchors": [],
+        "missing_anchors": [],
+    }
+    monkeypatch.setattr("services.google_sheets_service._resolve_oppm_mapping_profile", lambda *_args, **_kwargs: oppm_mapping)
+    monkeypatch.setattr(
+        "services.google_sheets_service._write_oppm_sheet_values",
+        lambda *_args, **_kwargs: (
+            10,
+            {
+                "mapping": oppm_mapping,
+                "writes": {"attempted": 4, "applied": 4, "skipped": 0},
+            },
+        ),
+    )
+
+    def _capture_sheet_write(_service, _spreadsheet_id, sheet_title, _headers, _rows):
+        task_sheet_calls.append(sheet_title)
+
+    monkeypatch.setattr("services.google_sheets_service._write_sheet_with_existing_headers", _capture_sheet_write)
+
+    result = _push_to_google_sheet(
+        {"client_email": "oppm-editor@example.com"},
+        "sheet-helper-oppm",
+        {"project_name": "Store Revamp"},
+        [types.SimpleNamespace(index="1", title="Task", deadline=None, status=None, is_sub=False, owners=[], timeline=[])],
+        [types.SimpleNamespace(id="m-1", slot=0, name="Alice")],
+        None,
+    )
+
+    assert result["updated_sheets"] == ["OPPM", "OPPM Summary", "OPPM Tasks", "OPPM Members"]
+    assert result["rows_written"]["oppm"] == 10
+    assert result["rows_written"]["summary"] == 9
+    assert result["diagnostics"]["mapping"]["source"] == "classic_fallback"
+    assert task_sheet_calls == ["OPPM Tasks", "OPPM Members"]

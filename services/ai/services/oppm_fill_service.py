@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.llm import call_with_fallback
 from infrastructure.llm.base import ProviderUnavailableError
 from shared.models.ai_model import AIModel
-from shared.models.oppm import OPPMHeader, OPPMObjective, OPPMTimelineEntry
+from shared.models.oppm import OPPMHeader, OPPMObjective, OPPMSubObjective, OPPMTimelineEntry, TaskSubObjective
 from shared.models.project import Project, ProjectMember
 from shared.models.task import Task, TaskOwner
 from shared.models.user import User
@@ -20,6 +20,7 @@ from shared.models.workspace import WorkspaceMember
 logger = logging.getLogger(__name__)
 
 _FALLBACK_PRIORITY_ORDER = ("A", "B", "C")
+_DEFAULT_OLLAMA_MODEL_ID = "gemma4:31b-cloud"
 
 
 def _resolve_member_name(workspace_member: WorkspaceMember | None, user: User | None) -> str | None:
@@ -51,6 +52,7 @@ async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | 
             select(AIModel).where(AIModel.workspace_id == workspace_id, AIModel.is_active == True)
         )
         models = list(result.scalars().all())
+        models.sort(key=lambda current_model: current_model.model_id != _DEFAULT_OLLAMA_MODEL_ID)
 
     serialized = [
         {
@@ -73,7 +75,7 @@ async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | 
             {
                 "id": "default-ollama",
                 "provider": "ollama",
-                "model_id": "kimi-k2.5:cloud",
+                "model_id": _DEFAULT_OLLAMA_MODEL_ID,
                 "api_key": None,
                 "base_url": ollama_url,
                 "endpoint_url": ollama_url,
@@ -241,6 +243,19 @@ async def fill_oppm(
                 "quality": row.quality,
             })
 
+    sub_objective_positions_by_task: dict[str, list[int]] = {str(task_id): [] for task_id in task_ids}
+    if task_ids:
+        sub_objective_result = await session.execute(
+            select(TaskSubObjective.task_id, OPPMSubObjective.position)
+            .join(OPPMSubObjective, OPPMSubObjective.id == TaskSubObjective.sub_objective_id)
+            .where(TaskSubObjective.task_id.in_(task_ids))
+            .order_by(OPPMSubObjective.position)
+        )
+        for row in sub_objective_result.all():
+            position = int(row.position)
+            if 1 <= position <= 6:
+                sub_objective_positions_by_task[str(row.task_id)].append(position)
+
     # ── Build OPPM task list: objectives as main-task rows, root tasks as sub-rows ──
     # Template layout:  Row N   = "X. <Objective title>"  (is_sub=False)
     #                   Row N+1 = "X.1 <Task title>"      (is_sub=True)
@@ -299,6 +314,7 @@ async def fill_oppm(
             "deadline": None,
             "status": None,
             "is_sub": False,
+            "sub_objective_positions": [],
             "owners": [],
             "timeline": [],
         })
@@ -332,6 +348,7 @@ async def fill_oppm(
                 "deadline": _fmt(task.due_date),
                 "status": task.status,
                 "is_sub": True,
+                "sub_objective_positions": sub_objective_positions_by_task.get(str(task.id), []),
                 "owners": _get_task_owners(task),
                 "timeline": timeline_by_task.get(str(task.id), []),
             })
@@ -344,6 +361,7 @@ async def fill_oppm(
             "deadline": None,
             "status": None,
             "is_sub": False,
+            "sub_objective_positions": [],
             "owners": [],
             "timeline": [],
         })
@@ -356,6 +374,7 @@ async def fill_oppm(
                 "deadline": _fmt(task.due_date),
                 "status": task.status,
                 "is_sub": True,
+                "sub_objective_positions": sub_objective_positions_by_task.get(str(task.id), []),
                 "owners": _get_task_owners(task),
                 "timeline": timeline_by_task.get(str(task.id), []),
             })

@@ -8,7 +8,7 @@ Model assignment
 - Stage 1 (OCR):  gemma4:31b-cloud  (hard-coded in ocr_service.py)
 - Stage 2 (Fill): whatever Ollama model is already active in the workspace
                   (resolved via the same _get_models() helper used by
-                   oppm_fill_service.py, falling back to kimi-k2.5:cloud)
+                   oppm_fill_service.py, falling back to gemma4:31b-cloud)
 """
 
 import json

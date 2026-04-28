@@ -53,6 +53,7 @@ class GoogleSheetPushTaskItem(BaseModel):
     deadline: Optional[str] = None
     status: Optional[str] = None
     is_sub: bool
+    sub_objective_positions: list[int] = Field(default_factory=list)
     owners: list[GoogleSheetPushTaskOwner] = Field(default_factory=list)
     timeline: list[GoogleSheetPushTimelineItem] = Field(default_factory=list)
 

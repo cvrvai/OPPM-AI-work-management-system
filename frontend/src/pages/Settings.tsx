@@ -1450,6 +1450,7 @@ const AI_MODEL_PRESETS: {
     models: [
       { name: 'GPT-OSS 120B', model_id: 'gpt-oss:120b-cloud', description: 'Large open-source model', endpoint: OLLAMA_CLOUD_ENDPOINT },
       { name: 'GPT-OSS 20B', model_id: 'gpt-oss:20b-cloud', description: 'Medium open-source model', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'Gemma 4 31B', model_id: 'gemma4:31b-cloud', description: 'Google · 31B · Strong general reasoning', endpoint: OLLAMA_CLOUD_ENDPOINT },
       { name: 'DeepSeek V3.1', model_id: 'deepseek-v3.1:671b-cloud', description: 'DeepSeek · 671B · Powerful reasoning', endpoint: OLLAMA_CLOUD_ENDPOINT },
       { name: 'Qwen3 Coder', model_id: 'qwen3-coder:480b-cloud', description: 'Alibaba · Specialized for code', endpoint: OLLAMA_CLOUD_ENDPOINT },
       { name: 'Qwen3 VL', model_id: 'qwen3-vl:235b-cloud', description: 'Alibaba · Vision & language', endpoint: OLLAMA_CLOUD_ENDPOINT },

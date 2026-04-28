@@ -1,7 +1,8 @@
 """Schemas for AI OPPM fill endpoint."""
 
-from pydantic import BaseModel
 from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class OPPMFillRequest(BaseModel):
@@ -15,8 +16,9 @@ class OPPMFillTaskItem(BaseModel):
     deadline: Optional[str] = None  # ISO date or None
     status: Optional[str] = None
     is_sub: bool
-    owners: list["OPPMFillTaskOwnerItem"] = []
-    timeline: list["OPPMFillTimelineItem"] = []
+    sub_objective_positions: list[int] = Field(default_factory=list)
+    owners: list["OPPMFillTaskOwnerItem"] = Field(default_factory=list)
+    timeline: list["OPPMFillTimelineItem"] = Field(default_factory=list)
 
 
 class OPPMFillTaskOwnerItem(BaseModel):
@@ -38,8 +40,8 @@ class OPPMFillMemberItem(BaseModel):
 
 class OPPMFillResponse(BaseModel):
     fills: dict[str, Optional[str]]
-    tasks: list[OPPMFillTaskItem] = []
-    members: list[OPPMFillMemberItem] = []
+    tasks: list[OPPMFillTaskItem] = Field(default_factory=list)
+    members: list[OPPMFillMemberItem] = Field(default_factory=list)
     """
     fills keys: project_name, project_leader, project_leader_member_id,
                 start_date, deadline, project_objective,
