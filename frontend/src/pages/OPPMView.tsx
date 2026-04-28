@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { transformExcelToFortune } from '@corbe30/fortune-excel'
-import { ArrowLeft, ExternalLink, Link2, Loader2, Send, Unplug } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ExternalLink, FileImage, Link2, Loader2, Send, ScanLine, Unplug, X, CloudDownload } from 'lucide-react'
 import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
@@ -35,6 +35,22 @@ interface GoogleSheetPushResult {
     summary: number
     tasks: number
     members: number
+  }
+  diagnostics?: {
+    mapping?: {
+      source?: string
+      resolved_fields?: Record<string, {
+        source?: string
+        target?: string
+      }>
+      task_anchor?: {
+        column?: string
+        first_row?: number
+      }
+    }
+    writes?: {
+      skipped?: number
+    }
   }
 }
 
@@ -100,6 +116,24 @@ interface OppmHeaderSnapshot {
   completed_by_text?: string | null
   people_count?: number | null
 }
+
+// ── OCR fill types ────────────────────────────────────────────────────────
+interface OcrFillTaskItem {
+  index: string
+  title: string
+  deadline?: string | null
+  status?: string | null
+  is_sub: boolean
+}
+
+interface OcrFillResponse {
+  fills: Record<string, string | null>
+  tasks: OcrFillTaskItem[]
+  ocr_raw_text: string
+  ocr_fields: Record<string, string>
+}
+
+type OcrStage = 'idle' | 'scanning' | 'mapping' | 'done' | 'error'
 
 interface OppmCombinedSnapshot {
   project?: OppmProjectSnapshot
@@ -190,6 +224,148 @@ function getGoogleSheetEmbedUrl(spreadsheetId: string | null): string | null {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Blank OPPM template (Fortune Sheet format)
+// ══════════════════════════════════════════════════════════════
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createBlankOppmTemplate(): any[] {
+  // Column layout (0-indexed):
+  //  0–5  : Sub objective     (6 cols, A–F)
+  //  6–12 : Major Tasks       (7 cols, G–M)
+  // 13–25 : Week timeline W1–W13 (13 cols, N–Z)
+  // 26–28 : People / owner    (3 cols, AA–AC)
+  const SUB_COLS = 6
+  const TASK_COLS = 7
+  const WEEK_COLS = 13
+  const TASK_COL = SUB_COLS           // 6
+  const WEEK_START = SUB_COLS + TASK_COLS  // 13
+  const PEOPLE_START = WEEK_START + WEEK_COLS  // 26
+  const TOTAL_COLS = PEOPLE_START + 3  // 29
+
+  const HEADER_ROW = 1
+  const COL_HEADER_ROW = 2
+  const TASK_START_ROW = 3
+  const ROWS_PER_OBJ = 4
+  const OBJ_COUNT = 5
+  const FOOTER_ROW = TASK_START_ROW + OBJ_COUNT * ROWS_PER_OBJ
+  const TOTAL_ROWS = FOOTER_ROW + 4
+
+  const WEEK_LABELS = ['W1','W2','W3','W4','W5','W6','W7','W8','W9','W10','W11','W12','W13']
+  const PEOPLE_LABELS = ['Member 1', 'Member 2', 'Member 3']
+  const OBJ_LABELS = ['1. Documentation', '2. Data', '3. Training', '4. Deployment', '5. Review']
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const celldata: Array<{ r: number; c: number; v: any }> = []
+  const config: {
+    merge: Record<string, { r: number; c: number; rs: number; cs: number }>
+    borderInfo: unknown[]
+    rowlen: Record<string, number>
+    columnlen: Record<string, number>
+  } = { merge: {}, borderInfo: [], rowlen: {}, columnlen: {} }
+
+  // Column widths
+  for (let c = 0; c < SUB_COLS; c++) config.columnlen[String(c)] = 72
+  for (let c = TASK_COL; c < TASK_COL + TASK_COLS; c++) config.columnlen[String(c)] = 88
+  for (let c = WEEK_START; c < WEEK_START + WEEK_COLS; c++) config.columnlen[String(c)] = 40
+  for (let c = PEOPLE_START; c < PEOPLE_START + 3; c++) config.columnlen[String(c)] = 65
+
+  // Row heights
+  config.rowlen['0'] = 18
+  config.rowlen[String(HEADER_ROW)] = 44
+  config.rowlen[String(COL_HEADER_ROW)] = 32
+  for (let r = TASK_START_ROW; r <= FOOTER_ROW + 1; r++) config.rowlen[String(r)] = 26
+
+  // Helpers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const push = (r: number, c: number, v: any) => celldata.push({ r, c, v })
+  const merge = (r: number, c: number, rs: number, cs: number) => {
+    config.merge[`${r}_${c}`] = { r, c, rs, cs }
+    for (let dr = 0; dr < rs; dr++) {
+      for (let dc = 0; dc < cs; dc++) {
+        if (dr > 0 || dc > 0) celldata.push({ r: r + dr, c: c + dc, v: { mc: { r, c } } })
+      }
+    }
+  }
+
+  // ── Row 1: project header ───────────────────────────────────
+  push(HEADER_ROW, 0, {
+    v: 'Project Name', m: 'Project Name', bl: 1, ht: 1, vt: 0,
+    mc: { r: HEADER_ROW, c: 0, rs: 1, cs: SUB_COLS },
+  })
+  merge(HEADER_ROW, 0, 1, SUB_COLS)
+
+  push(HEADER_ROW, TASK_COL, {
+    v: 'Project Leader: Project Manager', m: 'Project Leader: Project Manager',
+    bl: 1, ht: 1, vt: 0,
+    mc: { r: HEADER_ROW, c: TASK_COL, rs: 1, cs: TASK_COLS },
+  })
+  merge(HEADER_ROW, TASK_COL, 1, TASK_COLS)
+
+  // ── Row 2: column headers ───────────────────────────────────
+  push(COL_HEADER_ROW, 0, {
+    v: 'Sub objective', m: 'Sub objective', bl: 1, ht: 1, vt: 0,
+    bg: '#D0E4F5',
+    mc: { r: COL_HEADER_ROW, c: 0, rs: 1, cs: SUB_COLS },
+  })
+  merge(COL_HEADER_ROW, 0, 1, SUB_COLS)
+
+  push(COL_HEADER_ROW, TASK_COL, {
+    v: 'Major Tasks    (Deadline)', m: 'Major Tasks    (Deadline)',
+    bl: 1, ht: 1, vt: 0, bg: '#D0E4F5',
+    mc: { r: COL_HEADER_ROW, c: TASK_COL, rs: 1, cs: TASK_COLS },
+  })
+  merge(COL_HEADER_ROW, TASK_COL, 1, TASK_COLS)
+
+  WEEK_LABELS.forEach((week, i) => {
+    push(COL_HEADER_ROW, WEEK_START + i, {
+      v: week, m: week, bl: 1, ht: 1, vt: 0, bg: '#1E3A5F', fc: '#FFFFFF',
+    })
+  })
+
+  PEOPLE_LABELS.forEach((person, i) => {
+    push(COL_HEADER_ROW, PEOPLE_START + i, {
+      v: person, m: person, bl: 1, ht: 1, vt: 0, bg: '#D0E4F5',
+    })
+  })
+
+  // ── Task rows ───────────────────────────────────────────────
+  OBJ_LABELS.forEach((label, objIdx) => {
+    const objRow = TASK_START_ROW + objIdx * ROWS_PER_OBJ
+    const bg = objIdx % 2 === 0 ? '#F9FAFB' : '#FFFFFF'
+
+    push(objRow, 0, {
+      v: label, m: label, bl: 1, ht: 1, vt: 0, bg,
+      mc: { r: objRow, c: 0, rs: ROWS_PER_OBJ, cs: SUB_COLS },
+    })
+    merge(objRow, 0, ROWS_PER_OBJ, SUB_COLS)
+
+    for (let t = 0; t < ROWS_PER_OBJ; t++) {
+      const r = objRow + t
+      push(r, TASK_COL, {
+        v: '', m: '', ht: 0, bg,
+        mc: { r, c: TASK_COL, rs: 1, cs: TASK_COLS },
+      })
+      merge(r, TASK_COL, 1, TASK_COLS)
+    }
+  })
+
+  // ── Footer ──────────────────────────────────────────────────
+  push(FOOTER_ROW, 0, {
+    v: 'Project Completed By:', m: 'Project Completed By:', bl: 1, ht: 0, vt: 0,
+    mc: { r: FOOTER_ROW, c: 0, rs: 1, cs: SUB_COLS },
+  })
+  merge(FOOTER_ROW, 0, 1, SUB_COLS)
+
+  push(FOOTER_ROW, TASK_COL, {
+    v: '', m: '', ht: 0, mc: { r: FOOTER_ROW, c: TASK_COL, rs: 1, cs: TASK_COLS },
+  })
+  merge(FOOTER_ROW, TASK_COL, 1, TASK_COLS)
+
+  push(FOOTER_ROW, PEOPLE_START, { v: 'People Working: 0', m: 'People Working: 0', bl: 1, ht: 0, vt: 0 })
+
+  return [{ name: 'OPPM', celldata, config, row: TOTAL_ROWS, column: TOTAL_COLS }]
+}
+
+// ══════════════════════════════════════════════════════════════
 // OPPMView
 // ══════════════════════════════════════════════════════════════
 export function OPPMView() {
@@ -210,11 +386,25 @@ export function OPPMView() {
   const [sheetLoadState, setSheetLoadState] = useState<'idle' | 'loading' | 'ready' | 'preview' | 'error'>('idle')
   const [sheetLoadError, setSheetLoadError] = useState<string | null>(null)
   const [sheetRefreshToken, setSheetRefreshToken] = useState(0)
+  const [inAppEditMode, setInAppEditMode] = useState(false)
+  const [isEditLoading, setIsEditLoading] = useState(false)
+  const [editLoadError, setEditLoadError] = useState<string | null>(null)
   const [showDraftComposer, setShowDraftComposer] = useState(false)
   const [draftBrief, setDraftBrief] = useState('')
   const [pendingDraft, setPendingDraft] = useState<SuggestPlanResponse | null>(null)
   const [showControlPanel, setShowControlPanel] = useState(false)
   const [showNativeSnapshot, setShowNativeSnapshot] = useState(true)
+
+  // OCR Import state
+  const [showOcrPanel, setShowOcrPanel] = useState(false)
+  const [ocrFile, setOcrFile] = useState<File | null>(null)
+  const [ocrStage, setOcrStage] = useState<OcrStage>('idle')
+  const [ocrError, setOcrError] = useState<string | null>(null)
+  const [ocrResult, setOcrResult] = useState<OcrFillResponse | null>(null)
+  const [showOcrRawText, setShowOcrRawText] = useState(false)
+  const [isFetchingLinkedSheet, setIsFetchingLinkedSheet] = useState(false)
+  const ocrInputRef = React.useRef<HTMLInputElement>(null)
+
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
 
   const googleSheetQuery = useQuery({
@@ -267,15 +457,24 @@ export function OPPMView() {
 
   const pushToGoogleSheet = useMutation({
     mutationFn: async () => {
-      const fill = await api.post(`${wsPath}/projects/${id}/ai/oppm-fill`, {})
+      const fill = await api.post<Record<string, unknown>>(`${wsPath}/projects/${id}/ai/oppm-fill`, {})
       return api.post<GoogleSheetPushResult>(`${wsPath}/projects/${id}/oppm/google-sheet/push`, fill)
     },
     onSuccess: (data) => {
-      const oppmInfo = typeof data.rows_written.oppm === 'number'
-        ? ` OPPM rows: ${data.rows_written.oppm}.`
+      const oppmWriteInfo = typeof data.rows_written.oppm === 'number' && data.rows_written.oppm > 0
+        ? ` OPPM task rows: ${data.rows_written.oppm}.`
+        : ''
+      const mappingSource = data.diagnostics?.mapping?.source
+      const resolvedFieldCount = data.diagnostics?.mapping?.resolved_fields
+        ? Object.keys(data.diagnostics.mapping.resolved_fields).length
+        : 0
+      const mappingInfo = mappingSource
+        ? mappingSource === 'helper_sheet_profile'
+          ? ` Auto-targeted helper sheets${resolvedFieldCount ? ` (${resolvedFieldCount} field${resolvedFieldCount === 1 ? '' : 's'})` : ''}.`
+          : ` Auto-target: ${mappingSource}${resolvedFieldCount ? ` (${resolvedFieldCount} field${resolvedFieldCount === 1 ? '' : 's'})` : ''}.`
         : ''
       setActionNotice(
-        `Pushed AI-filled data to Google Sheets.${oppmInfo} Summary: ${data.rows_written.summary}, tasks: ${data.rows_written.tasks}, members: ${data.rows_written.members}. Check tabs OPPM, OPPM Summary, OPPM Tasks, and OPPM Members for updated values.`
+        `Pushed AI-filled data to Google Sheets.${oppmWriteInfo}${mappingInfo} Summary: ${data.rows_written.summary}, tasks: ${data.rows_written.tasks}, members: ${data.rows_written.members}.`
       )
       setSheetRefreshToken((value) => value + 1)
       queryClient.invalidateQueries({ queryKey: ['oppm-google-sheet', id, ws?.id] })
@@ -303,6 +502,61 @@ export function OPPMView() {
     onError: (error: Error) => setActionNotice(error.message),
   })
 
+  // ── OCR upload mutation ────────────────────────────────────────────────
+  const uploadOcrForm = useMutation({
+    mutationFn: async (file: File) => {
+      setOcrStage('scanning')
+      setOcrError(null)
+      setOcrResult(null)
+      const form = new FormData()
+      form.append('file', file)
+      // Stage 1 completes inside the backend; we show 'mapping' optimistically
+      // after a short delay so the user sees both stage labels.
+      const timer = setTimeout(() => setOcrStage('mapping'), 4000)
+      try {
+        const result = await api.postFormData<OcrFillResponse>(
+          `${wsPath}/projects/${id}/ai/ocr-fill`,
+          form,
+        )
+        clearTimeout(timer)
+        return result
+      } catch (err) {
+        clearTimeout(timer)
+        throw err
+      }
+    },
+    onSuccess: (data) => {
+      setOcrStage('done')
+      setOcrResult(data)
+      setActionNotice('OCR complete — review the detected fields below and apply them to the OPPM.')
+    },
+    onError: (err: Error) => {
+      setOcrStage('error')
+      setOcrError(err.message)
+    },
+  })
+
+  const handleScanLinkedSheet = async () => {
+    if (!googleSheet?.spreadsheet_id) return
+    setIsFetchingLinkedSheet(true)
+    try {
+      // 1. Fetch the linked sheet as XLSX blob from the core service
+      const blob = await api.getBlob(`${wsPath}/projects/${id}/oppm/google-sheet/xlsx`)
+      // 2. Convert to a File object
+      const file = new File([blob], `GoogleSheet_${googleSheet.spreadsheet_id}.xlsx`, {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      setOcrFile(file)
+      // 3. Submit to OCR
+      uploadOcrForm.mutate(file)
+    } catch (err: unknown) {
+      setOcrStage('error')
+      setOcrError(err instanceof Error ? err.message : 'Failed to download linked Google Sheet')
+    } finally {
+      setIsFetchingLinkedSheet(false)
+    }
+  }
+
   const applyOppmDraft = useMutation({
     mutationFn: (commitToken: string) =>
       api.post<CommitPlanResult>(`${wsPath}/projects/${id}/ai/suggest-plan/commit`, { commit_token: commitToken }),
@@ -319,6 +573,60 @@ export function OPPMView() {
     },
     onError: (error: Error) => setActionNotice(error.message),
   })
+
+  const handleToggleEditMode = async () => {
+    if (inAppEditMode) {
+      setInAppEditMode(false)
+      setEditLoadError(null)
+      return
+    }
+    setEditLoadError(null)
+    // If we already have sheet data loaded from the background XLSX fetch, go straight into edit mode.
+    if (sheetData.length > 0) {
+      setInAppEditMode(true)
+      return
+    }
+    // If a linked Google Sheet exists, download its XLSX.
+    // Use a 45-second timeout because the user explicitly requested edit mode and is willing to wait.
+    if (hasLinkedSheet && ws && id) {
+      setIsEditLoading(true)
+      const EDIT_XLSX_TIMEOUT_MS = 45_000
+      try {
+        const blob = await Promise.race([
+          api.getBlob(`${wsPath}/projects/${id}/oppm/google-sheet/xlsx`),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error('Google Sheet download timed out after 45 s — the sheet may be too large or the server is slow. Try again or use a blank template.')),
+              EDIT_XLSX_TIMEOUT_MS,
+            )
+          ),
+        ])
+        const file = new File([blob], `edit-linked-sheet-${id}.xlsx`, {
+          type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+        await transformExcelToFortune(file, setSheetData, setSheetKey, sheetRef)
+        setIsEditLoading(false)
+        setInAppEditMode(true)
+      } catch (err) {
+        setIsEditLoading(false)
+        const reason = err instanceof Error ? err.message : 'Unknown error.'
+        // Stay in preview mode and show a retry banner — do NOT silently open a blank template.
+        setEditLoadError(reason)
+      }
+    } else {
+      // No linked sheet — open a blank OPPM template
+      setSheetData(createBlankOppmTemplate())
+      setSheetKey((k) => k + 1)
+      setInAppEditMode(true)
+    }
+  }
+
+  const handleOpenBlankTemplate = () => {
+    setEditLoadError(null)
+    setSheetData(createBlankOppmTemplate())
+    setSheetKey((k) => k + 1)
+    setInAppEditMode(true)
+  }
 
   const googleSheet = googleSheetQuery.data
   const linkedSheetUrl = googleSheet?.spreadsheet_url ?? ''
@@ -337,6 +645,18 @@ export function OPPMView() {
     : googleSheet?.backend_configuration_error
       ? 'warning'
       : 'neutral'
+  const pushToGoogleSheetDisabledReason = pushToGoogleSheet.isPending
+    ? 'Push AI Fill is already running.'
+    : buttonsDisabled
+      ? 'Open this project inside a workspace before pushing data to Google Sheets.'
+      : googleSheetQuery.isLoading
+        ? 'Checking the linked Google Sheet state before enabling Push AI Fill.'
+        : !googleSheet?.connected
+          ? 'Link a Google Sheet and click Save Link before using Push AI Fill.'
+          : !googleSheet.backend_configured
+            ? (googleSheet.backend_configuration_error || 'Google Sheets write access is not configured on the backend yet.')
+            : null
+  const pushToGoogleSheetDisabled = !!pushToGoogleSheetDisabledReason
 
       useEffect(() => {
         if (!hasLinkedSheet) {
@@ -433,6 +753,21 @@ export function OPPMView() {
           >
             {showControlPanel ? 'Hide controls' : 'Show controls'}
           </button>
+
+          <button
+            type="button"
+            onClick={handleToggleEditMode}
+            disabled={isEditLoading}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-70 ${
+              inAppEditMode
+                ? 'border-blue-300 bg-blue-600 text-white hover:bg-blue-700'
+                : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+            }`}
+          >
+            {isEditLoading ? (
+              <><Loader2 className="h-3 w-3 animate-spin" /> Loading…</>
+            ) : inAppEditMode ? 'Exit Editor' : 'Edit in App'}
+          </button>
         </div>
 
         <div className="pb-3">
@@ -457,9 +792,9 @@ export function OPPMView() {
                         ? 'Backend Google push is unavailable right now, but linked-sheet browser preview can still work.'
                         : 'The backend must be configured with a Google service account before Push AI Fill can run.'}
                   </p>
-                <p className="mt-1 text-xs text-gray-600">
-                  AI push updates `OPPM Summary`, `OPPM Tasks`, and `OPPM Members` tabs. The original `OPPM` tab remains your template layout unless you edit it directly in Google Sheets.
-                </p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Push AI Fill now auto-targets the workbook's stable helper sheets when they are present, then refreshes the linked Summary, Tasks, and Members data without requiring manual mapping.
+                  </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                     <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1">
                       {googleSheetQuery.isLoading
@@ -475,6 +810,16 @@ export function OPPMView() {
                     ) : null}
                   </div>
                 </div>
+
+                <div className="rounded-xl border border-emerald-100 bg-white px-4 py-4 shadow-sm">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">Automatic Sheet Targeting</p>
+                  <p className="mt-2 text-sm text-gray-700">
+                    Push AI Fill now looks for pre-labeled helper tabs such as <span className="font-medium">OPPM Summary</span> and <span className="font-medium">OPPM Tasks</span> and writes into those stable cells first. When the workbook exposes that structure, the visual OPPM tab can update through its existing formulas.
+                  </p>
+                  <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                    No manual JSON setup is required. The backend chooses the safest detected write surface automatically and falls back to the older OPPM-tab placement only when the helper-sheet profile is unavailable.
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -484,10 +829,24 @@ export function OPPMView() {
                 <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-gray-700">
                   Tasks: {snapshotCompletedTasks}/{snapshotTasks.length} completed
                 </span>
+                <span className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-emerald-700">
+                  Auto target enabled
+                </span>
               </div>
             )}
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                id="ocr-import-toggle-btn"
+                type="button"
+                onClick={() => setShowOcrPanel((v) => !v)}
+                disabled={buttonsDisabled}
+                className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ScanLine className="h-4 w-4" />
+                {showOcrPanel ? 'Hide OCR Import' : 'OCR Import'}
+              </button>
+
               <button
                 type="button"
                 onClick={() => setShowDraftComposer((value) => !value)}
@@ -508,15 +867,28 @@ export function OPPMView() {
                 Save Link
               </button>
 
-              <button
-                type="button"
-                onClick={() => pushToGoogleSheet.mutate()}
-                disabled={buttonsDisabled || !googleSheet?.connected || !googleSheet.backend_configured || pushToGoogleSheet.isPending}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {pushToGoogleSheet.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Push AI Fill
-              </button>
+              <div className="group relative inline-flex">
+                <div
+                  title={pushToGoogleSheetDisabledReason ?? undefined}
+                  className={`inline-flex ${pushToGoogleSheetDisabled ? 'cursor-not-allowed' : ''}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => pushToGoogleSheet.mutate()}
+                    disabled={pushToGoogleSheetDisabled}
+                    aria-describedby={pushToGoogleSheetDisabledReason ? 'push-ai-fill-disabled-reason' : undefined}
+                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {pushToGoogleSheet.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Push AI Fill
+                  </button>
+                </div>
+                {pushToGoogleSheetDisabledReason ? (
+                  <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-80 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-lg group-hover:block">
+                    {pushToGoogleSheetDisabledReason}
+                  </div>
+                ) : null}
+              </div>
 
               {!googleSheet?.backend_configured ? (
                 <Link
@@ -547,6 +919,12 @@ export function OPPMView() {
                 Unlink
               </button>
             </div>
+
+            {pushToGoogleSheetDisabledReason ? (
+              <p id="push-ai-fill-disabled-reason" className="mt-2 text-xs text-amber-700">
+                Push AI Fill is unavailable: {pushToGoogleSheetDisabledReason}
+              </p>
+            ) : null}
 
             {primaryNotice ? (
               <div className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
@@ -619,6 +997,235 @@ export function OPPMView() {
                 </div>
               </>
             ) : null}
+          </div>
+        ) : null}
+
+        {/* ── OCR Import panel ──────────────────────────────────────── */}
+        {showOcrPanel ? (
+          <div className="mb-4 rounded-2xl border border-violet-200 bg-white shadow-sm overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between gap-3 border-b border-violet-100 bg-gradient-to-r from-violet-50 to-indigo-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-600 shadow-sm">
+                  <ScanLine className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-violet-500">Two-Stage AI Pipeline</p>
+                  <h2 className="text-sm font-bold text-gray-900">OCR Form Import</h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShowOcrPanel(false); setOcrFile(null); setOcrStage('idle'); setOcrResult(null); setOcrError(null) }}
+                className="rounded-lg p-1.5 text-gray-400 hover:bg-violet-100 hover:text-violet-700 transition-colors"
+                aria-label="Close OCR panel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Model info strip */}
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 font-semibold text-violet-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-500"></span>
+                  Stage 1 · gemma4:31b-cloud (OCR)
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
+                  Stage 2 · Workspace Ollama model (Fill)
+                </span>
+              </div>
+
+              {/* Drop zone */}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => ocrInputRef.current?.click()}
+                onKeyDown={(e) => e.key === 'Enter' && ocrInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const dropped = e.dataTransfer.files[0]
+                  if (dropped) setOcrFile(dropped)
+                }}
+                className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 px-6 py-8 text-center transition-colors hover:border-violet-400 hover:bg-violet-50"
+              >
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm border border-violet-100">
+                  <FileImage className="h-6 w-6 text-violet-500" />
+                </div>
+                {ocrFile ? (
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-gray-900">{ocrFile.name}</p>
+                    <p className="text-xs text-gray-500">{(ocrFile.size / 1024).toFixed(1)} KB · Click to change</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-gray-700">Drop your OPPM form here</p>
+                    <p className="text-xs text-gray-500">PNG, JPEG, WEBP, or PDF · Max 20 MB</p>
+                  </div>
+                )}
+              </div>
+              <input
+                ref={ocrInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+                className="sr-only"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) setOcrFile(f) }}
+              />
+
+              {/* Stage progress */}
+              {ocrStage !== 'idle' && (
+                <div className="rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-2">
+                      {/* Stage 1 badge */}
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                        ocrStage === 'scanning'
+                          ? 'bg-violet-600 text-white'
+                          : ocrStage === 'mapping' || ocrStage === 'done'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {ocrStage === 'scanning'
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : <CheckCircle2 className="h-3 w-3" />}
+                        1. OCR Scan
+                      </span>
+                      {/* Stage 2 badge */}
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                        ocrStage === 'mapping'
+                          ? 'bg-indigo-600 text-white'
+                          : ocrStage === 'done'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-gray-100 text-gray-400'
+                      }`}>
+                        {ocrStage === 'mapping'
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : ocrStage === 'done'
+                            ? <CheckCircle2 className="h-3 w-3" />
+                            : null}
+                        2. AI Mapping
+                      </span>
+                    </div>
+                    {ocrStage === 'done' && (
+                      <span className="text-xs font-semibold text-emerald-700">Complete ✓</span>
+                    )}
+                    {ocrStage === 'error' && (
+                      <span className="text-xs font-semibold text-red-600">Failed</span>
+                    )}
+                  </div>
+                  {ocrError && (
+                    <p className="mt-2 text-xs text-red-600">{ocrError}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  id="ocr-scan-btn"
+                  type="button"
+                  disabled={!ocrFile || uploadOcrForm.isPending || isFetchingLinkedSheet || buttonsDisabled}
+                  onClick={() => ocrFile && uploadOcrForm.mutate(ocrFile)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {uploadOcrForm.isPending
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <ScanLine className="h-4 w-4" />}
+                  {uploadOcrForm.isPending ? 'Processing…' : 'Scan File'}
+                </button>
+
+                {hasLinkedSheet && (
+                  <button
+                    type="button"
+                    disabled={uploadOcrForm.isPending || isFetchingLinkedSheet || buttonsDisabled}
+                    onClick={handleScanLinkedSheet}
+                    className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-white px-4 py-2.5 text-sm font-semibold text-violet-700 shadow-sm transition-colors hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isFetchingLinkedSheet
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <CloudDownload className="h-4 w-4" />}
+                    {isFetchingLinkedSheet ? 'Downloading…' : 'Scan Linked Sheet'}
+                  </button>
+                )}
+              </div>
+
+              {/* Results panel */}
+              {ocrResult && ocrStage === 'done' && (
+                <div className="space-y-3 rounded-xl border border-violet-100 bg-white p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-bold text-gray-900">Detected Fields</p>
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+                      {Object.values(ocrResult.fills).filter(Boolean).length} fields mapped
+                    </span>
+                  </div>
+
+                  {/* Fills table */}
+                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider">OPPM Field</th>
+                          <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider">Detected Value</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {Object.entries(ocrResult.fills)
+                          .filter(([k]) => k !== 'project_leader_member_id')
+                          .map(([key, value]) => (
+                            <tr key={key} className={value ? 'bg-white' : 'bg-gray-50'}>
+                              <td className="px-3 py-2 font-medium text-gray-700">
+                                {key.replace(/_/g, ' ')}
+                              </td>
+                              <td className="px-3 py-2 text-gray-900">
+                                {value || <span className="italic text-gray-400">— not detected</span>}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Task rows */}
+                  {ocrResult.tasks.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-xs font-semibold text-gray-700">Task Rows Detected ({ocrResult.tasks.length})</p>
+                      <div className="space-y-1">
+                        {ocrResult.tasks.map((task, i) => (
+                          <div
+                            key={`${task.index}-${i}`}
+                            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
+                              task.is_sub ? 'ml-4 bg-gray-50 text-gray-700' : 'bg-violet-50 font-semibold text-violet-900'
+                            }`}
+                          >
+                            <span className="w-8 shrink-0 font-mono text-gray-400">{task.index}</span>
+                            <span className="flex-1 truncate">{task.title}</span>
+                            {task.deadline && (
+                              <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-blue-700">{task.deadline}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Raw OCR toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowOcrRawText((v) => !v)}
+                    className="text-xs font-medium text-violet-600 hover:underline"
+                  >
+                    {showOcrRawText ? 'Hide raw OCR text' : 'Show raw OCR text'}
+                  </button>
+                  {showOcrRawText && (
+                    <pre className="max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap">
+                      {ocrResult.ocr_raw_text || '(no raw text returned)'}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -783,11 +1390,37 @@ export function OPPMView() {
           </div>
         ) : null}
 
-        {!hasLinkedSheet ? (
+        {inAppEditMode ? (
+          <div
+            className="bg-white border border-gray-300 rounded-lg overflow-hidden"
+            style={{ height: 'calc(100vh - 120px)', minHeight: 520 }}
+          >
+            <Workbook
+              key={sheetKey}
+              ref={sheetRef}
+              data={sheetData}
+              allowEdit={true}
+              showToolbar={true}
+              showFormulaBar={true}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              onChange={(data: any[]) => setSheetData(data)}
+              onOp={() => {}}
+            />
+          </div>
+        ) : !hasLinkedSheet ? (
           <MessagePanel
             title="No linked Google Sheet yet"
-            description="Save a Google Sheet URL or spreadsheet ID above to load that existing form inside the OPPM page. The hardcoded scaffold is no longer the primary display path."
+            description="Link a Google Sheet above to load your existing OPPM form, or click 'Edit in App' to create and edit a blank OPPM template directly here."
             tone="neutral"
+            actions={(
+              <button
+                type="button"
+                onClick={handleToggleEditMode}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                Edit blank OPPM in App
+              </button>
+            )}
           />
         ) : sheetLoadState === 'loading' ? (
           <div className="flex items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white py-24">
@@ -796,12 +1429,48 @@ export function OPPMView() {
           </div>
         ) : sheetLoadState === 'preview' && previewSrc ? (
           <div className="space-y-4">
+            {editLoadError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4">
+                <p className="text-sm font-semibold text-red-800">Could not load Google Sheet for editing</p>
+                <p className="mt-1 text-xs text-red-700">{editLoadError}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setEditLoadError(null); handleToggleEditMode() }}
+                    disabled={isEditLoading}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {isEditLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenBlankTemplate}
+                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
+                  >
+                    Open blank OPPM template
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div className="overflow-hidden rounded-xl border border-sky-200 bg-white shadow-sm">
-              <div className="border-b border-sky-100 bg-sky-50 px-4 py-3">
-                <p className="text-sm font-semibold text-sky-900">Live Browser Preview</p>
-                <p className="mt-1 text-xs text-sky-800">
-                  This preview is read-only inside the app. Edit the sheet in Google Sheets, then refresh this preview to see the latest content here.
-                </p>
+              <div className="border-b border-sky-100 bg-sky-50 px-4 py-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-sky-900">Live Browser Preview</p>
+                  <p className="mt-1 text-xs text-sky-800">
+                    This preview is read-only inside the app. Click <strong>Edit in App</strong> to open a fully editable spreadsheet editor with border, color, and formatting tools.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleEditMode}
+                  disabled={isEditLoading}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70"
+                >
+                  {isEditLoading ? (
+                    <><Loader2 className="h-3 w-3 animate-spin" /> Loading Sheet…</>
+                  ) : 'Edit in App'}
+                </button>
               </div>
               <iframe
                 key={previewSrc}
@@ -819,6 +1488,15 @@ export function OPPMView() {
             description="The page is in browser preview mode, but no preview URL could be built from the current Google Sheet link."
             detail={sheetLoadError || 'Save a valid Google Sheet URL or spreadsheet ID to enable live preview inside the OPPM page.'}
             tone="info"
+            actions={(
+              <button
+                type="button"
+                onClick={handleToggleEditMode}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                Edit blank OPPM in App
+              </button>
+            )}
           />
         ) : sheetLoadState === 'error' ? (
           <MessagePanel
@@ -848,15 +1526,17 @@ export function OPPMView() {
         ) : sheetData.length > 0 ? (
           <div
             className="bg-white border border-gray-300 rounded-lg overflow-hidden"
-            style={{ height: 'calc(100vh - 116px)', minHeight: 500 }}
+            style={{ height: 'calc(100vh - 120px)', minHeight: 520 }}
           >
             <Workbook
               key={sheetKey}
               ref={sheetRef}
               data={sheetData}
-              allowEdit={false}
-              showToolbar={false}
-              onChange={() => {}}
+              allowEdit={true}
+              showToolbar={true}
+              showFormulaBar={true}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              onChange={(data: any[]) => setSheetData(data)}
               onOp={() => {}}
             />
           </div>

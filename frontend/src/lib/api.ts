@@ -134,6 +134,53 @@ export const api = {
   patch: <T>(path: string, data: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+
+  /**
+   * Multipart/form-data POST.
+   * Do NOT set Content-Type manually — the browser must set it so the
+   * multipart boundary is included automatically.
+   */
+  postFormData: async <T>(path: string, form: FormData): Promise<T> => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: form,
+    })
+    if (res.status === 401) {
+      const refreshToken = localStorage.getItem('refresh_token')
+      if (refreshToken) {
+        const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        })
+        if (refreshRes.ok) {
+          const data = await refreshRes.json()
+          localStorage.setItem('access_token', data.access_token)
+          if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+          const retry = await fetch(`${API_BASE}${path}`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: form,
+          })
+          if (!retry.ok) {
+            const err = await retry.json().catch(() => ({ detail: retry.statusText }))
+            throw new ApiError(retry.status, err.detail || 'Request failed')
+          }
+          return retry.json()
+        }
+      }
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new ApiError(401, err.detail || 'Unauthorized')
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new ApiError(res.status, err.detail || 'Request failed')
+    }
+    return res.json()
+  },
 }
 
 export interface FileParseResult {

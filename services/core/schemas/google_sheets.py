@@ -1,8 +1,8 @@
 """Schemas for the Google Sheets OPPM MVP."""
 
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class GoogleSheetLinkUpsert(BaseModel):
@@ -63,10 +63,41 @@ class GoogleSheetPushMemberItem(BaseModel):
     name: str
 
 
+class GoogleSheetExplicitMappingTarget(BaseModel):
+    row: Optional[int] = None
+    column: Optional[int] = None
+    label: Optional[str] = None
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("label must not be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_locator_shape(self) -> "GoogleSheetExplicitMappingTarget":
+        has_coordinates = self.row is not None or self.column is not None
+        has_label = self.label is not None
+        if has_coordinates and has_label:
+            raise ValueError("Use either row/column or label, not both")
+        if has_coordinates:
+            if self.row is None or self.column is None:
+                raise ValueError("row and column are both required for coordinate mapping")
+            return self
+        if has_label:
+            return self
+        raise ValueError("Mapping target requires row+column or label")
+
+
 class GoogleSheetPushRequest(BaseModel):
     fills: dict[str, Optional[str]]
     tasks: list[GoogleSheetPushTaskItem] = Field(default_factory=list)
     members: list[GoogleSheetPushMemberItem] = Field(default_factory=list)
+    explicit_mapping: Optional[dict[str, GoogleSheetExplicitMappingTarget]] = None
 
 
 class GoogleSheetPushResponse(BaseModel):
@@ -74,3 +105,4 @@ class GoogleSheetPushResponse(BaseModel):
     spreadsheet_url: str
     updated_sheets: list[str]
     rows_written: dict[str, int]
+    diagnostics: dict[str, Any] = Field(default_factory=dict)

@@ -447,6 +447,7 @@ async def push_google_sheet_fill_route(
         data.fills,
         data.tasks,
         data.members,
+        data.explicit_mapping,
     )
 
 

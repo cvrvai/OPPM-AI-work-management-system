@@ -432,6 +432,7 @@ export function ProjectDetail() {
       {showCreate && (
         <TaskForm
           title="Create Task"
+          projectId={id ?? ''}
           objectives={objectives ?? []}
           subObjectives={subObjectives ?? []}
           members={members ?? []}
@@ -448,6 +449,7 @@ export function ProjectDetail() {
         <TaskForm
           title="Edit Task"
           initial={editingTask}
+          projectId={id ?? ''}
           objectives={objectives ?? []}
           subObjectives={subObjectives ?? []}
           members={members ?? []}
@@ -809,6 +811,7 @@ function TableView({
 function TaskForm({
   title,
   initial,
+  projectId,
   objectives,
   subObjectives = [],
   members,
@@ -822,6 +825,7 @@ function TaskForm({
 }: {
   title: string
   initial?: Task
+  projectId: string
   objectives: OPPMObjective[]
   subObjectives?: OPPMSubObjective[]
   members: WorkspaceMember[]
@@ -837,6 +841,10 @@ function TaskForm({
   const [tab, setTab] = useState<'details' | 'reports'>('details')
   const [reportForm, setReportForm] = useState({ report_date: new Date().toISOString().slice(0, 10), hours: '', description: '' })
   const [showReportForm, setShowReportForm] = useState(false)
+  const [manualObjectiveTitle, setManualObjectiveTitle] = useState('')
+  const [createdObjectives, setCreatedObjectives] = useState<OPPMObjective[]>([])
+  const [objectiveNotice, setObjectiveNotice] = useState<string | null>(null)
+  const [showObjectiveCreator, setShowObjectiveCreator] = useState(false)
 
   const reportsQuery = useQuery<TaskReport[]>({
     queryKey: ['task-reports', initial?.id],
@@ -864,6 +872,29 @@ function TaskForm({
     mutationFn: (reportId: string) => api.delete(`${wsPath}/tasks/${initial!.id}/reports/${reportId}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['task-reports', initial?.id] }),
   })
+
+  const createObjective = useMutation({
+    mutationFn: (objectiveTitle: string) =>
+      api.post<OPPMObjective>(`${wsPath}/projects/${projectId}/oppm/objectives`, { title: objectiveTitle }),
+    onSuccess: (objective) => {
+      const normalizedObjective: OPPMObjective = {
+        ...objective,
+        tasks: objective.tasks ?? [],
+      }
+      setCreatedObjectives((prev) =>
+        prev.some((item) => item.id === normalizedObjective.id) ? prev : [...prev, normalizedObjective]
+      )
+      queryClient.invalidateQueries({ queryKey: ['oppm-objectives', projectId] })
+      setForm((current) => ({ ...current, oppm_objective_id: normalizedObjective.id }))
+      setManualObjectiveTitle('')
+      setShowObjectiveCreator(false)
+      setObjectiveNotice(`Created and linked objective \"${normalizedObjective.title}\".`)
+    },
+    onError: (error: Error) => {
+      setObjectiveNotice(error.message)
+    },
+  })
+
   const [form, setForm] = useState({
     title: initial?.title || '',
     description: initial?.description || '',
@@ -891,6 +922,11 @@ function TaskForm({
     )
   }
 
+  const availableObjectives = [
+    ...objectives,
+    ...createdObjectives.filter((created) => !objectives.some((objective) => objective.id === created.id)),
+  ]
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim()) return
@@ -914,7 +950,7 @@ function TaskForm({
   if (!form.due_date) missingPillars.push('Due date')
 
   const isOppmAligned = missingPillars.length === 0
-  const selectedObjective = objectives.find((objective) => objective.id === form.oppm_objective_id)
+  const selectedObjective = availableObjectives.find((objective) => objective.id === form.oppm_objective_id)
   const selectedOwner = members.find((member) => member.user_id === form.assignee_id)
 
   const fieldLabelClass = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-text-secondary'
@@ -1244,7 +1280,7 @@ function TaskForm({
 
                 <div>
                   <label className={fieldLabelClass}>Linked Objective</label>
-                  {objectives.length > 0 ? (
+                  {availableObjectives.length > 0 ? (
                     <>
                       <select
                         value={form.oppm_objective_id}
@@ -1252,7 +1288,7 @@ function TaskForm({
                         className={selectClass}
                       >
                         <option value="">None (not linked to OPPM)</option>
-                        {objectives.map((obj, i) => (
+                        {availableObjectives.map((obj, i) => (
                           <option key={obj.id} value={obj.id}>
                             {String.fromCharCode(65 + i)}. {obj.title}
                           </option>
@@ -1261,11 +1297,82 @@ function TaskForm({
                       <p className="mt-2 text-xs text-text-secondary">
                         {selectedObjective ? `Currently linked to ${selectedObjective.title}.` : 'Linking an objective keeps the task visible in the OPPM layer.'}
                       </p>
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowObjectiveCreator((value) => !value)
+                            setObjectiveNotice(null)
+                          }}
+                          className="text-xs font-semibold text-primary transition-colors hover:text-primary-dark"
+                        >
+                          {showObjectiveCreator ? 'Cancel new objective' : 'Add another objective'}
+                        </button>
+                      </div>
+                      {showObjectiveCreator ? (
+                        <div className="mt-3 rounded-xl border border-dashed border-gray-200 px-4 py-4 text-sm text-text-secondary">
+                          <p className="font-medium text-text">Create another objective</p>
+                          <p className="mt-1 text-xs text-text-secondary">
+                            Add the objective you want, then it will be linked to this task automatically.
+                          </p>
+                          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                            <input
+                              value={manualObjectiveTitle}
+                              onChange={(e) => {
+                                setManualObjectiveTitle(e.target.value)
+                                if (objectiveNotice) setObjectiveNotice(null)
+                              }}
+                              placeholder="e.g. Launch production environment"
+                              className={inputClass}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => createObjective.mutate(manualObjectiveTitle.trim())}
+                              disabled={createObjective.isPending || !manualObjectiveTitle.trim() || !projectId}
+                              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {createObjective.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create objective'}
+                            </button>
+                          </div>
+                          {objectiveNotice ? (
+                            <p className={cn('mt-2 text-xs', createObjective.isError ? 'text-red-600' : 'text-emerald-600')}>
+                              {objectiveNotice}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </>
                   ) : (
-                    <p className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-sm italic text-text-secondary">
-                      No objectives yet. Create objectives in OPPM View first.
-                    </p>
+                    <div className="rounded-xl border border-dashed border-gray-200 px-4 py-4 text-sm text-text-secondary">
+                      <p className="font-medium text-text">No objectives yet.</p>
+                      <p className="mt-1 text-xs text-text-secondary">
+                        Create one here to link this task without relying on AI draft generation.
+                      </p>
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                        <input
+                          value={manualObjectiveTitle}
+                          onChange={(e) => {
+                            setManualObjectiveTitle(e.target.value)
+                            if (objectiveNotice) setObjectiveNotice(null)
+                          }}
+                          placeholder="e.g. Launch production environment"
+                          className={inputClass}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => createObjective.mutate(manualObjectiveTitle.trim())}
+                          disabled={createObjective.isPending || !manualObjectiveTitle.trim() || !projectId}
+                          className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {createObjective.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create objective'}
+                        </button>
+                      </div>
+                      {objectiveNotice ? (
+                        <p className={cn('mt-2 text-xs', createObjective.isError ? 'text-red-600' : 'text-emerald-600')}>
+                          {objectiveNotice}
+                        </p>
+                      ) : null}
+                    </div>
                   )}
                 </div>
 

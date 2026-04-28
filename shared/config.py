@@ -11,10 +11,10 @@ class SharedSettings(BaseSettings):
     """Base settings needed by the shared auth/database layer."""
 
     # Database
-    database_url: str = "postgresql+asyncpg://oppm:oppm_secret@localhost:5432/oppm"
+    database_url: str = "postgresql+asyncpg://oppm:oppm_dev_password@localhost:5432/oppm"
 
     # Redis
-    redis_url: str = "redis://:oppm_redis_secret@localhost:6379/0"
+    redis_url: str = "redis://:oppm_dev_password@localhost:6379/0"
 
     # JWT
     jwt_secret_key: str = "change-me-in-production"

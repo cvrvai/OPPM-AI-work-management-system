@@ -1,50 +1,36 @@
 # Current Phase Tracker
 
 ## Task
-Database-Backed Google Sheets Credentials Setup
+Reject Unresolved Google Sheets Push Targets
 
 ## Goal
-Allow workspace admins to configure Google Sheets write credentials in the app and store them in the database (encrypted), so Push AI Fill can work without mounting credential files on the server.
+Prevent `Push AI Fill` from reporting success when the workbook does not match either the helper-sheet profile or the legacy OPPM layout, so unresolved pushes fail with a clear error before any write occurs.
 
 ## Plan
 
-### Phase 1: Backend Credential Storage
-- [ ] Add workspace-scoped setup endpoints for Google Sheets credentials
-- [ ] Encrypt/decrypt service-account JSON before storing in workspace settings JSONB
-- [ ] Keep environment/file credentials as fallback for backward compatibility
+### Phase 1: Trace And Scope
+- [x] Confirm the unresolved mapping path still writes helper/export sheets and returns success
+- [x] Verify this creates a false-positive success message when the visible OPPM sheet is not actually targeted
 
-### Phase 2: Status and Validation
-- [ ] Update setup-status response to reflect database credential source
-- [ ] Expose service-account email from decrypted DB credential when available
-- [ ] Keep configuration errors explicit and safe for UI display
+### Phase 2: Backend Guard
+- [x] Fail fast when helper-sheet detection fails and the legacy OPPM mapping remains unresolved
+- [x] Return a clear error message that explains the workbook layout was not recognized
 
-### Phase 3: Frontend Setup UX
-- [ ] Extend Google Sheets Setup tab with credential paste/save/clear actions
-- [ ] Use workspace-scoped setup API routes
-- [ ] Refresh status after save/clear and show success/error notices
-
-### Phase 4: OPPM Integration
-- [ ] Keep Push AI Fill enablement tied to backend-configured status
-- [ ] Ensure existing OPPM setup shortcut continues to work
-
-### Phase 5: Validation
-- [ ] Run frontend type validation
-- [ ] Run backend syntax validation
-- [ ] Rebuild core service and verify setup status shows DB source
+### Phase 3: Regression Coverage
+- [x] Add a focused test proving unresolved pushes stop before any sheet write occurs
+- [x] Run the targeted backend mapping test suite
 
 ## Status
-In Progress
+Completed
 
 ## Expected Files
-- `services/core/schemas/google_sheets.py`
-- `services/core/services/google_sheets_service.py`
-- `services/core/routers/v1/oppm.py`
-- `frontend/src/pages/Settings.tsx`
-- `docs/PHASE-TRACKER.md`
+- services/core/services/google_sheets_service.py
+- services/core/tests/test_google_sheets_mapping.py
+- docs/PHASE-TRACKER.md
 
 ## Verification
-- Pending
+- pytest services/core/tests/test_google_sheets_mapping.py (pass)
 
 ## Notes
-- Security-sensitive data must never be returned in API responses.
-- Database credentials should be workspace-scoped and only writable by workspace admins/owners.
+- Current user symptom: success toast reports `Auto-target: unresolved` with non-zero helper-sheet row counts, but the workbook does not visually update.
+- Scope is limited to backend push validation and its focused regression tests.
