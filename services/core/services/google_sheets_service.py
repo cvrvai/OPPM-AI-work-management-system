@@ -40,6 +40,7 @@ _CLASSIC_MAX_TASK_ROWS = 64
 _CLASSIC_VISIBLE_TASK_ROWS = 16
 _DEFAULT_LAYOUT_SCAN_RANGE = "A1:AZ120"
 _CLASSIC_SUB_OBJECTIVE_COLUMNS = 6
+_SUMMARY_BLOCK_FIELDS = ("project_objective", "deliverable_output", "start_date", "deadline")
 _INLINE_LABEL_FIELDS = {"project_leader", "project_name", "completed_by"}
 _VALUE_LABEL_FIELDS = {"project_objective", "deliverable_output", "start_date", "deadline"}
 _EXPLICIT_MAPPING_SCALAR_FIELDS = (*sorted(_INLINE_LABEL_FIELDS), *_VALUE_LABEL_FIELDS)
@@ -131,6 +132,19 @@ def _merge_column_bounds(merges: list[dict[str, int]], row: int, col: int) -> tu
     return col, col
 
 
+def _merge_range_bounds(merges: list[dict[str, int]], row: int, col: int) -> tuple[int, int, int, int]:
+    row_index = row - 1
+    col_index = col - 1
+    for merge in merges:
+        start_row = merge.get("startRowIndex", 0)
+        end_row = merge.get("endRowIndex", 0)
+        start_col = merge.get("startColumnIndex", 0)
+        end_col = merge.get("endColumnIndex", 0)
+        if start_row <= row_index < end_row and start_col <= col_index < end_col:
+            return start_row + 1, end_row, start_col + 1, end_col
+    return row, row, col, col
+
+
 def _merge_end_column(merges: list[dict[str, int]], row: int, col: int) -> int:
     return _merge_column_bounds(merges, row, col)[1]
 
@@ -204,6 +218,39 @@ def _select_preferred_inline_label_cell(
         return None
     if len(matches) == 1:
         return matches[0]
+
+    preferred_max_row = None
+    if task_layout:
+        preferred_max_row = int(task_layout.get("task_anchor", {}).get("first_row") or 0) - 1
+
+    def _rank(match: tuple[int, int, str]) -> tuple[int, int, int, int]:
+        row, col, _ = match
+        start_col, end_col = _merge_column_bounds(layout.get("merges", []), row, col)
+        merged_penalty = 0 if end_col > start_col else 1
+        if preferred_max_row and preferred_max_row > 0:
+            above_penalty = 0 if row <= preferred_max_row else 1
+            distance = abs(preferred_max_row - row)
+        else:
+            above_penalty = 0
+            distance = row
+        return (above_penalty, distance, merged_penalty, -row)
+
+    return min(matches, key=_rank)
+
+
+def _find_summary_block_cell(
+    layout: dict[str, Any],
+    *,
+    task_layout: dict[str, Any] | None = None,
+) -> tuple[int, int, str] | None:
+    required_labels = tuple(_normalize_cell_text(label.replace("_", " ")) for label in _SUMMARY_BLOCK_FIELDS)
+    matches: list[tuple[int, int, str]] = []
+    for row, col, text, normalized_text in _iter_normalized_layout_cells(layout):
+        if all(label in normalized_text for label in required_labels):
+            matches.append((row, col, text))
+
+    if not matches:
+        return None
 
     preferred_max_row = None
     if task_layout:
@@ -600,6 +647,17 @@ def _resolve_oppm_mapping_profile(service: Any, spreadsheet_id: str) -> dict[str
         "start_date": _find_label_value_anchor(layout, "Start Date"),
         "deadline": _find_label_value_anchor(layout, "Deadline"),
     }
+    summary_block_cell = None
+    if any(anchor is None for anchor in label_anchors.values()):
+        summary_block_cell = _find_summary_block_cell(layout, task_layout=task_layout)
+    summary_block_anchor = _a1(summary_block_cell[1], summary_block_cell[0]) if summary_block_cell else None
+    summary_block_range = None
+    if summary_block_cell:
+        start_row, end_row, start_col, end_col = _merge_range_bounds(layout.get("merges", []), summary_block_cell[0], summary_block_cell[1])
+        summary_block_range = _a1(start_col, start_row)
+        if (start_row, end_row, start_col, end_col) != (summary_block_cell[0], summary_block_cell[0], summary_block_cell[1], summary_block_cell[1]):
+            summary_block_range = f"{summary_block_range}:{_a1(end_col, end_row)}"
+    covered_value_fields = set(_SUMMARY_BLOCK_FIELDS) if summary_block_anchor else set()
 
     leader_cell = _select_preferred_inline_label_cell(layout, "Project Leader", task_layout=task_layout)
     project_name_cell = _select_preferred_inline_label_cell(layout, "Project Name", task_layout=task_layout)
@@ -614,21 +672,43 @@ def _resolve_oppm_mapping_profile(service: Any, spreadsheet_id: str) -> dict[str
         "deadline": _a1(label_anchors["deadline"][1], label_anchors["deadline"][0]) if label_anchors["deadline"] else None,
         "completed_by": _a1(completed_by_cell[1], completed_by_cell[0]) if completed_by_cell else None,
     }
-    anchors = dict(summary_anchors)
+    anchors = {field_id: value for field_id, value in summary_anchors.items() if value}
     if task_layout and task_layout.get("people_count_anchor"):
         anchors["people_count"] = task_layout["people_count_anchor"]
 
-    missing_anchors = [name for name, value in summary_anchors.items() if not value]
+    missing_anchors = [
+        name
+        for name, value in summary_anchors.items()
+        if not value and name not in covered_value_fields
+    ]
     signal_count = len(summary_anchors) + 1
-    found_signals = (len(summary_anchors) - len(missing_anchors)) + (1 if task_layout else 0)
+    resolved_summary_fields = sum(
+        1
+        for field_id, value in summary_anchors.items()
+        if value or field_id in covered_value_fields
+    )
+    found_signals = resolved_summary_fields + (1 if task_layout else 0)
     confidence = round(found_signals / signal_count, 3)
 
-    has_all_required_labels = all(label_anchors.values())
+    has_all_required_labels = all(label_anchors[field_id] or field_id in covered_value_fields for field_id in _VALUE_LABEL_FIELDS)
     has_task_anchor = task_layout is not None
+
+    classic_anchors = dict(_classic_oppm_mapping_profile()["anchors"])
+
+    def _clear_anchors_for_mapping(resolved_anchors: dict[str, str | None]) -> list[str]:
+        stale: list[str] = []
+        for field_id, a1_ref in classic_anchors.items():
+            anchor = resolved_anchors.get(field_id)
+            if anchor and anchor != a1_ref:
+                stale.append(a1_ref)
+                continue
+            if field_id in covered_value_fields:
+                stale.append(a1_ref)
+        return list(dict.fromkeys(stale))
+
     if not has_all_required_labels or not has_task_anchor:
         if confidence >= 0.5:
             fallback = _classic_oppm_mapping_profile()
-            classic_anchors = dict(fallback["anchors"])
             fallback["confidence"] = confidence
             fallback["missing_anchors"] = missing_anchors
             fallback["anchors"].update({
@@ -639,6 +719,8 @@ def _resolve_oppm_mapping_profile(service: Any, spreadsheet_id: str) -> dict[str
             for field_id, value in summary_anchors.items():
                 if value is None:
                     fallback["anchors"].pop(field_id, None)
+            fallback["summary_block_anchor"] = summary_block_anchor
+            fallback["summary_block_range"] = summary_block_range
             if task_layout:
                 fallback["task_anchor"] = task_layout["task_anchor"]
                 fallback["regions"] = task_layout["regions"]
@@ -647,11 +729,7 @@ def _resolve_oppm_mapping_profile(service: Any, spreadsheet_id: str) -> dict[str
                     fallback["anchors"]["people_count"] = task_layout["people_count_anchor"]
                 else:
                     fallback["anchors"].pop("people_count", None)
-            fallback["clear_anchors"] = [
-                a1_ref
-                for field_id, a1_ref in classic_anchors.items()
-                if field_id in fallback["anchors"] and fallback["anchors"][field_id] != a1_ref
-            ]
+            fallback["clear_anchors"] = _clear_anchors_for_mapping(fallback["anchors"])
             return fallback
 
         unresolved_missing = list(missing_anchors)
@@ -669,6 +747,8 @@ def _resolve_oppm_mapping_profile(service: Any, spreadsheet_id: str) -> dict[str
             },
             "regions": {},
             "task_rows": [],
+            "summary_block_anchor": summary_block_anchor,
+            "summary_block_range": summary_block_range,
             "clear_anchors": [],
             "missing_anchors": unresolved_missing,
         }
@@ -681,7 +761,9 @@ def _resolve_oppm_mapping_profile(service: Any, spreadsheet_id: str) -> dict[str
         "task_anchor": task_layout["task_anchor"],
         "regions": task_layout["regions"],
         "task_rows": task_layout.get("task_rows", []),
-        "clear_anchors": [],
+        "summary_block_anchor": summary_block_anchor,
+        "summary_block_range": summary_block_range,
+        "clear_anchors": _clear_anchors_for_mapping(anchors),
         "missing_anchors": missing_anchors,
     }
 
@@ -1275,6 +1357,28 @@ def _oppm_field_value(field_id: str, fills: dict[str, str | None]) -> str:
     return values[field_id]
 
 
+def _oppm_summary_block_value(fills: dict[str, str | None]) -> str:
+    return "\n".join([
+        f"Project Objective: {fills.get('project_objective') or '—'}",
+        f"Deliverable Output: {fills.get('deliverable_output') or '—'}",
+        f"Start Date: {fills.get('start_date') or '—'}",
+        f"Deadline: {fills.get('deadline') or '—'}",
+    ])
+
+
+def _oppm_timeline_header_value(fills: dict[str, str | None]) -> str:
+    completed_by = fills.get("completed_by_text") or "—"
+    start_date = fills.get("start_date") or ""
+    deadline = fills.get("deadline") or ""
+    if start_date and deadline:
+        return f"Project Completed By: {completed_by} | {start_date} -> {deadline}"
+    if start_date:
+        return f"Project Completed By: {completed_by} | Start {start_date}"
+    if deadline:
+        return f"Project Completed By: {completed_by} | Due {deadline}"
+    return f"Project Completed By: {completed_by}"
+
+
 def _get_item_value(item: Any, field_name: str, default: Any = None) -> Any:
     if isinstance(item, dict):
         return item.get(field_name, default)
@@ -1390,45 +1494,21 @@ def _oppm_task_title(task: Any) -> str:
     return title
 
 
+def _oppm_grouped_task_title(task: Any) -> str:
+    return str(_get_item_value(task, "title", "") or "")
+
+
+def _oppm_grouped_task_label(task: Any) -> str:
+    return f"{_get_item_value(task, 'index', '')}  {_oppm_grouped_task_title(task)}".strip()
+
+
 def _align_tasks_to_grouped_rows(tasks: list[Any], task_rows: list[dict[str, int | str]]) -> list[Any | None]:
     if not task_rows:
         return tasks
 
-    main_slot_indexes = [index for index, slot in enumerate(task_rows) if str(slot.get("kind")) == "main"]
-    if not main_slot_indexes:
-        return tasks[:len(task_rows)]
-
-    grouped_tasks: list[tuple[Any, list[Any]]] = []
-    current_main: Any | None = None
-    current_subs: list[Any] = []
-    for task in tasks:
-        if bool(_get_item_value(task, "is_sub", False)):
-            if current_main is None:
-                return tasks[:len(task_rows)]
-            current_subs.append(task)
-            continue
-
-        if current_main is not None:
-            grouped_tasks.append((current_main, current_subs))
-        current_main = task
-        current_subs = []
-
-    if current_main is not None:
-        grouped_tasks.append((current_main, current_subs))
-
     aligned: list[Any | None] = [None] * len(task_rows)
-    for group_index, (main_task, sub_tasks) in enumerate(grouped_tasks[:len(main_slot_indexes)]):
-        main_slot_index = main_slot_indexes[group_index]
-        aligned[main_slot_index] = main_task
-        next_main_slot_index = main_slot_indexes[group_index + 1] if group_index + 1 < len(main_slot_indexes) else len(task_rows)
-        sub_slot_indexes = [
-            slot_index
-            for slot_index in range(main_slot_index + 1, next_main_slot_index)
-            if str(task_rows[slot_index].get("kind")) == "sub"
-        ]
-        for slot_index, sub_task in zip(sub_slot_indexes, sub_tasks):
-            aligned[slot_index] = sub_task
-
+    for slot_index, task in enumerate(tasks[:len(task_rows)]):
+        aligned[slot_index] = task
     return aligned
 
 
@@ -1438,7 +1518,7 @@ def _grouped_task_text_updates(task_rows: list[dict[str, int | str]], tasks: lis
         row = int(slot["row"])
         kind = str(slot.get("kind"))
         if kind == "main":
-            value = _oppm_task_label(task).strip() if task else ""
+            value = _oppm_grouped_task_label(task) if task else ""
             data.append({
                 "range": f"'{_OPPM_SHEET_TITLE}'!{_a1(int(slot['write_col']), row)}",
                 "values": [[value]],
@@ -1446,7 +1526,7 @@ def _grouped_task_text_updates(task_rows: list[dict[str, int | str]], tasks: lis
             continue
 
         index_value = str(_get_item_value(task, "index", "") or "") if task else ""
-        title_value = _oppm_task_title(task) if task else ""
+        title_value = _oppm_grouped_task_title(task) if task else ""
         data.append({
             "range": f"'{_OPPM_SHEET_TITLE}'!{_a1(int(slot['index_col']), row)}",
             "values": [[index_value]],
@@ -1574,13 +1654,24 @@ def _write_oppm_sheet_values(
     task_anchor = mapping.get("task_anchor") or {}
     regions = mapping.get("regions") or {}
     task_rows = mapping.get("task_rows") or []
+    summary_block_anchor = mapping.get("summary_block_anchor")
+    summary_block_range = mapping.get("summary_block_range") or summary_block_anchor
     clear_anchors = mapping.get("clear_anchors") or []
     data: list[dict[str, Any]] = []
 
     for field_id, a1_ref in anchors.items():
+        value = _oppm_field_value(field_id, fills)
+        if field_id == "completed_by" and summary_block_anchor and regions.get("timeline"):
+            value = _oppm_timeline_header_value(fills)
         data.append({
             "range": f"'{_OPPM_SHEET_TITLE}'!{a1_ref}",
-            "values": [[_oppm_field_value(field_id, fills)]],
+            "values": [[value]],
+        })
+
+    if summary_block_range:
+        data.append({
+            "range": f"'{_OPPM_SHEET_TITLE}'!{summary_block_range}",
+            "values": [[_oppm_summary_block_value(fills)]],
         })
 
     task_column = task_anchor.get("column")
@@ -1696,7 +1787,7 @@ def _write_oppm_sheet_values(
     diagnostics = {
         "mapping": mapping,
         "writes": {
-            "attempted": len(anchors) + len(tasks),
+            "attempted": len(anchors) + len(tasks) + (1 if summary_block_range else 0),
             "applied": len(data) + region_writes,
             "skipped": max(len(tasks) - task_rows_to_write, 0),
         },

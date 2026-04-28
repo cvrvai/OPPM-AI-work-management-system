@@ -1,27 +1,26 @@
 # Current Phase Tracker
 
 ## Task
-Fix Google Sheets OPPM push for grouped main-task and sub-task row layouts
+Tighten visible OPPM header-field mapping and remap the date/timeline area for the linked Google Sheet layout
 
 ## Goal
-Make `Push AI Fill` write main tasks and sub tasks into the actual grouped OPPM row structure used by the linked Google Sheet template, instead of treating the task block as a flat linear list.
+Detect the linked workbook's merged summary block and visible timeline layout directly from the sheet so `Push AI Fill` writes header fields into the actual visible OPPM area instead of relying on classic fallback cells.
 
 ## Plan
 
-### Phase 1: Confirm the row-pattern mismatch
-- [x] Inspect the current linked Google Sheet layout downloaded from the backend
-- [x] Verify the helper `OPPM Tasks` tab has the right root-task and sub-task sequence
-- [x] Verify the visible `OPPM` tab uses grouped rows with separate main-task and sub-task slots
+### Phase 1: Confirm the workbook-specific layout
+- [x] Inspect the live linked workbook header merges and visible timeline columns
+- [x] Verify the visible summary fields live in a merged block instead of standalone label cells
 
-### Phase 2: Patch the writer
-- [x] Detect grouped task row patterns from the live OPPM sheet layout
-- [x] Write main-task titles and sub-task rows into the correct cells for that grouped layout
-- [x] Keep the existing linear-row behavior for classic templates that already work
-- [x] Stop helper-sheet detection from bypassing the visible `OPPM` tab when its layout is also recognized
+### Phase 2: Patch mapping and writes
+- [x] Detect workbook-specific merged summary blocks for project objective, deliverable output, start date, and deadline
+- [x] Write the visible summary block into the merged OPPM area
+- [x] Tighten the visible timeline/date mapping for the grouped template without regressing helper-sheet output
 
 ### Phase 3: Validate
-- [x] Add focused backend tests for grouped OPPM row mapping
-- [x] Run targeted validation on the Google Sheets mapping service
+- [x] Add focused backend tests for merged summary-block detection and writing
+- [x] Run targeted Google Sheets mapping tests
+- [x] Run a live write against the linked workbook and inspect the linked workbook again
 
 ## Status
 Completed and validated.
@@ -33,11 +32,10 @@ Completed and validated.
 
 ## Verification
 - `Set-Location "c:\Users\cheon\work project\internal\OPPM-AI-work-management-system" ; $env:PYTHONPATH = (Get-Location).Path ; pytest services/core/tests/test_google_sheets_mapping.py`
-- Focused downloaded-sheet inspection against the linked Google Sheet layout before and after the live push
-- Real `Push AI Fill` call through the frontend API proxy, then linked-sheet XLSX verification of rows `H6:M23`
-- VS Code error check on touched files
+- Direct live Google Sheets write probe under the same env-loading logic as `services/core/start.ps1`, which resolved the real workbook mapping and wrote to the linked sheet successfully
+- Linked workbook XLSX inspection after the successful direct write, confirming the visible summary block at `H3:AI4` and the compact grouped task rows remain correct
 
 ## Notes
-- The linked Google Sheet at `1tAAsDsK5dT35UbfjCyiDpHY3wfPYpx0pC0ftoG6p1Ao` uses a grouped task layout: main rows like `H6:L6`, followed by sub rows with index in column `H` and title merged across `I:L`.
-- The original writer treated the task area as a flat linear region, which caused main-task placeholders like `Main task 1` to remain and shifted root-task titles into sub-task rows.
-- The live workbook was also taking the helper-sheet path first, so `Push AI Fill` updated `OPPM Summary` and `OPPM Tasks` but skipped the visible `OPPM` tab until the helper-profile branch was changed to write both when possible.
+- The linked workbook uses `H3:AI4` as one merged summary block containing `Project Objective`, `Deliverable Output`, `Start Date`, and `Deadline` labels.
+- The resolved visible OPPM mapping now uses `summary_block_range = H3:AI4` and does not emit null scalar anchors for the summary-block fields, which prevents invalid Google Sheets batch ranges like `'OPPM'!None`.
+- The currently running backend process behind `localhost:8000` is stale and did not reload these changes during validation. The current code path itself is verified by the direct write probe, but the local core server should be restarted before relying on the UI `Push AI Fill` button to hit the updated implementation.

@@ -340,6 +340,58 @@ def test_resolve_mapping_profile_detects_grouped_task_rows(monkeypatch):
     ]
 
 
+def test_resolve_mapping_profile_detects_merged_summary_block(monkeypatch):
+    layout = _build_layout(
+        cells={
+            (2, 8): "Project Leader: Project Manager",
+            (2, 11): "Project Name: 3d Enhancement Project",
+            (3, 8): "Project Objective: Text\nDeliverable Output : Text\nStart Date:\nDeadline:",
+            (5, 2): "Sub objective",
+            (5, 9): "Major Tasks (Deadline)",
+            (5, 13): "Project Completed By: 8 weeks",
+            (5, 30): "Owner / Priority",
+            (29, 12): "# People working on the project",
+        },
+        merges=[
+            {"startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 7, "endColumnIndex": 10},
+            {"startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 10, "endColumnIndex": 35},
+            {"startRowIndex": 2, "endRowIndex": 4, "startColumnIndex": 7, "endColumnIndex": 35},
+            {"startRowIndex": 4, "endRowIndex": 5, "startColumnIndex": 1, "endColumnIndex": 7},
+            {"startRowIndex": 4, "endRowIndex": 5, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 4, "endRowIndex": 5, "startColumnIndex": 12, "endColumnIndex": 29},
+            {"startRowIndex": 4, "endRowIndex": 5, "startColumnIndex": 29, "endColumnIndex": 35},
+            {"startRowIndex": 5, "endRowIndex": 6, "startColumnIndex": 7, "endColumnIndex": 12},
+            {"startRowIndex": 6, "endRowIndex": 7, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 7, "endRowIndex": 8, "startColumnIndex": 8, "endColumnIndex": 12},
+            {"startRowIndex": 9, "endRowIndex": 10, "startColumnIndex": 7, "endColumnIndex": 12},
+            {"startRowIndex": 10, "endRowIndex": 11, "startColumnIndex": 8, "endColumnIndex": 12},
+        ],
+        max_row=40,
+        max_col=40,
+    )
+
+    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+
+    profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-merged-summary")
+
+    assert profile["source"] == "layout_detected"
+    assert profile["summary_block_anchor"] == "H3"
+    assert profile["summary_block_range"] == "H3:AI4"
+    assert profile["anchors"]["project_leader"] == "H2"
+    assert profile["anchors"]["project_name"] == "K2"
+    assert profile["anchors"]["completed_by"] == "M5"
+    assert "project_objective" not in profile["anchors"]
+    assert "deliverable_output" not in profile["anchors"]
+    assert "start_date" not in profile["anchors"]
+    assert "deadline" not in profile["anchors"]
+    assert profile["regions"]["timeline"]["start_col"] == 13
+    assert profile["regions"]["timeline"]["end_col"] == 29
+    assert profile["regions"]["owners"]["start_col"] == 30
+    assert profile["regions"]["owners"]["end_col"] == 35
+    assert profile["missing_anchors"] == []
+    assert set(profile["clear_anchors"]) >= {"A1", "U1", "U7", "G3", "G4", "G5", "G6"}
+
+
 def test_write_oppm_sheet_values_writes_grouped_task_rows() -> None:
     service = _FakeService()
     tasks = [
@@ -397,19 +449,82 @@ def test_write_oppm_sheet_values_writes_grouped_task_rows() -> None:
         for item in service.values_api.batch_updates[0]["body"]["data"]
     }
     assert written_values["'OPPM'!H8"] == [["1  Sales Order Modification"]]
-    assert written_values["'OPPM'!H12"] == [["2  Stock Management Enhancement"]]
-    assert written_values["'OPPM'!H13"] == [["2.1"]]
-    assert written_values["'OPPM'!I13"] == [["Update beginning stock  (2026-04-26)"]]
-    assert written_values["'OPPM'!H14"] == [["2.2"]]
-    assert written_values["'OPPM'!I14"] == [["Stock alert configuration  (2026-05-03)"]]
-    assert written_values["'OPPM'!H15"] == [["2.3"]]
-    assert written_values["'OPPM'!I15"] == [["Build stock alert  (2026-05-03)"]]
-    assert written_values["'OPPM'!H16"] == [["3  Mobile App New Features"]]
-    assert written_values["'OPPM'!H20"] == [["4  Purchase Order & Route Optimization"]]
-    assert written_values["'OPPM'!H21"] == [["4.1"]]
-    assert written_values["'OPPM'!I21"] == [["Key in PO in the system  (2026-05-10)"]]
-    assert written_values["'OPPM'!H23"] == [["4.3"]]
-    assert written_values["'OPPM'!I23"] == [["Route planning module  (2026-05-17)"]]
+    assert written_values["'OPPM'!H9"] == [["2"]]
+    assert written_values["'OPPM'!I9"] == [["Stock Management Enhancement"]]
+    assert written_values["'OPPM'!H10"] == [["2.1"]]
+    assert written_values["'OPPM'!I10"] == [["Update beginning stock"]]
+    assert written_values["'OPPM'!H11"] == [["2.2"]]
+    assert written_values["'OPPM'!I11"] == [["Stock alert configuration"]]
+    assert written_values["'OPPM'!H12"] == [["2.3  Build stock alert"]]
+    assert written_values["'OPPM'!H13"] == [["3"]]
+    assert written_values["'OPPM'!I13"] == [["Mobile App New Features"]]
+    assert written_values["'OPPM'!H14"] == [["4"]]
+    assert written_values["'OPPM'!I14"] == [["Purchase Order & Route Optimization"]]
+    assert written_values["'OPPM'!H15"] == [["4.1"]]
+    assert written_values["'OPPM'!I15"] == [["Key in PO in the system"]]
+    assert written_values["'OPPM'!H16"] == [["4.2  Route planning"]]
+    assert written_values["'OPPM'!H17"] == [["4.3"]]
+    assert written_values["'OPPM'!I17"] == [["Route planning module"]]
+
+
+def test_write_oppm_sheet_values_writes_summary_block_and_timeline_header() -> None:
+    service = _FakeService()
+    fills = {
+        "project_leader": "Project Manager",
+        "project_name": "3d Enhancement Project",
+        "project_objective": "Enhance the existing system",
+        "deliverable_output": "Enhanced system modules",
+        "start_date": "2026-02-09",
+        "deadline": "2026-05-01",
+        "completed_by_text": "8 weeks",
+    }
+
+    rows_written, diagnostics = _write_oppm_sheet_values(
+        service,
+        "sheet-summary-block-write",
+        fills,
+        [],
+        [],
+        {
+            "source": "layout_detected",
+            "anchors": {
+                "project_leader": "H2",
+                "project_name": "K2",
+                "completed_by": "M5",
+            },
+            "summary_block_anchor": "H3",
+            "summary_block_range": "H3:AI4",
+            "task_anchor": {"column": "H", "first_row": 6, "max_rows": 16},
+            "task_rows": [],
+            "regions": {
+                "timeline": {"start_col": 13, "end_col": 29, "first_row": 6, "max_rows": 16},
+            },
+            "clear_anchors": ["A1", "U1", "U7", "G3", "G4", "G5", "G6"],
+        },
+    )
+
+    assert rows_written == 0
+    assert diagnostics["writes"]["attempted"] == 4
+    assert len(service.values_api.batch_updates) == 1
+
+    written_values = {
+        item["range"]: item["values"]
+        for item in service.values_api.batch_updates[0]["body"]["data"]
+    }
+    assert written_values["'OPPM'!H2"] == [["Project Leader: Project Manager"]]
+    assert written_values["'OPPM'!K2"] == [["Project Name: 3d Enhancement Project"]]
+    assert written_values["'OPPM'!M5"] == [["Project Completed By: 8 weeks | 2026-02-09 -> 2026-05-01"]]
+    assert written_values["'OPPM'!H3:AI4"] == [[
+        "Project Objective: Enhance the existing system\n"
+        "Deliverable Output: Enhanced system modules\n"
+        "Start Date: 2026-02-09\n"
+        "Deadline: 2026-05-01"
+    ]]
+
+    clear_ranges = {item["range"] for item in service.values_api.clears}
+    assert "'OPPM'!A1" in clear_ranges
+    assert "'OPPM'!G3" in clear_ranges
+    assert "'OPPM'!U7" in clear_ranges
 
 
 def test_partial_layout_fallback_prefers_detected_leader_anchor_over_stale_a1(monkeypatch):
