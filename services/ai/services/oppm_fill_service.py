@@ -134,7 +134,7 @@ async def fill_oppm(
     # ── Structured fills (no LLM) ─────────────────────────────
     fills: dict[str, str | None] = {
         "project_name": project.title,
-        "project_leader": header.project_leader_text if header and header.project_leader_text else lead_name,
+        "project_leader": lead_name or (header.project_leader_text if header else None),
         "project_leader_member_id": str(project.lead_id) if project.lead_id else None,
         "start_date": str(project.start_date) if project.start_date else None,
         "deadline": str(project.deadline) if project.deadline else None,
@@ -163,6 +163,22 @@ async def fill_oppm(
             "user_id": str(workspace_member.user_id),
             "name": _resolve_member_name(workspace_member, user) or "",
         })
+
+    # If no explicit project members, fall back to all workspace members so the
+    # owner columns are populated even for projects that haven't been staffed yet.
+    if not member_rows:
+        wm_result = await session.execute(
+            select(WorkspaceMember, User)
+            .join(User, User.id == WorkspaceMember.user_id)
+            .where(WorkspaceMember.workspace_id == workspace_id)
+            .order_by(WorkspaceMember.joined_at, User.full_name, User.email)
+        )
+        for workspace_member, user in wm_result.all():
+            member_rows.append({
+                "id": str(workspace_member.id),
+                "user_id": str(workspace_member.user_id),
+                "name": _resolve_member_name(workspace_member, user) or "",
+            })
 
     lead_member_id = str(project.lead_id) if project.lead_id else None
     ordered_members: list[dict[str, str]] = []

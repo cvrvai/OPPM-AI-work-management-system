@@ -545,11 +545,17 @@ def _resolve_task_layout_regions(layout: dict[str, Any]) -> dict[str, Any] | Non
             "date_header_row": timeline_date_header_row,
         }
     if owner_region:
+        owner_member_header_row = (
+            people_count_cell[0] + 1
+            if people_count_cell and people_count_cell[0] > first_task_row
+            else first_task_row - 1
+        )
         regions["owners"] = {
             "start_col": int(owner_region["start_col"]),
             "end_col": int(owner_region["end_col"]),
             "first_row": first_task_row,
             "max_rows": max_rows,
+            "member_header_row": owner_member_header_row,
         }
 
     task_rows = _resolve_grouped_task_rows(layout, task_region, first_task_row, max_rows)
@@ -1811,6 +1817,7 @@ def _write_oppm_sheet_values(
 
     owner_region = regions.get("owners")
     if owner_region:
+        owner_width = int(owner_region["end_col"]) - int(owner_region["start_col"]) + 1
         region_writes += _write_sheet_region_values(
             service,
             spreadsheet_id,
@@ -1819,9 +1826,31 @@ def _write_oppm_sheet_values(
             _build_owner_rows(
                 rendered_tasks,
                 members,
-                int(owner_region["end_col"]) - int(owner_region["start_col"]) + 1,
+                owner_width,
             ),
         )
+        # Write actual member names to the member-header row (e.g. row 30).
+        member_header_row = int(owner_region.get("member_header_row") or 0)
+        if member_header_row >= 1 and members:
+            ordered = sorted(members, key=lambda m: int(_get_item_value(m, "slot", 0)))
+            name_values = (
+                [str(_get_item_value(m, "name") or "") for m in ordered] + [""] * owner_width
+            )[:owner_width]
+            ow_start_col = int(owner_region["start_col"])
+            ow_end_col = int(owner_region["end_col"])
+            try:
+                service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=(
+                        f"'{_OPPM_SHEET_TITLE}'!{_a1(ow_start_col, member_header_row)}:"
+                        f"{_a1(ow_end_col, member_header_row)}"
+                    ),
+                    valueInputOption="RAW",
+                    body={"values": [name_values]},
+                ).execute()
+                region_writes += 1
+            except Exception:
+                logger.debug("Failed to write member name headers at row %s", member_header_row)
 
     if data:
         service.spreadsheets().values().batchUpdate(
