@@ -529,11 +529,20 @@ def _resolve_task_layout_regions(layout: dict[str, Any]) -> dict[str, Any] | Non
             "max_rows": max_rows,
         }
     if timeline_region:
+        # Use the row immediately after the people-count cell as the date header row
+        # because the row above first_task_row is typically a merged cell (e.g. "Project
+        # Completed By: X weeks") that cannot hold individual per-column date values.
+        timeline_date_header_row = (
+            people_count_cell[0] + 1
+            if people_count_cell and people_count_cell[0] > first_task_row
+            else first_task_row - 1
+        )
         regions["timeline"] = {
             "start_col": int(timeline_region["start_col"]),
             "end_col": int(timeline_region["end_col"]),
             "first_row": first_task_row,
             "max_rows": max_rows,
+            "date_header_row": timeline_date_header_row,
         }
     if owner_region:
         regions["owners"] = {
@@ -1406,6 +1415,33 @@ def _collect_timeline_weeks(tasks: list[Any], limit: int) -> list[str]:
     return sorted(weeks)[:limit]
 
 
+def _collect_task_due_date_weeks(tasks: list[Any], limit: int) -> list[str]:
+    """Derive weekly column dates from task due_date / start_date when no explicit
+    timeline entries and no project start/deadline are available."""
+    if limit <= 0:
+        return []
+    all_dates: set[date] = set()
+    for task in tasks:
+        for field in ("deadline", "start_date", "due_date"):
+            d = _parse_iso_date(_get_item_value(task, field))
+            if d:
+                all_dates.add(d)
+    if not all_dates:
+        return []
+    min_date = min(all_dates)
+    max_date = max(all_dates)
+    start_monday = min_date - timedelta(days=min_date.weekday())
+    end_monday = max_date - timedelta(days=max_date.weekday())
+    weeks: list[str] = []
+    current = start_monday
+    while current <= end_monday and len(weeks) < limit:
+        weeks.append(current.isoformat())
+        current += timedelta(weeks=1)
+    if not weeks:
+        weeks.append(start_monday.isoformat())
+    return weeks[:limit]
+
+
 def _resolve_timeline_weeks(
     fills: dict[str, str | None],
     tasks: list[Any],
@@ -1417,7 +1453,10 @@ def _resolve_timeline_weeks(
     start = _parse_iso_date(fills.get("start_date"))
     deadline = _parse_iso_date(fills.get("deadline"))
     if not start and not deadline:
-        return _collect_timeline_weeks(tasks, limit)
+        weeks = _collect_timeline_weeks(tasks, limit)
+        if weeks:
+            return weeks
+        return _collect_task_due_date_weeks(tasks, limit)
 
     if not start:
         start = deadline
@@ -1724,6 +1763,7 @@ def _write_oppm_sheet_values(
 
     timeline_region = regions.get("timeline")
     if timeline_region:
+        tl_width = int(timeline_region["end_col"]) - int(timeline_region["start_col"]) + 1
         region_writes += _write_sheet_region_values(
             service,
             spreadsheet_id,
@@ -1732,9 +1772,42 @@ def _write_oppm_sheet_values(
             _build_timeline_rows(
                 fills,
                 rendered_tasks,
-                int(timeline_region["end_col"]) - int(timeline_region["start_col"]) + 1,
+                tl_width,
             ),
         )
+        # Write the date column headers in the designated date-header row.
+        # For templates where the row above the first task row is a merged cell
+        # (e.g. "Project Completed By: X weeks"), the date_header_row points to
+        # a different row (typically right after the people-count label) that has
+        # individual per-column cells that can each hold a date value.
+        tl_first_row = int(timeline_region["first_row"])
+        tl_header_row = int(timeline_region.get("date_header_row") or tl_first_row - 1)
+        if tl_header_row >= 1:
+            weeks = _resolve_timeline_weeks(fills, rendered_tasks, tl_width)
+            if weeks:
+                formatted_dates = []
+                for week_str in weeks:
+                    week_date = _parse_iso_date(week_str)
+                    formatted_dates.append(
+                        week_date.strftime("%d-%b-%Y") if week_date else week_str
+                    )
+                # Pad with empty strings if fewer weeks than columns
+                row_values = (formatted_dates + [""] * tl_width)[:tl_width]
+                tl_start_col = int(timeline_region["start_col"])
+                tl_end_col = int(timeline_region["end_col"])
+                try:
+                    service.spreadsheets().values().update(
+                        spreadsheetId=spreadsheet_id,
+                        range=(
+                            f"'{_OPPM_SHEET_TITLE}'!{_a1(tl_start_col, tl_header_row)}:"
+                            f"{_a1(tl_end_col, tl_header_row)}"
+                        ),
+                        valueInputOption="RAW",
+                        body={"values": [row_values]},
+                    ).execute()
+                    region_writes += 1
+                except Exception:
+                    logger.debug("Failed to write timeline date headers at row %s", tl_header_row)
 
     owner_region = regions.get("owners")
     if owner_region:
