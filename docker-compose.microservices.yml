@@ -27,19 +27,19 @@ services:
       - "80:80"
     restart: on-failure
     depends_on:
-      core:
+      workspace:
         condition: service_healthy
-      ai:
+      intelligence:
         condition: service_healthy
-      git:
+      integrations:
         condition: service_healthy
-      mcp:
+      automation:
         condition: service_healthy
 
-  core:
+  workspace:
     build:
       context: .
-      dockerfile: services/core/Dockerfile
+      dockerfile: services/workspace/Dockerfile
     expose:
       - "8000"
     volumes:
@@ -62,10 +62,10 @@ services:
       retries: 8
       start_period: 60s
 
-  ai:
+  intelligence:
     build:
       context: .
-      dockerfile: services/ai/Dockerfile
+      dockerfile: services/intelligence/Dockerfile
     expose:
       - "8001"
     env_file:
@@ -82,17 +82,17 @@ services:
       retries: 5
       start_period: 20s
 
-  git:
+  integrations:
     build:
       context: .
-      dockerfile: services/git/Dockerfile
+      dockerfile: services/integrations/Dockerfile
     expose:
       - "8002"
     env_file:
       - services/.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
-      - AI_SERVICE_URL=http://ai:8001
+      - AI_SERVICE_URL=http://intelligence:8001
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,10 +103,10 @@ services:
       retries: 5
       start_period: 20s
 
-  mcp:
+  automation:
     build:
       context: .
-      dockerfile: services/mcp/Dockerfile
+      dockerfile: services/automation/Dockerfile
     expose:
       - "8003"
     env_file:

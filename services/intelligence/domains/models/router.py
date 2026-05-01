@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_admin
-from schemas.ai import AIModelConfig
+from domains.models.schemas import AIModelConfig
 from shared.schemas.common import SuccessResponse
 from shared.database import get_session
 from shared.models.ai_model import AIModel
@@ -32,7 +32,8 @@ async def list_ai_models(
             {
                 "id": str(m.id), "workspace_id": str(m.workspace_id),
                 "name": m.name, "provider": m.provider, "model_id": m.model_id,
-                "endpoint_url": m.endpoint_url, "is_active": m.is_active,
+                "endpoint_url": m.endpoint_url, "api_key": m.api_key,
+                "is_active": m.is_active,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in models
@@ -63,7 +64,8 @@ async def add_ai_model(
         return {
             "id": str(model.id), "workspace_id": str(model.workspace_id),
             "name": model.name, "provider": model.provider, "model_id": model.model_id,
-            "endpoint_url": model.endpoint_url, "is_active": model.is_active,
+            "endpoint_url": model.endpoint_url, "api_key": model.api_key,
+            "is_active": model.is_active,
             "created_at": model.created_at.isoformat() if model.created_at else None,
         }
     except Exception as e:

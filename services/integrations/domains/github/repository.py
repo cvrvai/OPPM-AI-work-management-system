@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repositories.base import BaseRepository
+from domains.github.base_repository import BaseRepository
 from shared.models.git import GithubAccount, RepoConfig, CommitEvent, CommitAnalysis
 
 

@@ -15,9 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import get_workspace_context, WorkspaceContext
 from shared.database import get_session
-from schemas.ocr_fill import OcrFillResponse
-from services.ocr_service import extract_text_from_upload
-from services.ocr_fill_service import fill_from_ocr
+from domains.analysis.schemas import OcrFillResponse
+from domains.analysis.ocr_service import extract_text_from_upload, fill_from_ocr
 from infrastructure.llm.base import ProviderUnavailableError
 
 logger = logging.getLogger(__name__)

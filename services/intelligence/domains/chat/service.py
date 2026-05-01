@@ -32,7 +32,7 @@ from shared.models.project import Project, ProjectMember
 from shared.models.oppm import OPPMHeader
 from shared.models.git import CommitEvent, CommitAnalysis
 from shared.models.user import User
-from repositories.oppm_repo import (
+from domains.analysis.oppm_repository import (
     ObjectiveRepository, TimelineRepository, CostRepository,
     DeliverableRepository, ForecastRepository, RiskRepository,
     TaskDetailRepository,
@@ -40,7 +40,7 @@ from repositories.oppm_repo import (
 from repositories.project_repo import ProjectRepository
 from repositories.task_repo import TaskRepository
 from repositories.notification_repo import AuditRepository
-from services import rag_service
+from domains.rag import service as rag_service
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,7 @@ async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | 
         models = list(result.scalars().all())
         models.sort(key=lambda current_model: current_model.model_id != _DEFAULT_OLLAMA_MODEL_ID)
     serialized = [{"id": str(m.id), "provider": m.provider, "model_id": m.model_id,
-                   "api_key": None, "base_url": m.endpoint_url, "name": m.name,
+                   "api_key": m.api_key, "base_url": m.endpoint_url, "name": m.name,
                    "endpoint_url": m.endpoint_url, "is_active": m.is_active} for m in models]
     if not serialized:
         from config import get_settings as get_ai_settings

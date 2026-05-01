@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import get_workspace_context, WorkspaceContext
 from shared.database import get_session
-from schemas.oppm_fill import OPPMFillRequest, OPPMFillResponse
-from services.oppm_fill_service import fill_oppm
+from domains.analysis.oppm_fill_schemas import OPPMFillRequest, OPPMFillResponse
+from domains.analysis.oppm_fill_service import fill_oppm
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

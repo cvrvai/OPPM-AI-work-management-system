@@ -18,6 +18,7 @@ class AIModel(Base):
     provider: Mapped[str] = mapped_column(String(20), nullable=False)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False)
     endpoint_url: Mapped[str | None] = mapped_column(String(300))
+    api_key: Mapped[str | None] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

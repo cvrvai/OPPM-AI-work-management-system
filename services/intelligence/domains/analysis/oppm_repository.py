@@ -5,7 +5,7 @@ from datetime import date
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repositories.base import BaseRepository
+from domains.models.base_repository import BaseRepository
 from shared.models.oppm import (
     OPPMObjective, OPPMSubObjective, TaskSubObjective,
     OPPMTimelineEntry, ProjectCost,

@@ -6,15 +6,16 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_write, require_admin
 from shared.database import get_session
-from schemas.ai_chat import (
+from domains.chat.schemas import (
     ChatRequest, ChatResponse, SuggestPlanRequest, SuggestPlanResponse,
     CommitPlanRequest, CapabilitiesResponse, ReindexResponse, FeedbackRequest,
     FileParseResponse,
 )
-from services.ai_chat_service import chat, chat_stream, suggest_plan, commit_plan, weekly_summary, workspace_chat
-from services.document_indexer import reindex_workspace
-from repositories.vector_repo import VectorRepository
-from repositories.notification_repo import AuditRepository
+from domains.chat.service import chat, chat_stream, suggest_plan, commit_plan, weekly_summary, workspace_chat
+from domains.rag.document_indexer import reindex_workspace
+from domains.rag.vector_repository import VectorRepository
+from domains.analysis.oppm_repository import ObjectiveRepository, TimelineRepository, CostRepository, DeliverableRepository, ForecastRepository, RiskRepository, TaskDetailRepository
+from domains.models.base_repository import BaseRepository
 from shared.database import get_session
 from infrastructure.file_parser import parse_file, MAX_FILE_BYTES
 

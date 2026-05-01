@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from shared.auth import verify_internal_key
-from services.ai_analyzer import analyze_commits
+from domains.analysis.service import analyze_commits
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/internal")

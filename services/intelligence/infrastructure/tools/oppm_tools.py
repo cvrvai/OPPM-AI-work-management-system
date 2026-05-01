@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.tools.base import ToolDefinition, ToolParam, ToolResult
 from infrastructure.tools.registry import get_registry
-from repositories.oppm_repo import ObjectiveRepository, TimelineRepository
+from domains.analysis.oppm_repository import ObjectiveRepository, TimelineRepository
 
 logger = logging.getLogger(__name__)
 

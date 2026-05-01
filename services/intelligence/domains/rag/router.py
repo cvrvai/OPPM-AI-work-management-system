@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.auth import get_current_user, get_workspace_context
 from shared.database import get_session
-from schemas.rag import RAGQueryRequest, RAGQueryResponse, RAGSource
-from services import rag_service
+from domains.rag.schemas import RAGQueryRequest, RAGQueryResponse, RAGSource
+from domains.rag import service as rag_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

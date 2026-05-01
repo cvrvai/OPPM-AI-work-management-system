@@ -63,10 +63,12 @@ async def call_with_fallback(
             if json_mode:
                 return await adapter.call_json(
                     model["model_id"], prompt, endpoint_url=model.get("endpoint_url"),
+                    api_key=model.get("api_key"),
                 )
             else:
                 return await adapter.call(
                     model["model_id"], prompt, endpoint_url=model.get("endpoint_url"),
+                    api_key=model.get("api_key"),
                 )
         except ProviderUnavailableError as e:
             logger.warning("Provider %s/%s unavailable, trying next: %s",
@@ -122,6 +124,7 @@ async def call_with_fallback_tools(
                 messages,
                 tools=model_tools,
                 endpoint_url=model.get("endpoint_url"),
+                api_key=model.get("api_key"),
             )
         except ProviderUnavailableError as e:
             logger.warning("Provider %s/%s unavailable (tools), trying next: %s",

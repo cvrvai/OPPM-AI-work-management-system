@@ -2,7 +2,7 @@
 
 from typing import Optional
 from pydantic import BaseModel
-from schemas.oppm_fill import OPPMFillResponse
+from domains.analysis.oppm_fill_schemas import OPPMFillResponse
 
 
 class OcrResult(BaseModel):

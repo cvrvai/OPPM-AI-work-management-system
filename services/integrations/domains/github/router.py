@@ -7,11 +7,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.auth import WorkspaceContext, get_workspace_context, require_write, require_admin
-from schemas.git import GitAccountCreate, RepoConfigCreate, RepoConfigUpdate
+from domains.github.schemas import GitAccountCreate, RepoConfigCreate, RepoConfigUpdate
 from shared.schemas.common import SuccessResponse
 from shared.database import get_session, get_session_factory
 from shared.models.git import RepoConfig
-from services.git_service import (
+from domains.github.service import (
     list_accounts,
     create_account,
     delete_account,

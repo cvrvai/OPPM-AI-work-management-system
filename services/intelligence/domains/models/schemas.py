@@ -11,4 +11,5 @@ class AIModelConfig(BaseModel):
     provider: str
     model_id: str
     endpoint_url: Optional[str] = None
+    api_key: Optional[str] = None
     is_active: bool = True

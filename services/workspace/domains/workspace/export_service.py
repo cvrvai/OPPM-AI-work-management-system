@@ -10,12 +10,12 @@ from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from exports.oppm_exporter import build_oppm_xlsx
-from repositories.oppm_repo import (
+from domains.oppm.repository import (
     DeliverableRepository, ForecastRepository, ObjectiveRepository,
     RiskRepository, SubObjectiveRepository,
 )
-from repositories.project_repo import ProjectRepository
-from services.oppm_service import get_oppm_data
+from domains.project.repository import ProjectRepository
+from domains.oppm.service import get_oppm_data
 from shared.models.oppm import TaskSubObjective
 from shared.models.task import Task
 

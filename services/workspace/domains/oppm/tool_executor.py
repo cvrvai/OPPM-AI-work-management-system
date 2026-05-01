@@ -6,10 +6,10 @@ Used by the AI chat service when the LLM wants to make changes.
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repositories.oppm_repo import ObjectiveRepository, TimelineRepository, CostRepository
-from repositories.task_repo import TaskRepository
-from repositories.project_repo import ProjectRepository
-from repositories.notification_repo import AuditRepository
+from domains.oppm.repository import ObjectiveRepository, TimelineRepository, CostRepository
+from domains.task.repository import TaskRepository
+from domains.project.repository import ProjectRepository
+from domains.notification.repository import AuditRepository
 
 logger = logging.getLogger(__name__)
 

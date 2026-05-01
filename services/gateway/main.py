@@ -13,6 +13,7 @@ Legacy env vars (CORE_URLS, AI_URLS, GIT_URLS, MCP_URLS) are still supported.
 import re
 import asyncio
 import logging
+import uuid
 
 import httpx
 from contextlib import asynccontextmanager

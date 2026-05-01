@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.llm import call_with_fallback
 from infrastructure.llm.base import ProviderUnavailableError
-from schemas.ocr_fill import OcrResult, OcrFillResponse
-from services.oppm_fill_service import _get_models  # reuse existing model-resolver
+from domains.analysis.schemas import OcrResult, OcrFillResponse
+from domains.analysis.oppm_fill_service import _get_models  # reuse existing model-resolver
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,72 @@ Rules:
 - If the form shows no task rows, return tasks as an empty array [].
 - Dates must be ISO-8601 (YYYY-MM-DD) or null.
 - Do NOT invent data not visible in the OCR output."""
+
+
+# ── Stage 1 prompt ────────────────────────────────────────────────────────────
+_OCR_PROMPT = """You are an expert OCR assistant. Read the uploaded OPPM (One Page Project Manager) form image and extract:
+1. All visible text as raw_text
+2. Key field-value pairs as a JSON object under "fields"
+
+Return ONLY valid JSON with this exact structure (no commentary outside JSON):
+{
+  "raw_text": "<all visible text concatenated>",
+  "fields": {
+    "project_name": "<value or empty>",
+    "project_leader": "<value or empty>",
+    "start_date": "<YYYY-MM-DD or empty>",
+    "deadline": "<YYYY-MM-DD or empty>",
+    "project_objective": "<value or empty>",
+    "deliverable_output": "<value or empty>",
+    "completed_by_text": "<value or empty>",
+    "people_count": "<value or empty>"
+  }
+}"""
+
+
+async def extract_text_from_upload(
+    file_bytes: bytes,
+    mime_type: str,
+) -> OcrResult:
+    """Stage 1 — extract text from an uploaded file using OCR or file parsing.
+
+    Args:
+        file_bytes: Raw file bytes.
+        mime_type:  MIME type of the uploaded file.
+
+    Returns:
+        OcrResult with raw_text and detected fields.
+    """
+    # For images, use the Ollama vision model
+    if mime_type.startswith("image/"):
+        from infrastructure.llm.ollama import OllamaAdapter
+
+        adapter = OllamaAdapter()
+        result = await adapter.call_vision_json(
+            "gemma4:31b-cloud",
+            _OCR_PROMPT,
+            file_bytes,
+        )
+        if result is None:
+            raise RuntimeError("OCR vision model returned no parseable JSON")
+
+        raw_text = result.get("raw_text", "")
+        fields = result.get("fields", {})
+        if not isinstance(fields, dict):
+            fields = {}
+        return OcrResult(raw_text=raw_text, fields=fields)
+
+    # For PDF / XLSX / other files, use the file parser
+    from infrastructure.file_parser import parse_file
+
+    parse_result = parse_file(filename="upload", content=file_bytes)
+    if parse_result.error:
+        raise RuntimeError(f"File parsing failed: {parse_result.error}")
+
+    return OcrResult(
+        raw_text=parse_result.text,
+        fields={},
+    )
 
 
 async def fill_from_ocr(

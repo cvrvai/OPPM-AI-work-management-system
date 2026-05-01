@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from shared.auth import get_current_user, get_workspace_context, WorkspaceContext
-from infrastructure.mcp.tools import TOOL_REGISTRY
+from domains.execution import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

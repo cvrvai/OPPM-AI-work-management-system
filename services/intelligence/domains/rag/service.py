@@ -26,7 +26,7 @@ from infrastructure.rag.retrievers import (
 )
 from infrastructure.rag.retrievers.graph_retriever import _needs_graph
 from infrastructure.rag.retrievers.base_retriever import RetrievedChunk
-from repositories.vector_repo import VectorRepository
+from domains.rag.vector_repository import VectorRepository
 
 logger = logging.getLogger(__name__)
 

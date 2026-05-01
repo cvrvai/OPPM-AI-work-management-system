@@ -1456,7 +1456,7 @@ const AI_MODEL_PRESETS: {
       { name: 'Qwen3 VL', model_id: 'qwen3-vl:235b-cloud', description: 'Alibaba · Vision & language', endpoint: OLLAMA_CLOUD_ENDPOINT },
       { name: 'MiniMax M2', model_id: 'minimax-m2:cloud', description: 'Efficient high-performance model', endpoint: OLLAMA_CLOUD_ENDPOINT },
       { name: 'ALM 4.6', model_id: 'alm-4.6:cloud', description: 'Advanced language model', endpoint: OLLAMA_CLOUD_ENDPOINT },
-      { name: 'Kimi K2.5', model_id: 'kimi-k2.5:cloud', description: 'Moonshot · Long context · Powerful', endpoint: OLLAMA_CLOUD_ENDPOINT },
+      { name: 'Kimi K2.6', model_id: 'kimi-k2.6:cloud', description: 'Moonshot · Long context · Powerful', endpoint: OLLAMA_CLOUD_ENDPOINT },
     ],
   },
   {
@@ -1488,7 +1488,7 @@ const AI_MODEL_PRESETS: {
     icon: '🌙',
     label: 'Kimi (Moonshot)',
     models: [
-      { name: 'Kimi K2.5', model_id: 'kimi-k2-5', description: 'Moonshot · Long context · Chinese/English' },
+      { name: 'Kimi K2.6', model_id: 'kimi-k2-5', description: 'Moonshot · Long context · Chinese/English' },
       { name: 'Moonshot v1 8K', model_id: 'moonshot-v1-8k', description: 'Moonshot · 8K context' },
       { name: 'Moonshot v1 32K', model_id: 'moonshot-v1-32k', description: 'Moonshot · 32K context' },
     ],

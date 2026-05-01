@@ -25,7 +25,7 @@ from domains.oppm.google_sheets_schemas import (
     GoogleSheetsSetupStatusResponse,
 )
 from shared.schemas.common import SuccessResponse
-from services.oppm_service import (
+from domains.oppm.service import (
     get_oppm_data,
     get_objectives_with_tasks,
     create_objective,
@@ -61,8 +61,8 @@ from services.oppm_service import (
     get_oppm_task_items,
     replace_oppm_task_items,
 )
-from services.export_service import export_oppm_xlsx, import_oppm_xlsx, import_oppm_json, parse_oppm_xlsx_to_preview
-from services.google_sheets_service import (
+from domains.workspace.export_service import export_oppm_xlsx, import_oppm_xlsx, import_oppm_json, parse_oppm_xlsx_to_preview
+from domains.oppm.google_sheets_service import (
     delete_google_sheets_workspace_credentials,
     get_google_sheets_setup_status,
     get_google_sheet_link,
@@ -72,7 +72,7 @@ from services.google_sheets_service import (
     push_google_sheet_fill,
     download_linked_google_sheet_xlsx,
 )
-from repositories.oppm_repo import OPPMTemplateRepository
+from domains.oppm.repository import OPPMTemplateRepository
 
 router = APIRouter()
 

@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from infrastructure.embedding import generate_embedding
-from repositories.vector_repo import VectorRepository
+from domains.rag.vector_repository import VectorRepository
 from shared.database import get_session_factory
 
 logger = logging.getLogger(__name__)

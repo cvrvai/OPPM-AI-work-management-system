@@ -34,7 +34,7 @@ def _run_migrations() -> None:
     """Apply any pending Alembic migrations before the app starts accepting requests."""
     try:
         alembic_cfg = AlembicConfig("alembic.ini")
-        alembic_command.upgrade(alembic_cfg, "head")
+        alembic_command.upgrade(alembic_cfg, "heads")
         logger.info("Database migrations applied successfully")
     except Exception as exc:
         logger.error("Failed to apply database migrations: %s", exc)

@@ -12,34 +12,34 @@ services:
     ports:
       - "80:80"
 
-  core:
+  workspace:
     volumes:
       - ./shared:/shared
-      - ./services/core:/app
+      - ./services/workspace:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
 
-  ai:
+  intelligence:
     volumes:
       - ./shared:/shared
-      - ./services/ai:/app
+      - ./services/intelligence:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
     ports:
       - "8001:8001"
 
-  git:
+  integrations:
     volumes:
       - ./shared:/shared
-      - ./services/git:/app
+      - ./services/integrations:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8002 --reload
     ports:
       - "8002:8002"
 
-  mcp:
+  automation:
     volumes:
       - ./shared:/shared
-      - ./services/mcp:/app
+      - ./services/automation:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8003 --reload
     ports:
       - "8003:8003"

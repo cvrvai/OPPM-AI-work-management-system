@@ -1,4 +1,4 @@
-You are working on the **OPPM AI Work Management System** — a multi-tenant, workspace-scoped
+You are working on the **FlowDesk Work Management System** — a multi-tenant, workspace-scoped
 project management platform following the One Page Project Manager (OPPM) methodology.
 
 Before making any changes, always read the relevant rules in `.claude/rules/` for the area

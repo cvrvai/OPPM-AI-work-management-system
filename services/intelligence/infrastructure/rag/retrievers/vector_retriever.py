@@ -5,7 +5,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.rag.embedder import generate_embedding
 from infrastructure.rag.retrievers.base_retriever import BaseRetriever, RetrievedChunk
-from repositories.vector_repo import VectorRepository
+from domains.rag.vector_repository import VectorRepository
 
 logger = logging.getLogger(__name__)
 

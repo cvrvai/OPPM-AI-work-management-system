@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cryptography.fernet import Fernet, InvalidToken
 
 from config import get_settings
-from repositories.notification_repo import AuditRepository
-from repositories.project_repo import ProjectRepository
-from repositories.workspace_repo import WorkspaceRepository
+from domains.notification.repository import AuditRepository
+from domains.project.repository import ProjectRepository
+from domains.workspace.repository import WorkspaceRepository
 
 logger = logging.getLogger(__name__)
 

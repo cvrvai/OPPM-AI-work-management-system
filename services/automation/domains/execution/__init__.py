@@ -1,9 +1,9 @@
 """MCP tools registry — workspace-scoped data retrieval tools."""
 
-from infrastructure.mcp.tools.project_tools import get_project_status, list_projects
-from infrastructure.mcp.tools.objective_tools import list_at_risk_objectives
-from infrastructure.mcp.tools.task_tools import get_task_summary
-from infrastructure.mcp.tools.commit_tools import summarize_recent_commits
+from domains.execution.project_tools import get_project_status, list_projects
+from domains.execution.objective_tools import list_at_risk_objectives
+from domains.execution.task_tools import get_task_summary
+from domains.execution.commit_tools import summarize_recent_commits
 
 TOOL_REGISTRY: dict[str, dict] = {
     "get_project_status": {

@@ -8,7 +8,7 @@ from infrastructure.tools.base import ToolDefinition, ToolParam, ToolResult
 from infrastructure.tools.registry import get_registry
 from repositories.project_repo import ProjectRepository
 from repositories.task_repo import TaskRepository
-from repositories.oppm_repo import (
+from domains.analysis.oppm_repository import (
     ObjectiveRepository, CostRepository, RiskRepository,
     DeliverableRepository, ForecastRepository, TaskDetailRepository,
 )

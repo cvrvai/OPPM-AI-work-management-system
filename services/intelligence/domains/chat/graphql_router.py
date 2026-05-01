@@ -4,11 +4,11 @@ from fastapi import APIRouter, Depends
 from strawberry.asgi import GraphQL as GraphQLASGI
 import strawberry
 from strawberry.types import Info
-from schemas.graphql_schema import StatusItem, WeeklySummaryResult, SuggestedObjective, SuggestPlanResult
+from domains.chat.schemas import StatusItem, WeeklySummaryResult, SuggestedObjective, SuggestPlanResult
 from shared.auth import WorkspaceContext, require_write
 from shared.database import get_session
 from sqlalchemy.ext.asyncio import AsyncSession
-from services.ai_chat_service import weekly_summary, suggest_plan, commit_plan
+from domains.chat.service import weekly_summary, suggest_plan, commit_plan
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ import hmac
 import logging
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from repositories.git_repo import (
+from domains.github.repository import (
     GitAccountRepository,
     RepoConfigRepository,
     CommitRepository,

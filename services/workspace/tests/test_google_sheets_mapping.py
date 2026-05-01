@@ -3,7 +3,7 @@ import types
 import pytest
 from fastapi import HTTPException
 
-from services.google_sheets_service import (
+from domains.oppm.google_sheets_service import (
     _push_to_google_sheet,
     _resolve_oppm_mapping_profile,
     _resolve_explicit_oppm_mapping,

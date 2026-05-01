@@ -29,10 +29,15 @@ class OllamaAdapter(LLMAdapter):
 
     async def call(self, model_id: str, prompt: str, **kwargs) -> LLMResponse:
         url = self._url(**kwargs)
+        headers = {}
+        api_key = kwargs.get("api_key")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(
                     f"{url}/api/chat",
+                    headers=headers,
                     json={
                         "model": model_id,
                         "messages": [{"role": "user", "content": prompt}],
@@ -51,10 +56,15 @@ class OllamaAdapter(LLMAdapter):
 
     async def call_json(self, model_id: str, prompt: str, **kwargs) -> dict | None:
         url = self._url(**kwargs)
+        headers = {}
+        api_key = kwargs.get("api_key")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(
                     f"{url}/api/chat",
+                    headers=headers,
                     json={
                         "model": model_id,
                         "messages": [{"role": "user", "content": prompt}],
@@ -95,10 +105,15 @@ class OllamaAdapter(LLMAdapter):
         """
         url = self._url(**kwargs)
         image_b64 = base64.b64encode(image_bytes).decode()
+        headers = {}
+        api_key = kwargs.get("api_key")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         try:
             async with httpx.AsyncClient(timeout=180) as client:
                 resp = await client.post(
                     f"{url}/api/chat",
+                    headers=headers,
                     json={
                         "model": model_id,
                         "messages": [
