@@ -1,34 +1,49 @@
 # Database Documentation Hub
 
-Last updated: 2026-04-20
+Last updated: 2026-05-01
 
 ## Purpose
 
-This hub organizes database documentation by service so future updates are easier to plan and execute.
+This is the **single entry point** for all database documentation.
 
-It complements the canonical root docs:
+There are only **two database docs** you need to know about:
 
-- [DATABASE-SCHEMA.md](../DATABASE-SCHEMA.md)
-- [ERD.md](../ERD.md)
-
-## Database Docs By Service
-
-| Service | Database doc | Primary database role |
+| Doc | Purpose | When to update |
 |---|---|---|
-| Core | [core/README.md](core/README.md) | Main schema owner, migrations, and most business data writes |
-| AI | [ai/README.md](ai/README.md) | AI model config, embeddings, audit feedback, and AI-driven shared-data writes |
-| Git | [git/README.md](git/README.md) | GitHub integration tables, commit ingestion, analysis persistence |
-| MCP | [mcp/README.md](mcp/README.md) | Tool-mediated reads/writes via workspace-scoped tool functions |
-| Gateway | [gateway/README.md](gateway/README.md) | No direct DB ownership; routing-only layer |
+| [schema.md](schema.md) | **Canonical reference** — every table, column, constraint, index (32 tables) | When tables/columns/constraints change |
+| [ER-DIAGRAM.md](ER-DIAGRAM.md) | **Visual ER diagram** — Mermaid relationship map | When foreign keys or relationships change |
 
-## ER Diagram View
+## Single Source of Truth
 
-- [ER-DIAGRAM.md](ER-DIAGRAM.md) (service-oriented ER view)
-- [../ERD.md](../ERD.md) (canonical full ERD)
+The actual schema lives in code:
 
-## Update Checklist
+- **`shared/models/`** — SQLAlchemy ORM classes (source of truth)
+- **`services/workspace/alembic/versions/`** — Migration history
 
-1. If table/column constraints change, update `../DATABASE-SCHEMA.md`.
-2. If relationships change, update both `ER-DIAGRAM.md` and `../ERD.md`.
-3. If service data ownership changes, update relevant `database/<service>/README.md`.
+## Update Rule
+
+> **Schema changes? Update `shared/models/` first, then `docs/database/schema.md`.**
+> **Relationship changes? Update `docs/database/ER-DIAGRAM.md`.**
+
+That's it. No other database docs exist.
+
+## Service Database Ownership (Quick Reference)
+
+| Service | Tables it owns/writes |
+|---|---|
+| **Workspace** | All business tables: users, workspaces, projects, tasks, OPPM, agile, waterfall, notifications, audit_log |
+| **Intelligence** | `ai_models`, `document_embeddings` (plus reads/writes shared tables via tools) |
+| **Integrations** | `github_accounts`, `repo_configs`, `commit_events`, `commit_analyses` |
+| **Automation** | No dedicated tables (reads/writes shared tables via MCP tools) |
+| **Gateway** | No database access |
+
+## Where to find service-specific docs
+
+For feature-level service docs (routes, flowcharts, architecture), see:
+
+- [docs/services/workspace/README.md](../services/workspace/README.md)
+- [docs/services/intelligence/README.md](../services/intelligence/README.md)
+- [docs/services/integrations/README.md](../services/integrations/README.md)
+- [docs/services/automation/README.md](../services/automation/README.md)
+- [docs/services/gateway/README.md](../services/gateway/README.md)
 

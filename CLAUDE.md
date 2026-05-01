@@ -5,7 +5,7 @@ Before making any changes, always read the relevant rules in `.claude/rules/` fo
 you are modifying. These rules are mandatory and must be followed.
 
 ## Project Summary
-- **Backend**: Python FastAPI 0.115, 4-layer clean architecture (Router → Service → Repository → Infrastructure)
+- **Backend**: Python FastAPI 0.115, DDD domain architecture (domains/ with router, service, repository, schemas together)
 - **Frontend**: React 19 + Vite 8 + TypeScript 5.9 + Tailwind CSS v4 + @tanstack/react-query v5 + Zustand v5
 - **Database**: PostgreSQL (asyncpg) + SQLAlchemy async ORM, 23 tables across 7 domains, workspace-scoped (see `docs/DATABASE-SCHEMA.md`)
 - **Auth**: Custom JWT auth (python-jose HS256) — local decode via `JWT_SECRET_KEY`
@@ -13,7 +13,7 @@ you are modifying. These rules are mandatory and must be followed.
 - **AI**: LLM adapter pattern (Ollama, Kimi, Anthropic, OpenAI)
 
 ## Key Commands
-- **Backend (core)**: `cd services/core && uvicorn main:app --reload --port 8000`
+- **Backend (workspace)**: `cd services/workspace && uvicorn main:app --reload --port 8000`
 - **Frontend**: `cd frontend && npm run dev`
 - **Type check**: `cd frontend && npx tsc -b`
 - **Build**: `cd frontend && npm run build`

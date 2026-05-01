@@ -5,8 +5,9 @@ Routes all /api/* requests to the correct backend service using the same
 URL patterns as gateway/nginx.conf. Supports health-aware round-robin load
 balancing when multiple instances are configured via environment variables.
 
-Set CORE_URLS, AI_URLS, GIT_URLS, MCP_URLS to comma-separated lists to
-enable load balancing across multiple instances of the same service.
+Set WORKSPACE_URLS, INTELLIGENCE_URLS, INTEGRATIONS_URLS, AUTOMATION_URLS
+to comma-separated lists to enable load balancing across multiple instances.
+Legacy env vars (CORE_URLS, AI_URLS, GIT_URLS, MCP_URLS) are still supported.
 """
 
 import re
@@ -19,7 +20,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from load_balancer import HealthyRoundRobin
+from infrastructure.load_balancer import HealthyRoundRobin
+from middleware.logging import log_requests_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +34,24 @@ def _parse_urls(raw: str) -> list[str]:
 
 lb: dict[str, HealthyRoundRobin] = {}
 
+# Persistent HTTP client for connection pooling
+http_client: httpx.AsyncClient | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    lb["core"] = HealthyRoundRobin(_parse_urls(settings.core_urls))
-    lb["ai"]   = HealthyRoundRobin(_parse_urls(settings.ai_urls))
-    lb["git"]  = HealthyRoundRobin(_parse_urls(settings.git_urls))
-    lb["mcp"]  = HealthyRoundRobin(_parse_urls(settings.mcp_urls))
+    global http_client
+    lb["workspace"]     = HealthyRoundRobin(_parse_urls(settings.resolved_workspace_urls()))
+    lb["intelligence"]  = HealthyRoundRobin(_parse_urls(settings.resolved_intelligence_urls()))
+    lb["integrations"] = HealthyRoundRobin(_parse_urls(settings.resolved_integrations_urls()))
+    lb["automation"]    = HealthyRoundRobin(_parse_urls(settings.resolved_automation_urls()))
     tasks = [asyncio.create_task(v.start_health_checks()) for v in lb.values()]
+    http_client = httpx.AsyncClient(timeout=120, limits=httpx.Limits(max_connections=100, max_keepalive_connections=20))
     yield
     for t in tasks:
         t.cancel()
+    if http_client:
+        await http_client.aclose()
 
 
 app = FastAPI(title="OPPM API Gateway", lifespan=lifespan)
@@ -51,28 +60,37 @@ app = FastAPI(title="OPPM API Gateway", lifespan=lifespan)
 # ── Route table — order matters, most specific first ────────────────────────
 ROUTES: list[tuple[re.Pattern, str, int]] = [
     # pattern, service, timeout_seconds
-    (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/ai/"), "ai",  120),
-    (re.compile(r"^/api/v1/workspaces/[^/]+/rag/"),                "ai",  120),
-    (re.compile(r"^/api/v1/workspaces/[^/]+/ai/"),                 "ai",  120),
-    (re.compile(r"^/internal/analyze-commits$"),                   "ai",  120),
-    (re.compile(r"^/api/v1/workspaces/[^/]+/mcp/"),                "mcp", 120),
-    (re.compile(r"^/api/v1/workspaces/[^/]+/github-accounts"),     "git",  30),
-    (re.compile(r"^/api/v1/workspaces/[^/]+/commits"),             "git",  30),
-    (re.compile(r"^/api/v1/workspaces/[^/]+/git/"),                "git",  30),
-    (re.compile(r"^/api/v1/git/webhook"),                          "git",  30),
-    (re.compile(r"^/mcp"),                                         "mcp", 300),
-    (re.compile(r"^/api/"),                                        "core",  30),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/ai/"), "intelligence",  120),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/rag/"),                "intelligence",  120),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/ai/"),                 "intelligence",  120),
+    (re.compile(r"^/internal/analyze-commits$"),                   "intelligence",  120),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/mcp/"),                "automation",   120),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/github-accounts"),     "integrations",  30),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/commits"),             "integrations",  30),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/git/"),                "integrations",  30),
+    (re.compile(r"^/api/v1/git/webhook"),                          "integrations",  30),
+    (re.compile(r"^/mcp"),                                         "automation",   300),
+    (re.compile(r"^/api/"),                                       "workspace",     30),
 ]
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
+# Parse comma-separated origins from env var
+# SECURITY: Internal headers (X-Internal-API-Key) are intentionally excluded
+# from CORS. Internal endpoints are backend-only and must never be reachable
+# from browsers. Backend services communicate directly, bypassing CORS entirely.
+cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https?://localhost(:[0-9]+)?",
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     allow_credentials=True,
     max_age=86400,
 )
+
+
+# ── Request logging middleware ────────────────────────────────────────────────
+app.middleware("http")(log_requests_middleware)
 
 
 async def _forward_upstream_health(service: str) -> Response:
@@ -85,8 +103,7 @@ async def _forward_upstream_health(service: str) -> Response:
         )
 
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            upstream = await client.get(f"{target_base}/health")
+        upstream = await http_client.get(f"{target_base}/health", timeout=5)
 
         response = Response(
             content=upstream.content,
@@ -117,24 +134,24 @@ async def gateway_health() -> dict:
     return {"status": "ok", "service": "gateway"}
 
 
-@app.get("/health/core")
-async def core_health() -> Response:
-    return await _forward_upstream_health("core")
+@app.get("/health/workspace")
+async def workspace_health() -> Response:
+    return await _forward_upstream_health("workspace")
 
 
-@app.get("/health/ai")
-async def ai_health() -> Response:
-    return await _forward_upstream_health("ai")
+@app.get("/health/intelligence")
+async def intelligence_health() -> Response:
+    return await _forward_upstream_health("intelligence")
 
 
-@app.get("/health/git")
-async def git_health() -> Response:
-    return await _forward_upstream_health("git")
+@app.get("/health/integrations")
+async def integrations_health() -> Response:
+    return await _forward_upstream_health("integrations")
 
 
-@app.get("/health/mcp")
-async def mcp_health() -> Response:
-    return await _forward_upstream_health("mcp")
+@app.get("/health/automation")
+async def automation_health() -> Response:
+    return await _forward_upstream_health("automation")
 
 
 # ── Proxy handler ─────────────────────────────────────────────────────────────
@@ -176,16 +193,20 @@ async def proxy(request: Request, path: str) -> Response:
         if k.lower() not in skip_headers
     }
 
+    # Propagate request ID for distributed tracing
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    forward_headers["X-Request-ID"] = request_id
+
     logger.debug("Gateway -> %s %s", target_service, target_url)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            upstream = await client.request(
-                method=request.method,
-                url=target_url,
-                headers=forward_headers,
-                content=await request.body(),
-            )
+        upstream = await http_client.request(
+            method=request.method,
+            url=target_url,
+            headers=forward_headers,
+            content=await request.body(),
+            timeout=timeout,
+        )
 
         # Preserve multi-value headers (especially Set-Cookie).
         # dict(upstream.headers) collapses duplicates — browser loses cookies.
@@ -197,19 +218,21 @@ async def proxy(request: Request, path: str) -> Response:
         for key, value in upstream.headers.multi_items():
             if key.lower() not in skip_response:
                 response.headers.append(key, value)
+        response.headers["X-Request-ID"] = request_id
         return response
     except httpx.ConnectError:
         logger.warning("Gateway: cannot reach %s at %s", target_service, target_base)
         return Response(
             content=f"Service '{target_service}' is not running",
             status_code=502,
-            headers={"Retry-After": "5"},
+            headers={"Retry-After": "5", "X-Request-ID": request_id},
         )
     except httpx.TimeoutException:
         logger.warning("Gateway: timeout reaching %s", target_service)
         return Response(
             content=f"Service '{target_service}' timed out",
             status_code=504,
+            headers={"X-Request-ID": request_id},
         )
 
 

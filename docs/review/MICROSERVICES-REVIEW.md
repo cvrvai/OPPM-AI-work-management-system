@@ -10,8 +10,8 @@ What is solid:
 
 - service responsibilities are understandable
 - the shared ORM package prevents schema duplication across services
-- the core service owns the main business workflow cleanly
-- AI, GitHub, and MCP capabilities are separated instead of being bolted directly into core
+- the workspace service owns the main business workflow cleanly
+- intelligence, integrations, and automation capabilities are separated instead of being bolted directly into workspace
 - the Python gateway mirrors the same routing intent as the nginx gateway
 
 What still needs attention:
@@ -37,16 +37,16 @@ Confirmed facts:
 
 - auth uses locally validated HS256 JWTs in `shared/auth.py`
 - workspace authorization resolves through `workspace_members`
-- the core service mounts both `/api/auth/*` and `/api/v1/*`
-- AI, Git, and MCP services expose their own `/api/v1/*` route groups
-- the AI service also exposes `/internal/analyze-commits` protected by `X-Internal-API-Key`
+- the workspace service mounts both `/api/auth/*` and `/api/v1/*`
+- intelligence, integrations, and automation services expose their own `/api/v1/*` route groups
+- the intelligence service also exposes `/internal/analyze-commits` protected by `X-Internal-API-Key`
 - `shared/models/` is the active ORM source of truth
-- migrations are owned by `services/core/alembic/`
+- migrations are owned by `services/workspace/alembic/`
 - Redis is optional support infrastructure, not the source of truth
 
 ## Service Topology Assessment
 
-### Core Service
+### Workspace Service
 
 Assessment: strong
 
@@ -57,7 +57,7 @@ Why:
 - repositories and services are separated reasonably well
 - it is the correct place for migrations and workspace authorization-driven CRUD
 
-### AI Service
+### Intelligence Service
 
 Assessment: structured and production-ready
 
@@ -72,14 +72,14 @@ Why:
 - query rewriting improves recall for vague or underspecified questions
 - native function calling for OpenAI and Anthropic; XML-prompt fallback for Ollama and Kimi
 - user feedback is logged to `audit_log` for future model improvement
-- the AI service owns real route and write behavior, not just helper orchestration
+- the intelligence service owns real route and write behavior, not just helper orchestration
 
 Risk area:
 
 - the service still touches many cross-cutting concepts; schema or prompt drift can surface here quickly
 - adding new tools requires only a module edit but must also be reflected in documentation and tests
 
-### Git Service
+### Integrations Service
 
 Assessment: good
 
@@ -87,13 +87,13 @@ Why:
 
 - GitHub account, repo, webhook, and commit flows are grouped correctly
 - webhook processing is split into fast acknowledge plus background work
-- handoff to AI is explicit instead of hidden in a monolith callback
+- handoff to intelligence is explicit instead of hidden in a monolith callback
 
 Risk area:
 
 - webhook and repo configuration security must stay tight because secrets live here
 
-### MCP Service
+### Automation Service
 
 Assessment: clean and focused
 
@@ -101,7 +101,7 @@ Why:
 
 - service boundary is narrow
 - tool registry pattern is straightforward
-- it keeps tool execution separate from the AI service HTTP surface
+- it keeps tool execution separate from the intelligence service HTTP surface
 
 ### Gateway Layer
 
@@ -187,7 +187,7 @@ What still increases maintenance cost:
 
 One real schema contract issue was corrected while preparing this documentation refresh:
 
-- `services/core/schemas/workspace.py` was fixed so `InvitePreviewResponse` now carries `accepted_at`, `member_count`, `is_expired`, and `is_accepted`
+- `services/workspace/domains/workspace/schemas.py` was fixed so `InvitePreviewResponse` now carries `accepted_at`, `member_count`, `is_expired`, and `is_accepted`
 - those fields were removed from `MemberSkillCreate`, where they had been attached incorrectly
 
 That fix matters because the invite preview route and the Team/skills feature now have the correct schema separation.

@@ -20,3 +20,5 @@
 - Tokens stored in Zustand + localStorage via `useAuthStore`; auto-refresh handled in `api.ts`
 - Use Vite proxy in development — never make cross-origin API calls in dev
 - CORS is configured for production origins only
+- NEVER include `X-Internal-API-Key` in CORS `allow_headers` — internal endpoints must not be reachable from browsers
+- Backend services communicate directly (bypassing CORS); internal headers are for service-to-service use only

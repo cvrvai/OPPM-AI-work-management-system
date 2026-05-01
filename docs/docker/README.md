@@ -70,10 +70,10 @@ Compose files are layered. Settings in a later `-f` file override the earlier on
 | postgres | 5432 | 5432 | `pgvector/pgvector:pg16` |
 | redis | 6379 | 6379 | `redis:7-alpine` |
 | gateway | 80 | 80 | `./gateway` (nginx:1.27-alpine) |
-| core | 8000 | 8000 | `services/core/Dockerfile` |
-| ai | 8001 | 8001 | `services/ai/Dockerfile` |
-| git | 8002 | 8002 | `services/git/Dockerfile` |
-| mcp | 8003 | 8003 | `services/mcp/Dockerfile` |
+| workspace | 8000 | 8000 | `services/workspace/Dockerfile` |
+| intelligence | 8001 | 8001 | `services/intelligence/Dockerfile` |
+| integrations | 8002 | 8002 | `services/integrations/Dockerfile` |
+| automation | 8003 | 8003 | `services/automation/Dockerfile` |
 | frontend | 5173 | 5173 | `frontend/Dockerfile` |
 
 In production mode all microservice ports are `expose`-only (internal Docker network). Only port 80 (gateway) is published to the host.

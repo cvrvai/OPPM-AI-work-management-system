@@ -1,4 +1,6 @@
-"""Request logging middleware (copy from auth service)."""
+"""
+Request logging middleware using standard Python logging.
+"""
 
 import logging
 import time
@@ -11,15 +13,25 @@ logger = logging.getLogger("oppm.access")
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Logs every request with timing, status, and request ID."""
+
     async def dispatch(self, request: Request, call_next) -> Response:
         request_id = str(uuid.uuid4())[:8]
         start = time.time()
+
         request.state.request_id = request_id
+
         response: Response = await call_next(request)
+
         elapsed_ms = round((time.time() - start) * 1000, 1)
         logger.info(
             "%s %s %s %sms [%s]",
-            request.method, request.url.path, response.status_code, elapsed_ms, request_id,
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+            request_id,
         )
+
         response.headers["X-Request-ID"] = request_id
         return response

@@ -8,8 +8,8 @@ This ER diagram groups the main relationship chains by service/data domain.
 
 For full canonical schema and all table details, use:
 
-- [../ERD.md](../ERD.md)
-- [../DATABASE-SCHEMA.md](../DATABASE-SCHEMA.md)
+- [schema.md](schema.md) — Full canonical schema reference (32 tables, all columns, constraints, indexes)
+- [../architecture/miro/er-diagram.md](../architecture/miro/er-diagram.md) — Miro-ready visual ER diagram
 
 ## ER View
 
@@ -39,6 +39,21 @@ erDiagram
     projects ||--o{ oppm_deliverables : delivers
     projects ||--o{ oppm_forecasts : forecasts
     projects ||--o{ oppm_risks : risks
+    projects ||--o{ oppm_templates : templates
+    projects ||--o{ oppm_header : header
+    projects ||--o{ oppm_task_items : task_items
+    oppm_task_items ||--o{ oppm_task_items : parent_child
+
+    projects ||--o{ epics : has
+    projects ||--o{ user_stories : has
+    projects ||--o{ sprints : has
+    projects ||--o{ retrospectives : has
+    epics ||--o{ user_stories : contains
+    sprints ||--o{ user_stories : contains
+    sprints ||--o{ retrospectives : reviews
+
+    projects ||--o{ project_phases : phases
+    project_phases ||--o{ phase_documents : documents
 
     workspaces ||--o{ github_accounts : connects
     github_accounts ||--o{ repo_configs : authorizes
@@ -54,8 +69,8 @@ erDiagram
 
 ## Service-Domain Notes
 
-- Core service is the main owner for schema evolution and most table writes.
-- AI service owns AI-specific tables and can mutate shared business tables via tools.
-- Git service owns GitHub ingestion tables and analysis persistence flow.
-- MCP and gateway do not own dedicated table domains.
+- Workspace service is the main owner for schema evolution and most table writes.
+- Intelligence service owns AI-specific tables and can mutate shared business tables via tools.
+- Integrations service owns GitHub ingestion tables and analysis persistence flow.
+- Automation and gateway do not own dedicated table domains.
 

@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, ExternalLink, FileImage, Link2, Loader2, Send, ScanLine, Unplug, X, CloudDownload } from 'lucide-react'
 import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
+import { useChatContext } from '@/hooks/useChatContext'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import { api } from '@/lib/api'
 import { buildOppmScratchSheet } from '@/lib/oppmSheetBuilder'
@@ -214,6 +215,7 @@ export function OPPMView() {
 
   // Keep workspace-switch guard active while the page is simplified.
   useWorkspaceNavGuard()
+  useChatContext('project', id)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [sheetData, setSheetData] = useState<any[]>([])

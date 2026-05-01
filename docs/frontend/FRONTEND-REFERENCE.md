@@ -301,6 +301,8 @@ Typical query keys:
 
 ## Feature Entry Points
 
+Each section below lists the frontend files for a feature. For the full feature flow (backend files, tables, caveats), see the linked canonical doc in `docs/features/`.
+
 ### Authentication
 
 Start with:
@@ -308,6 +310,8 @@ Start with:
 - `stores/authStore.ts`
 - `pages/Login.tsx`
 - `lib/api.ts`
+
+Canonical doc: [`features/auth/authentication.md`](../features/auth/authentication.md)
 
 ### Workspace Selection And Shell
 
@@ -317,6 +321,8 @@ Start with:
 - `components/workspace/`
 - `components/layout/Layout.tsx`
 - `components/layout/Sidebar.tsx`
+
+Canonical doc: [`features/workspace/workspaces.md`](../features/workspace/workspaces.md)
 
 ### Projects
 
@@ -332,6 +338,8 @@ Important current behavior:
 - the team assignment step stores workspace member ids but posts them in a field named `user_id`
 - create and edit flows now use the same wider modal rhythm as the task editor for denser setup without cramped form spacing
 
+Canonical doc: [`features/project/projects.md`](../features/project/projects.md)
+
 ### Task Permissions
 
 The task system enforces role-based permissions:
@@ -340,6 +348,8 @@ The task system enforces role-based permissions:
 - only the assigned user can submit daily reports
 - only project leads can approve/revoke report approvals
 - approval status updates use optimistic UI via `setQueryData`
+
+Canonical doc: [`features/project/tasks.md`](../features/project/tasks.md)
 
 ### Task Hierarchy
 
@@ -353,6 +363,8 @@ Tasks support a parent/sub-task hierarchy via `parent_task_id`:
   - A **quick-start guide** explaining the OPPM hierarchy workflow for new users
 - The table view renders tasks hierarchically with `└` indentation for sub-tasks
 - The board (Kanban) view renders all tasks flat grouped by status
+
+Canonical doc: [`features/project/tasks.md`](../features/project/tasks.md)
 
 ### OPPM
 
@@ -373,7 +385,11 @@ Important current behavior:
 - when backend app render is unavailable, the page switches to **browser preview mode** and embeds the live Google Sheet preview in an `iframe`
 - browser preview mode is read-only inside the app, but it is the reason Google Sheet edits can appear after reload
 - the current page surfaces backend configuration warnings without crashing the route or breaking the rest of the page
-- see [docs/oppm/google-sheets-linked-form.md](../oppm/google-sheets-linked-form.md) for the full feature walkthrough and UI-state reference
+
+Canonical docs:
+- [`features/oppm/spreadsheet-rendering.md`](../features/oppm/spreadsheet-rendering.md) — Spreadsheet, templates, AI fill
+- [`features/oppm/google-sheets-integration.md`](../features/oppm/google-sheets-integration.md) — Google Sheets linking
+- [`features/oppm/structured-planning.md`](../features/oppm/structured-planning.md) — Structured OPPM data
 
 ### Team And Skills
 
@@ -388,6 +404,8 @@ Important current behavior:
 - the Team page is now the home for member role changes, invite management, and skill management
 - the member and invite panel is shared from `Settings.tsx` but rendered on Team
 - admin behavior resolves from `current_user_role` first and falls back to `role` for compatibility
+
+Canonical doc: [`features/workspace/team-invites.md`](../features/workspace/team-invites.md)
 
 ### Settings
 

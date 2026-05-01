@@ -1511,12 +1511,17 @@ function AIModelSettings() {
 
   const { data: models, isLoading } = useQuery({
     queryKey: ['ai-models', ws?.id],
-    queryFn: () => ws ? api.get<AIModel[]>(`${wsPath}/ai/models`) : api.get<AIModel[]>('/ai/models'),
+    queryFn: () => api.get<AIModel[]>(`${wsPath}/ai/models`),
+    enabled: !!ws,
   })
 
   const createModel = useMutation({
-    mutationFn: (data: { name: string; provider: string; model_id: string; endpoint_url: string | null }) =>
-      ws ? api.post(`${wsPath}/ai/models`, data) : api.post('/ai/models', data),
+    mutationFn: (data: { name: string; provider: string; model_id: string; endpoint_url: string | null }) => {
+      if (!ws) {
+        throw new Error('Select a workspace before managing AI models.')
+      }
+      return api.post(`${wsPath}/ai/models`, data)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-models'] })
       setShowAdd(false)
@@ -1529,12 +1534,22 @@ function AIModelSettings() {
   })
 
   const toggleModel = useMutation({
-    mutationFn: (id: string) => ws ? api.put(`${wsPath}/ai/models/${id}/toggle`, {}) : api.put(`/ai/models/${id}/toggle`, {}),
+    mutationFn: (id: string) => {
+      if (!ws) {
+        throw new Error('Select a workspace before managing AI models.')
+      }
+      return api.put(`${wsPath}/ai/models/${id}/toggle`, {})
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ai-models'] }),
   })
 
   const deleteModel = useMutation({
-    mutationFn: (id: string) => ws ? api.delete(`${wsPath}/ai/models/${id}`) : api.delete(`/ai/models/${id}`),
+    mutationFn: (id: string) => {
+      if (!ws) {
+        throw new Error('Select a workspace before managing AI models.')
+      }
+      return api.delete(`${wsPath}/ai/models/${id}`)
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ai-models'] }),
   })
 

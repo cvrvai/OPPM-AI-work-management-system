@@ -19,11 +19,11 @@ docker compose -f docker-compose.microservices.yml up -d --build <service>
 
 Examples:
 ```bash
-# Changed something in services/core/
-docker compose -f docker-compose.microservices.yml up -d --build core
+# Changed something in services/workspace/
+docker compose -f docker-compose.microservices.yml up -d --build workspace
 
-# Changed something in services/ai/
-docker compose -f docker-compose.microservices.yml up -d --build ai
+# Changed something in services/intelligence/
+docker compose -f docker-compose.microservices.yml up -d --build intelligence
 
 # Changed nginx.conf in gateway/
 docker compose -f docker-compose.microservices.yml up -d --build gateway
@@ -65,10 +65,10 @@ docker compose -f docker-compose.microservices.yml logs -f core
 
 | What changed | Command |
 |---|---|
-| `services/core/**` | `--build core` |
-| `services/ai/**` | `--build ai` |
-| `services/git/**` | `--build git` |
-| `services/mcp/**` | `--build mcp` |
+| `services/workspace/**` | `--build workspace` |
+| `services/intelligence/**` | `--build intelligence` |
+| `services/integrations/**` | `--build integrations` |
+| `services/automation/**` | `--build automation` |
 | `gateway/nginx.conf` | `--build gateway` |
 | `shared/**` | `--build` (all services) |
 | `services/.env` | `restart <service>` (no rebuild needed) |
@@ -86,10 +86,10 @@ Install all dependencies into your global Python environment:
 
 ```powershell
 pip install -r services/gateway/requirements.txt
-pip install -r services/core/requirements.txt
-pip install -r services/ai/requirements.txt
-pip install -r services/git/requirements.txt
-pip install -r services/mcp/requirements.txt
+pip install -r services/workspace/requirements.txt
+pip install -r services/intelligence/requirements.txt
+pip install -r services/integrations/requirements.txt
+pip install -r services/automation/requirements.txt
 ```
 
 ---
@@ -100,10 +100,10 @@ Open one terminal per service (6 total). Run each from the workspace root:
 
 ```powershell
 ./services/gateway/start.ps1  # port 8080 — API gateway + load balancer  ← start this first
-./services/core/start.ps1     # port 8000 — workspaces, projects, tasks, OPPM
-./services/ai/start.ps1       # port 8001 — chat, RAG, commit analysis
-./services/git/start.ps1      # port 8002 — GitHub webhooks, commits
-./services/mcp/start.ps1      # port 8003 — MCP tool endpoints
+./services/workspace/start.ps1     # port 8000 — workspaces, projects, tasks, OPPM
+./services/intelligence/start.ps1  # port 8001 — chat, RAG, commit analysis
+./services/integrations/start.ps1  # port 8002 — GitHub webhooks, commits
+./services/automation/start.ps1    # port 8003 — MCP tool endpoints
 ```
 
 ```powershell
@@ -120,7 +120,7 @@ cd frontend ; npm run dev:docker  # proxy through the Docker gateway on port 80
 cd frontend ; npm run dev:direct  # bypass the gateway and proxy to ports 8000-8003
 ```
 
-If you're already inside a service folder (e.g. `services/core/`), just run:
+If you're already inside a service folder (e.g. `services/workspace/`), just run:
 
 ```powershell
 ./start.ps1
@@ -135,7 +135,7 @@ CORE_URLS=http://localhost:8000,http://localhost:8010
 
 Then start the second instance on the extra port:
 ```powershell
-# In services/core/, temporarily override the port
+# In services/workspace/, temporarily override the port
 uvicorn main:app --reload --port 8010
 ```
 
@@ -148,10 +148,10 @@ uvicorn main:app --reload --port 8010
 docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up -d
 
 # 2. Stop the one you want to run natively
-docker compose -f docker-compose.microservices.yml stop core
+docker compose -f docker-compose.microservices.yml stop workspace
 
 # 3. Run it with the script
-./services/core/start.ps1
+./services/workspace/start.ps1
 ```
 
 ---
@@ -174,28 +174,28 @@ docker compose -f docker-compose.microservices.yml stop core
 |---|---|---|
 | gateway (Docker) | 80 | nginx reverse proxy + load balancer |
 | gateway (native) | 8080 | Python reverse proxy + load balancer |
-| core | 8000 | workspaces, projects, tasks, OPPM |
-| ai | 8001 | chat, RAG, AI analysis |
-| git | 8002 | GitHub, webhooks, commits |
-| mcp | 8003 | MCP tool endpoints |
+| workspace | 8000 | workspaces, projects, tasks, OPPM |
+| intelligence | 8001 | chat, RAG, AI analysis |
+| integrations | 8002 | GitHub, webhooks, commits |
+| automation | 8003 | MCP tool endpoints |
 | frontend | 5173 | Vite dev server |
 
 ---
 
 ## Database Migrations
 
-Migrations are applied via Alembic inside the `core` service.
+Migrations are applied via Alembic inside the `workspace` service.
 
 ### Apply pending migrations (Docker)
 
 ```powershell
-docker compose -f docker-compose.microservices.yml exec core alembic upgrade head
+docker compose -f docker-compose.microservices.yml exec workspace alembic upgrade head
 ```
 
 ### Apply pending migrations (native)
 
 ```powershell
-cd services/core
+cd services/workspace
 .\start.ps1   # ensure env vars loaded, then in another terminal:
 alembic upgrade head
 ```
@@ -203,9 +203,9 @@ alembic upgrade head
 ### Create a new migration
 
 ```powershell
-cd services/core
+cd services/workspace
 alembic revision --autogenerate -m "add column foo to projects"
-# Review the generated file in services/core/alembic/versions/
+# Review the generated file in services/workspace/alembic/versions/
 alembic upgrade head
 ```
 
@@ -228,8 +228,8 @@ docker compose -f docker-compose.microservices.yml -f docker-compose.dev.yml up 
 ```
 
 What it does:
-- Mounts `services/core/` → `/app/` in the core container (uvicorn `--reload` picks up changes)
-- Same for `services/ai/`, `services/git/`, `services/mcp/`
+- Mounts `services/workspace/` → `/app/` in the workspace container (uvicorn `--reload` picks up changes)
+- Same for `services/intelligence/`, `services/integrations/`, `services/automation/`
 - Does **not** mount `shared/` — rebuild required if shared code changes (`--build` all)
 
 Note: The frontend is not included in the Docker overlay; Vite hot-reload operates independently on port 5173.

@@ -67,11 +67,24 @@ export const useAuthStore = create<AuthState>((set) => ({
         return
       }
 
-      clearSession()
+      // fetchCurrentUser returned null — check why.
+      // If tokens are still in localStorage, sessionClient did NOT call clearSession,
+      // meaning this was a transient network/server error (service restarting, etc.).
+      // Keep the user authenticated so they can retry once services recover.
+      if (hasStoredSession()) {
+        set({ isAuthenticated: true, loading: false })
+        return
+      }
+
+      // Tokens were cleared by sessionClient (401 from refresh) — actually invalid.
       set({ user: null, isAuthenticated: false, loading: false })
     } catch {
-      clearSession()
-      set({ user: null, isAuthenticated: false, loading: false })
+      // Unexpected error during init — if tokens are still present assume network issue.
+      if (hasStoredSession()) {
+        set({ isAuthenticated: true, loading: false })
+      } else {
+        set({ user: null, isAuthenticated: false, loading: false })
+      }
     }
   },
 

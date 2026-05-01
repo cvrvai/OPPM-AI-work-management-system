@@ -13,16 +13,16 @@ Gateway layer has two implementations that must remain aligned:
 
 | Route pattern | Target service |
 |---|---|
-| `/api/v1/workspaces/{ws}/projects/{project_id}/ai/*` | AI |
-| `/api/v1/workspaces/{ws}/rag/*` | AI |
-| `/api/v1/workspaces/{ws}/ai/*` | AI |
-| `/internal/analyze-commits` | AI |
-| `/api/v1/workspaces/{ws}/mcp/*` | MCP |
-| `/api/v1/workspaces/{ws}/github-accounts*` | Git |
-| `/api/v1/workspaces/{ws}/commits*` | Git |
-| `/api/v1/workspaces/{ws}/git/*` | Git |
-| `/api/v1/git/webhook` | Git |
-| `/api/*` (fallback) | Core |
+| `/api/v1/workspaces/{ws}/projects/{project_id}/ai/*` | Intelligence |
+| `/api/v1/workspaces/{ws}/rag/*` | Intelligence |
+| `/api/v1/workspaces/{ws}/ai/*` | Intelligence |
+| `/internal/analyze-commits` | Intelligence |
+| `/api/v1/workspaces/{ws}/mcp/*` | Automation |
+| `/api/v1/workspaces/{ws}/github-accounts*` | Integrations |
+| `/api/v1/workspaces/{ws}/commits*` | Integrations |
+| `/api/v1/workspaces/{ws}/git/*` | Integrations |
+| `/api/v1/git/webhook` | Integrations |
+| `/api/*` (fallback) | Workspace |
 
 ## Service Flowchart
 
@@ -30,10 +30,10 @@ Gateway layer has two implementations that must remain aligned:
 flowchart TD
     A[Incoming request] --> B[Gateway route matcher]
     B --> C{Path match}
-    C -- AI patterns --> D[Forward to AI service]
-    C -- Git patterns --> E[Forward to Git service]
-    C -- MCP patterns --> F[Forward to MCP service]
-    C -- /api fallback --> G[Forward to Core service]
+    C -- AI patterns --> D[Forward to intelligence service]
+    C -- Git patterns --> E[Forward to integrations service]
+    C -- MCP patterns --> F[Forward to automation service]
+    C -- /api fallback --> G[Forward to workspace service]
     C -- Health path --> H[Service health forwarding]
 
     D --> I[Upstream response passthrough]

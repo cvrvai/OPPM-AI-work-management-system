@@ -15,6 +15,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, parseFile } from '@/lib/api'
+import { fetchWithSessionRetry } from '@/lib/sessionClient'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore, getContextKey, type FileAttachment, type PastSession, DEFAULT_PANEL_SIZE } from '@/stores/chatStore'
 import {
@@ -439,16 +440,12 @@ export function ChatPanel() {
       }
 
       // Project-level: consume SSE stream
-      const token = localStorage.getItem('access_token')
-      const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || '/api'
-
+      // Use fetchWithSessionRetry so an expired access token is automatically
+      // refreshed before the request rather than returning 401 to the user.
       try {
-        const res = await fetch(`${API_BASE}${path}`, {
+        const res = await fetchWithSessionRetry(path, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messages: msgs }),
           signal: abortRef.current.signal,
         })

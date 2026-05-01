@@ -99,14 +99,16 @@ export function ProjectDetail() {
 
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id, ws?.id],
-    queryFn: () => ws ? api.get<Project>(`${wsPath}/projects/${id}`) : api.get<Project>(`/projects/${id}`),
+    queryFn: () => api.get<Project>(`${wsPath}/projects/${id}`),
+    enabled: !!ws && !!id,
   })
 
   useChatContext('project', id, project?.title)
 
   const { data: tasks, isLoading: loadingTasks } = useQuery({
     queryKey: ['tasks', id, ws?.id],
-    queryFn: () => ws ? api.get<Task[]>(`${wsPath}/tasks?project_id=${id}`) : api.get<Task[]>(`/projects/${id}/tasks`),
+    queryFn: () => api.get<Task[]>(`${wsPath}/tasks?project_id=${id}`),
+    enabled: !!ws && !!id,
   })
 
   const { data: objectives } = useQuery({
@@ -164,6 +166,10 @@ export function ProjectDetail() {
       queryClient.invalidateQueries({ queryKey: ['project', id] })
     },
   })
+
+  if (!ws) {
+    return <p className="py-12 text-center text-sm text-text-secondary">Select a workspace to view this project.</p>
+  }
 
   if (loadingProject) {
     return (

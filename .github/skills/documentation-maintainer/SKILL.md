@@ -36,9 +36,9 @@ Then verify the current implementation from code before stating facts or updatin
 
 When documentation and code differ, prefer the code and record the mismatch.
 
-- Backend entry points: `services/*/main.py`, `services/core/main.py`, `services/gateway/main.py`
-- Backend API surface: `services/*/routers/`, `services/core/routers/`, `services/*/schemas/`
-- Business logic: `services/*/services/`, `services/core/services/`
+- Backend entry points: `services/*/main.py`, `services/workspace/main.py`, `services/gateway/main.py`
+- Backend API surface: `services/*/domains/*/router.py`, `services/workspace/domains/*/router.py`, `services/*/schemas/`
+- Business logic: `services/*/domains/*/service.py`, `services/workspace/domains/*/service.py`
 - Shared platform behavior: `shared/auth.py`, `shared/database.py`, `shared/models/`
 - Frontend stack and routes: `frontend/package.json`, `frontend/src/App.tsx`, `frontend/src/pages/`, `frontend/src/lib/api.ts`
 - Deployment/runtime shape: `docker-compose.yml`, `docker-compose.dev.yml`, `docker-compose.microservices.yml`, `start_*.ps1`

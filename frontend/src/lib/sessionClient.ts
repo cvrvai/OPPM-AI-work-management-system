@@ -44,7 +44,11 @@ async function performRefresh(): Promise<SessionTokens | null> {
     })
 
     if (!response.ok) {
-      clearSession()
+      if (response.status === 401) {
+        // Refresh token is explicitly invalid or expired — log out
+        clearSession()
+      }
+      // For 5xx / network errors keep tokens so the user can retry after services recover
       return null
     }
 
@@ -52,7 +56,7 @@ async function performRefresh(): Promise<SessionTokens | null> {
     persistSession(sessionTokens)
     return sessionTokens
   } catch {
-    clearSession()
+    // Network error (service down during restart, etc.) — keep tokens, let the user retry
     return null
   }
 }

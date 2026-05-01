@@ -6,4 +6,4 @@ Get-Content $envFile | ForEach-Object {
   }
 }
 Set-Location $PSScriptRoot
-uvicorn main:app --reload --host 127.0.0.1 --port 8005
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
