@@ -1,0 +1,83 @@
+=== TABLES ===
+ai_models
+alembic_version
+audit_log
+commit_analyses
+commit_events
+document_embeddings
+epics
+github_accounts
+member_skills
+notifications
+oppm_deliverables
+oppm_forecasts
+oppm_header
+oppm_objectives
+oppm_risks
+oppm_sub_objectives
+oppm_task_items
+oppm_templates
+oppm_timeline_entries
+phase_documents
+project_costs
+project_members
+project_phases
+projects
+refresh_tokens
+repo_configs
+retrospectives
+sprints
+task_assignees
+task_dependencies
+task_owners
+task_reports
+task_sub_objectives
+tasks
+user_stories
+users
+workspace_ai_config
+workspace_invites
+workspace_members
+workspaces
+
+=== PROJECTS COLUMNS ===
+id | uuid | NO | None
+workspace_id | uuid | NO | None
+title | character varying | NO | None
+description | text | NO | None
+status | character varying | NO | None
+priority | character varying | NO | None
+progress | integer | NO | None
+start_date | date | YES | None
+deadline | date | YES | None
+lead_id | uuid | YES | None
+metadata | jsonb | NO | None
+created_at | timestamp with time zone | NO | now()
+updated_at | timestamp with time zone | NO | now()
+project_code | character varying | YES | None
+objective_summary | text | YES | None
+budget | numeric | NO | '0'::numeric
+planning_hours | numeric | NO | '0'::numeric
+end_date | date | YES | None
+deliverable_output | text | YES | None
+methodology | character varying | NO | 'oppm'::character varying
+
+=== TASKS COLUMNS ===
+id | uuid | NO | None
+title | character varying | NO | None
+description | text | NO | None
+project_id | uuid | NO | None
+oppm_objective_id | uuid | YES | None
+assignee_id | uuid | YES | None
+status | character varying | NO | None
+priority | character varying | NO | None
+progress | integer | NO | None
+project_contribution | integer | NO | None
+due_date | date | YES | None
+created_by | uuid | YES | None
+completed_at | timestamp with time zone | YES | None
+created_at | timestamp with time zone | NO | now()
+updated_at | timestamp with time zone | NO | now()
+start_date | date | YES | None
+sort_order | integer | NO | 0
+parent_task_id | uuid | YES | None

@@ -1,0 +1,43 @@
+=== WORKSPACES ===
+0a36e0e7-d47d-48aa-8ba9-f9a09d7065e2 | one u
+77f3feae-8994-4e06-b39a-cf5df40ff0f3 | one uc
+dd1dfda6-d54e-472c-b4d5-1d7609dd94a5 | KIT
+f956f5ce-571c-41f4-b5ae-48621a70e2c7 | test
+3c2704ca-5f7c-499a-a016-cc6bdbab196a | OPPM Test Workspace
+b649caf3-a516-4163-a1ce-486765111507 | smoke-ws
+4cb12b24-daca-4c05-8ebd-75eb58e16bd1 | ic project
+
+=== USERS ===
+4e6c84a0-6b3c-41cb-b49c-54d45e7abbd9 | vai@gmail.com | None
+2b2571dc-b911-40fd-98c7-1b02a32b150c | choonvai@gmail.com | None
+2a2daacd-6311-40e9-89a2-0838d169af87 | ky.rasy24@kit.edu.kh | None
+8b824a04-522e-457e-9d22-b864e58af99a | cheong.choonvai24@kit.edu.kh | None
+a55b9e85-2768-418f-a460-307d2c7dc198 | admin@oppm.dev | None
+aef177bb-94c0-4a69-9775-675ac8ed7d30 | smoke_test@oppm.local | None
+
+=== WORKSPACE MEMBERS ===
+7f7947d6-751a-43e3-a652-86b89ca80ed3 | 0a36e0e7-d47d-48aa-8ba9-f9a09d7065e2 | 4e6c84a0-6b3c-41cb-b49c-54d45e7abbd9 | owner | None
+a90d0312-7424-43df-aaaf-1990e54d121c | 77f3feae-8994-4e06-b39a-cf5df40ff0f3 | 2b2571dc-b911-40fd-98c7-1b02a32b150c | owner | None
+8396dc5b-abc5-4144-a40e-b2d37a816e5f | dd1dfda6-d54e-472c-b4d5-1d7609dd94a5 | 2a2daacd-6311-40e9-89a2-0838d169af87 | owner | None
+90141859-241e-46ae-8445-6b51e5b14d9e | f956f5ce-571c-41f4-b5ae-48621a70e2c7 | 8b824a04-522e-457e-9d22-b864e58af99a | owner | None
+6d1e49a6-1a8d-4345-a3ab-0cf0a0993b64 | 77f3feae-8994-4e06-b39a-cf5df40ff0f3 | 8b824a04-522e-457e-9d22-b864e58af99a | member | None
+796286b9-61ab-4260-abc2-d6a266b54df6 | 3c2704ca-5f7c-499a-a016-cc6bdbab196a | a55b9e85-2768-418f-a460-307d2c7dc198 | owner | None
+227dbe10-f94d-4ac9-b763-b8527b570c14 | b649caf3-a516-4163-a1ce-486765111507 | aef177bb-94c0-4a69-9775-675ac8ed7d30 | owner | None
+6c0a23bf-5ffd-40f9-87fb-a6b06aee940f | 4cb12b24-daca-4c05-8ebd-75eb58e16bd1 | 2b2571dc-b911-40fd-98c7-1b02a32b150c | owner | None
+
+=== NHRS PROJECTS ===
+No NHRS project found
+
+=== OPPM_SUB_OBJECTIVES CONSTRAINTS ===
+ck_sub_objectives_position | CHECK ((("position" >= 1) AND ("position" <= 6)))
+
+=== OPPM_DELIVERABLES CONSTRAINTS ===
+
+=== OPPM_FORECASTS CONSTRAINTS ===
+
+=== OPPM_RISKS CONSTRAINTS ===
+ck_risks_rag | CHECK (((rag)::text = ANY ((ARRAY['green'::character varying, 'amber'::character varying, 'red'::character varying])::text[])))
+
+=== PROJECT_PHASES CONSTRAINTS ===
+ck_project_phases_type | CHECK (((phase_type)::text = ANY ((ARRAY['requirements'::character varying, 'design'::character varying, 'development'::character varying, 'testing'::character varying, 'deployment'::character varying, 'maintenance'::character varying])::text[])))
+ck_project_phases_status | CHECK (((status)::text = ANY ((ARRAY['not_started'::character varying, 'in_progress'::character varying, 'completed'::character varying, 'approved'::character varying])::text[])))

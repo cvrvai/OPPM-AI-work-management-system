@@ -13,12 +13,14 @@ from .constants import (
     _CLASSIC_MAX_TASK_ROWS,
     _CLASSIC_VISIBLE_TASK_ROWS,
     _MEMBERS_SHEET_TITLE,
+    _MEMBERS_TABLE_HEADERS,
     _OPPM_SHEET_TITLE,
     _SPREADSHEET_ID_RE,
     _SPREADSHEET_URL_RE,
     _SUMMARY_BLOCK_FIELDS,
     _SUMMARY_SHEET_TITLE,
     _TASKS_SHEET_TITLE,
+    _TASKS_TABLE_HEADERS,
     _TASK_SUB_OBJECTIVE_MARK,
     _TIMELINE_SYMBOLS,
     _XLSX_MIME_TYPE,
@@ -304,17 +306,18 @@ def _extend_task_rows_for_overflow(
 
 def _build_task_row_merge_requests(
     task_rows: list[dict[str, int | str]],
+    tasks: list[Any | None],
     sheet_id: int,
     index_col: int,
     end_col: int,
 ) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
-    for slot in task_rows:
+    for slot, task in zip(task_rows, tasks):
         row = int(slot["row"])
-        kind = str(slot.get("kind", ""))
         row_idx = row - 1
+        is_main = not bool(_get_item_value(task, "is_sub", False)) if task else False
 
-        if kind == "main":
+        if is_main:
             # Merge ALL cells in the row (from index_col to end_col)
             requests.append({
                 "mergeCells": {
@@ -328,9 +331,10 @@ def _build_task_row_merge_requests(
                     "mergeType": "MERGE_ALL",
                 }
             })
-        elif kind == "sub":
+        else:
             # Leave 1 cell for index, merge the rest (from title_col to end_col)
-            title_col = int(slot.get("title_col", index_col + 1))
+            slot_index_col = int(slot.get("index_col") or slot.get("write_col") or index_col)
+            title_col = int(slot.get("title_col") or (slot_index_col + 1))
             requests.append({
                 "mergeCells": {
                     "range": {
@@ -351,8 +355,8 @@ def _grouped_task_text_updates(task_rows: list[dict[str, int | str]], tasks: lis
     data: list[dict[str, Any]] = []
     for slot, task in zip(task_rows, tasks):
         row = int(slot["row"])
-        slot_kind = str(slot.get("kind", ""))
-        if slot_kind == "main":
+        is_main = not bool(_get_item_value(task, "is_sub", False)) if task else False
+        if is_main:
             # After mergeCells runs, write_col IS the single merged cell — just write once
             value = _oppm_grouped_task_label(task) if task else ""
             data.append({
@@ -361,15 +365,18 @@ def _grouped_task_text_updates(task_rows: list[dict[str, int | str]], tasks: lis
             })
             continue
 
-        # Sub-task slot: split into two columns — index in first, title in second
+        # Sub-task: split into two columns — index in first, title in second
+        # Derive columns from slot; if slot is a main-task slot, compute defaults
+        slot_index_col = int(slot.get("index_col") or slot.get("write_col") or 0)
+        slot_title_col = int(slot.get("title_col") or (slot_index_col + 1) or 0)
         index_value = str(_get_item_value(task, "index", "") or "") if task else ""
         title_value = _oppm_grouped_task_title(task) if task else ""
         data.append({
-            "range": f"'{_OPPM_SHEET_TITLE}'!{_a1(int(slot['index_col']), row)}",
+            "range": f"'{_OPPM_SHEET_TITLE}'!{_a1(slot_index_col, row)}",
             "values": [[index_value]],
         })
         data.append({
-            "range": f"'{_OPPM_SHEET_TITLE}'!{_a1(int(slot['title_col']), row)}",
+            "range": f"'{_OPPM_SHEET_TITLE}'!{_a1(slot_title_col, row)}",
             "values": [[title_value]],
         })
 
@@ -700,7 +707,7 @@ def _write_oppm_sheet_values(
             sheet_id = _get_sheet_id_by_title(service, spreadsheet_id, _OPPM_SHEET_TITLE)
             if sheet_id is not None:
                 merge_requests = _build_task_row_merge_requests(
-                    task_rows, sheet_id, index_col, task_end_col
+                    task_rows, rendered_tasks, sheet_id, index_col, task_end_col
                 )
                 if merge_requests:
                     try:

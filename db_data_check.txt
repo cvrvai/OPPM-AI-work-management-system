@@ -1,0 +1,28 @@
+project_phases: 0 rows
+oppm_deliverables: 0 rows
+oppm_forecasts: 0 rows
+oppm_risks: 0 rows
+oppm_sub_objectives: 0 rows
+oppm_objectives: 18 rows
+
+project_phases columns:
+  id
+  workspace_id
+  project_id
+  phase_type
+  status
+  position
+  start_date
+  end_date
+  gate_approved_by
+  gate_approved_at
+  notes
+  created_at
+  updated_at
+
+oppm_deliverables columns:
+  id
+  project_id
+  item_number
+  description
+  created_at
