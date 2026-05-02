@@ -3,11 +3,13 @@ import types
 import pytest
 from fastapi import HTTPException
 
-from domains.oppm.google_sheets_service import (
-    _push_to_google_sheet,
+from domains.oppm.google_sheets.mapping import (
     _resolve_oppm_mapping_profile,
     _resolve_explicit_oppm_mapping,
     _resolve_helper_sheet_profile,
+)
+from domains.oppm.google_sheets.writer import (
+    _push_to_google_sheet,
     _write_oppm_sheet_values,
     _write_summary_helper_sheet_values,
 )
@@ -86,7 +88,7 @@ def test_resolve_explicit_row_column_mapping(monkeypatch):
         cells={},
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     profile = _resolve_explicit_oppm_mapping(
         types.SimpleNamespace(),
@@ -122,7 +124,7 @@ def test_resolve_explicit_label_mapping_for_inline_and_value_targets(monkeypatch
         max_col=60,
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     profile = _resolve_explicit_oppm_mapping(
         types.SimpleNamespace(),
@@ -148,7 +150,7 @@ def test_resolve_explicit_mapping_rejects_unknown_fields(monkeypatch):
         cells={},
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     with pytest.raises(HTTPException) as error:
         _resolve_explicit_oppm_mapping(
@@ -175,7 +177,7 @@ def test_resolve_explicit_mapping_rejects_ambiguous_and_missing_labels(monkeypat
         ],
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     with pytest.raises(HTTPException) as error:
         _resolve_explicit_oppm_mapping(
@@ -264,7 +266,7 @@ def test_resolve_mapping_profile_detects_task_regions_and_people_count(monkeypat
         max_col=40,
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-layout")
 
@@ -324,7 +326,7 @@ def test_resolve_mapping_profile_detects_grouped_task_rows(monkeypatch):
         max_col=30,
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-grouped")
 
@@ -370,7 +372,7 @@ def test_resolve_mapping_profile_detects_merged_summary_block(monkeypatch):
         max_col=40,
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-merged-summary")
 
@@ -550,7 +552,7 @@ def test_partial_layout_fallback_prefers_detected_leader_anchor_over_stale_a1(mo
         max_col=40,
     )
 
-    monkeypatch.setattr("services.google_sheets_service._read_sheet_layout", lambda *_args, **_kwargs: layout)
+    monkeypatch.setattr("domains.oppm.google_sheets.layout._read_sheet_layout", lambda *_args, **_kwargs: layout)
 
     profile = _resolve_oppm_mapping_profile(types.SimpleNamespace(), "sheet-partial")
 
@@ -678,7 +680,7 @@ def test_resolve_helper_sheet_profile_uses_summary_labels(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "services.google_sheets_service._read_sheet_layout",
+        "domains.oppm.google_sheets.layout._read_sheet_layout",
         lambda _service, _spreadsheet_id, _sheet_title: summary_layout,
     )
 
@@ -741,11 +743,11 @@ def test_write_summary_helper_sheet_values_targets_helper_cells() -> None:
 def test_push_to_google_sheet_rejects_unresolved_mapping(monkeypatch) -> None:
     service = _FakeService()
 
-    monkeypatch.setattr("services.google_sheets_service._build_sheets_service", lambda *_args, **_kwargs: service)
-    monkeypatch.setattr("services.google_sheets_service._ensure_sheet_tabs", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("services.google_sheets_service._resolve_helper_sheet_profile", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("domains.oppm.google_sheets.credentials._build_sheets_service", lambda *_args, **_kwargs: service)
+    monkeypatch.setattr("domains.oppm.google_sheets.writer._ensure_sheet_tabs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("domains.oppm.google_sheets.mapping._resolve_helper_sheet_profile", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        "services.google_sheets_service._resolve_oppm_mapping_profile",
+        "domains.oppm.google_sheets.mapping._resolve_oppm_mapping_profile",
         lambda *_args, **_kwargs: {
             "source": "unresolved",
             "confidence": 0.125,
@@ -777,10 +779,10 @@ def test_push_to_google_sheet_writes_oppm_alongside_helper_sheets(monkeypatch) -
     service = _FakeService()
     task_sheet_calls: list[str] = []
 
-    monkeypatch.setattr("services.google_sheets_service._build_sheets_service", lambda *_args, **_kwargs: service)
-    monkeypatch.setattr("services.google_sheets_service._ensure_sheet_tabs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("domains.oppm.google_sheets.credentials._build_sheets_service", lambda *_args, **_kwargs: service)
+    monkeypatch.setattr("domains.oppm.google_sheets.writer._ensure_sheet_tabs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        "services.google_sheets_service._resolve_helper_sheet_profile",
+        "domains.oppm.google_sheets.mapping._resolve_helper_sheet_profile",
         lambda *_args, **_kwargs: {
             "source": "helper_sheet_profile",
             "summary_anchors": {"project_name": "B2"},
@@ -788,7 +790,7 @@ def test_push_to_google_sheet_writes_oppm_alongside_helper_sheets(monkeypatch) -
         },
     )
     monkeypatch.setattr(
-        "services.google_sheets_service._write_summary_helper_sheet_values",
+        "domains.oppm.google_sheets.writer._write_summary_helper_sheet_values",
         lambda *_args, **_kwargs: (
             9,
             {
@@ -807,9 +809,9 @@ def test_push_to_google_sheet_writes_oppm_alongside_helper_sheets(monkeypatch) -
         "clear_anchors": [],
         "missing_anchors": [],
     }
-    monkeypatch.setattr("services.google_sheets_service._resolve_oppm_mapping_profile", lambda *_args, **_kwargs: oppm_mapping)
+    monkeypatch.setattr("domains.oppm.google_sheets.mapping._resolve_oppm_mapping_profile", lambda *_args, **_kwargs: oppm_mapping)
     monkeypatch.setattr(
-        "services.google_sheets_service._write_oppm_sheet_values",
+        "domains.oppm.google_sheets.writer._write_oppm_sheet_values",
         lambda *_args, **_kwargs: (
             10,
             {
@@ -822,7 +824,7 @@ def test_push_to_google_sheet_writes_oppm_alongside_helper_sheets(monkeypatch) -
     def _capture_sheet_write(_service, _spreadsheet_id, sheet_title, _headers, _rows):
         task_sheet_calls.append(sheet_title)
 
-    monkeypatch.setattr("services.google_sheets_service._write_sheet_with_existing_headers", _capture_sheet_write)
+    monkeypatch.setattr("domains.oppm.google_sheets.writer._write_sheet_with_existing_headers", _capture_sheet_write)
 
     result = _push_to_google_sheet(
         {"client_email": "oppm-editor@example.com"},

@@ -322,7 +322,7 @@ async def fill_oppm(
 
     rendered_main_rows = 0
 
-    for obj_idx, obj in enumerate(objectives[:4]):
+    for obj_idx, obj in enumerate(objectives):
         # Main task row: the objective itself
         task_items.append({
             "index": str(obj_idx + 1),
@@ -336,7 +336,7 @@ async def fill_oppm(
         })
         rendered_main_rows += 1
 
-        # Sub-task rows: first 3 root tasks of this objective (template has 3 sub-rows per main-task slot)
+        # Sub-task rows: all root tasks linked to this objective
         obj_root = sorted(
             [
                 task
@@ -344,20 +344,16 @@ async def fill_oppm(
                 if str(task.oppm_objective_id) == str(obj.id) and task.parent_task_id is None
             ],
             key=lambda task: (task.sort_order or 0, str(task.created_at)),
-        )[:3]
+        )
 
         selected_sub_tasks: list[Task] = list(obj_root)
         if not selected_sub_tasks:
-            flat_tasks = sorted(
+            selected_sub_tasks = sorted(
                 [task for task in all_tasks if str(task.oppm_objective_id) == str(obj.id)],
                 key=lambda task: (task.sort_order or 0, str(task.created_at)),
-            )[:3]
-            selected_sub_tasks = list(flat_tasks)
+            )
 
-        if len(selected_sub_tasks) < 3:
-            selected_sub_tasks.extend(_take_unassigned(3 - len(selected_sub_tasks)))
-
-        for sub_idx, task in enumerate(selected_sub_tasks[:3], 1):
+        for sub_idx, task in enumerate(selected_sub_tasks, 1):
             task_items.append({
                 "index": f"{obj_idx + 1}.{sub_idx}",
                 "title": task.title,
@@ -369,7 +365,7 @@ async def fill_oppm(
                 "timeline": timeline_by_task.get(str(task.id), []),
             })
 
-    while rendered_main_rows < 4 and unassigned_cursor < len(unassigned_root_tasks):
+    while unassigned_cursor < len(unassigned_root_tasks):
         main_idx = rendered_main_rows + 1
         task_items.append({
             "index": str(main_idx),
@@ -383,7 +379,7 @@ async def fill_oppm(
         })
         rendered_main_rows += 1
 
-        for sub_idx, task in enumerate(_take_unassigned(3), 1):
+        for sub_idx, task in enumerate(_take_unassigned(len(unassigned_root_tasks) - unassigned_cursor), 1):
             task_items.append({
                 "index": f"{main_idx}.{sub_idx}",
                 "title": task.title,
@@ -395,33 +391,40 @@ async def fill_oppm(
                 "timeline": timeline_by_task.get(str(task.id), []),
             })
 
-    # If both text fields already have content, skip the LLM call
-    if fills["project_objective"] and fills["deliverable_output"]:
+    # If all three generated text fields already have content, skip the LLM call
+    if fills["project_objective"] and fills["deliverable_output"] and fills["completed_by_text"]:
         return {"fills": fills, "tasks": task_items, "members": member_items}
 
     # ── LLM call to generate missing text fields ───────────────
     models = await _get_models(session, workspace_id, model_id)
 
-    prompt = f"""You are an expert project manager using the One Page Project Manager (OPPM) methodology.
-Given the project information below, write concise, professional text for the two OPPM header fields.
+    prompt = f"""You are an OPPM (One Page Project Manager) form-filling assistant.
+Read the project data below and return a JSON object with exactly three fields.
+Use ONLY the data provided — never invent information not present in the input.
 
-Project Title: {project.title}
-Description: {project.description or "Not provided"}
-Start Date: {fills["start_date"] or "Not set"}
-Deadline: {fills["deadline"] or "Not set"}
+== PROJECT DATA ==
+Project Title    : {project.title}
+Description      : {project.description or "Not provided"}
+Start Date       : {fills["start_date"] or "Not set"}
+Deadline         : {fills["deadline"] or "Not set"}
+Team size        : {len(member_items)} member(s)
 Current Objective: {fills["project_objective"] or "Not set"}
 Current Deliverable Output: {fills["deliverable_output"] or "Not set"}
+Current Completed-by text : {fills["completed_by_text"] or "Not set"}
 
-Return ONLY valid JSON with exactly these two keys:
+Return ONLY valid JSON with exactly these three keys:
 {{
-  "project_objective": "One sentence describing what this project aims to achieve.",
-  "deliverable_output": "One sentence describing the tangible output/result of this project."
+  "project_objective":  "One sentence describing what this project aims to achieve.",
+  "deliverable_output": "One sentence describing the tangible output/result of this project.",
+  "completed_by_text":  "Duration string derived from start_date and deadline, e.g. '8 weeks' or '3 months'. Empty string if dates are missing."
 }}
 
 Rules:
-- If the current value is already good, return it unchanged.
+- If a current value is already good, return it unchanged.
 - Keep each text under 120 characters.
-- Be specific and professional."""
+- Be specific and professional.
+- completed_by_text: calculate the duration between start_date and deadline; if either is missing, use an empty string.
+- Return ONLY the JSON object. No markdown fences, no explanation."""
 
     import re as _re
     import json as _json
@@ -455,5 +458,7 @@ Rules:
             fills["project_objective"] = result_json.get("project_objective")
         if not fills["deliverable_output"]:
             fills["deliverable_output"] = result_json.get("deliverable_output")
+        if not fills["completed_by_text"]:
+            fills["completed_by_text"] = result_json.get("completed_by_text") or None
 
     return {"fills": fills, "tasks": task_items, "members": member_items}

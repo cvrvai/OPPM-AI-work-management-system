@@ -15,6 +15,8 @@ from domains.oppm.schemas import (
     RiskCreate, RiskUpdate,
     OPPMHeaderUpsert,
     OPPMTaskItemsReplace,
+    SheetActionsRequest, SheetActionsResponse,
+    OppmSheetPromptResponse, OppmSheetPromptUpsert,
 )
 from domains.oppm.google_sheets_schemas import (
     GoogleSheetLinkResponse,
@@ -60,9 +62,12 @@ from domains.oppm.service import (
     upsert_oppm_header,
     get_oppm_task_items,
     replace_oppm_task_items,
+    get_oppm_sheet_prompt,
+    upsert_oppm_sheet_prompt,
+    reset_oppm_sheet_prompt,
 )
 from domains.workspace.export_service import export_oppm_xlsx, import_oppm_xlsx, import_oppm_json, parse_oppm_xlsx_to_preview
-from domains.oppm.google_sheets_service import (
+from domains.oppm.google_sheets import (
     delete_google_sheets_workspace_credentials,
     get_google_sheets_setup_status,
     get_google_sheet_link,
@@ -71,6 +76,7 @@ from domains.oppm.google_sheets_service import (
     delete_google_sheet_link,
     push_google_sheet_fill,
     download_linked_google_sheet_xlsx,
+    execute_sheet_actions,
 )
 from domains.oppm.repository import OPPMTemplateRepository
 
@@ -521,3 +527,65 @@ async def replace_oppm_task_items_route(
     """Full replace of OPPM task items for a project (delete-all then re-insert)."""
     items = [i.model_dump() for i in data.items]
     return await replace_oppm_task_items(session, project_id, items, ws.workspace_id)
+
+
+# ── Sheet Actions (OPPM AI) ──
+
+@router.post(
+    "/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/actions",
+    response_model=SheetActionsResponse,
+)
+async def execute_sheet_actions_route(
+    project_id: str,
+    data: SheetActionsRequest,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    """Execute a batch of OPPM AI sheet actions against the linked Google Sheet."""
+    result = await execute_sheet_actions(
+        session,
+        project_id,
+        ws.workspace_id,
+        ws.user.id,
+        [a.model_dump() for a in data.actions],
+    )
+    return SheetActionsResponse(**result)
+
+
+# ── OPPM AI Config (workspace-level system prompt) ──
+
+@router.get(
+    "/workspaces/{workspace_id}/ai-config/oppm-sheet-prompt",
+    response_model=OppmSheetPromptResponse,
+)
+async def get_oppm_sheet_prompt_route(
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the workspace's custom OPPM sheet system prompt (or default flag)."""
+    return await get_oppm_sheet_prompt(session, ws.workspace_id)
+
+
+@router.put(
+    "/workspaces/{workspace_id}/ai-config/oppm-sheet-prompt",
+    response_model=OppmSheetPromptResponse,
+)
+async def upsert_oppm_sheet_prompt_route(
+    data: OppmSheetPromptUpsert,
+    ws: WorkspaceContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Store a custom OPPM sheet system prompt for the workspace. Requires admin."""
+    return await upsert_oppm_sheet_prompt(session, ws.workspace_id, data.prompt)
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/ai-config/oppm-sheet-prompt",
+    response_model=OppmSheetPromptResponse,
+)
+async def reset_oppm_sheet_prompt_route(
+    ws: WorkspaceContext = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Reset the OPPM sheet system prompt to the built-in default. Requires admin."""
+    return await reset_oppm_sheet_prompt(session, ws.workspace_id)

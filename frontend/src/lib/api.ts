@@ -1,4 +1,5 @@
 import { fetchWithSessionRetry } from '@/lib/sessionClient'
+import type { SheetAction, SheetActionsResponse } from '@/types'
 
 export class ApiError extends Error {
   status: number
@@ -97,4 +98,42 @@ export async function parseFile(workspaceId: string, file: File): Promise<FilePa
   }
 
   return response.json()
+}
+
+export async function executeSheetActions(
+  workspaceId: string,
+  projectId: string,
+  actions: SheetAction[],
+): Promise<SheetActionsResponse> {
+  const response = await fetchWithSessionRetry(
+    `/api/v1/workspaces/${workspaceId}/projects/${projectId}/oppm/google-sheet/actions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actions }),
+    },
+  )
+  if (!response.ok) {
+    throw await getApiError(response, 'Failed to execute sheet actions')
+  }
+  return response.json()
+}
+
+export async function getOppmSheetPrompt(
+  workspaceId: string,
+): Promise<{ config_key: string; prompt: string; is_default: boolean }> {
+  return api.get(`/api/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`)
+}
+
+export async function updateOppmSheetPrompt(
+  workspaceId: string,
+  prompt: string,
+): Promise<{ config_key: string; prompt: string; is_default: boolean }> {
+  return api.put(`/api/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`, { prompt })
+}
+
+export async function resetOppmSheetPrompt(
+  workspaceId: string,
+): Promise<{ config_key: string; prompt: string; is_default: boolean }> {
+  return api.delete(`/api/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`)
 }

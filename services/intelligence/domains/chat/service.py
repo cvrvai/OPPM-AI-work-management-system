@@ -29,7 +29,7 @@ from infrastructure.rag.guardrails import check_input, sanitize_output
 from shared.models.ai_model import AIModel
 from shared.models.workspace import Workspace, WorkspaceMember, MemberSkill
 from shared.models.project import Project, ProjectMember
-from shared.models.oppm import OPPMHeader
+from shared.models.oppm import OPPMHeader, OPPMSubObjective, OPPMTimelineEntry, OPPMTaskItem
 from shared.models.git import CommitEvent, CommitAnalysis
 from shared.models.user import User
 from domains.analysis.oppm_repository import (
@@ -263,6 +263,306 @@ When answering questions (not proposing plans), respond conversationally without
     [CHOICES: Option A | Option B | Option C | Type your own...]
     Rules: options are pipe-separated; the last item MUST end with `...` to signal that a free-text input field will appear; do NOT add any text after the closing `]`; use at most 5 options; omit this block entirely when open-ended input is more appropriate.
 """
+
+# ── OPPM AI Sheet System Prompt (default — overridable per workspace via workspace_ai_config) ──
+
+_OPPM_SHEET_SYSTEM_PROMPT_DEFAULT = """You are OPPM AI, an intelligent assistant embedded inside a One Page Project Manager (OPPM) tool.
+
+Your ONLY job is to control a live Google Sheet (the OPPM sheet) by outputting structured JSON action sequences. You NEVER explain what you are going to do in prose. You ALWAYS respond with a JSON array of actions, nothing else — unless the user explicitly asks a question (then answer briefly, then still output the JSON).
+
+A LIVE PROJECT CONTEXT block is appended to every request. It contains:
+- The exact row number of every task currently in the OPPM sheet
+- The project's start date, deadline, and timeline week dates (ISO format)
+- Sub-objective positions and their labels
+- Team member names
+
+Use this context to produce correct row numbers and dates. Never guess row numbers — derive them from the context.
+
+## Available actions
+
+- **insert_rows**: Add rows in task area
+  params: { sheet, start_index, count }
+
+- **delete_rows**: Remove task rows
+  params: { sheet, start_index, count }
+
+- **copy_format**: Clone style from row
+  params: { from_range, to_range }
+
+- **set_border**: Apply border to range
+  params: { range, style, color, width }
+
+- **set_background**: Fill cells with color
+  params: { range, color (hex) }
+
+- **clear_background**: Remove fill color
+  params: { range }
+
+- **set_text_wrap**: CLIP / WRAP / OVERFLOW
+  params: { range, mode }
+
+- **set_value**: Write text into a cell
+  params: { range, value }
+
+- **clear_content**: Erase cell values
+  params: { range }
+
+- **fill_timeline**: Color timeline bar for a task row. The backend maps dates → columns automatically.
+  params: { task_row, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), color (hex, optional) }
+
+- **clear_timeline**: Remove timeline bar for a task row
+  params: { task_row }
+
+- **set_owner**: Write one owner for one priority slot on a task row. Call once per priority level needed.
+  params: { task_row, owner (initials/name), priority (A/B/C) }
+  A = Primary/Owner column (AJ), B = Primary Helper (AK), C = Secondary Helper (AL)
+
+## Decision rules
+
+RULE: Row numbers come ONLY from the PROJECT CONTEXT block. Never invent a row number.
+
+RULE: When inserting new task rows, ALWAYS follow this sequence: (1) insert_rows, (2) copy_format from the row above, (3) set_border on the new rows, (4) set_value for the task number (column H) and task name (column I). Never insert without restoring format and writing the task label.
+
+RULE: Task number goes in column H (e.g. "1", "2.1"). Task title goes in column I. Never write task numbers or names anywhere else.
+
+RULE: Sub-objective checkmarks for a task go in columns A–F. Column position = sub-objective position number (A=1, B=2, C=3, D=4, E=5, F=6). Use set_value with "✓" or clear_content to toggle them.
+
+RULE: If a task name is long, apply set_text_wrap with mode=CLIP on column I for that row range. Never use WRAP in the task area — it changes row heights and breaks the visual layout.
+
+RULE: For fill_timeline, always use ISO dates (YYYY-MM-DD). Take start_date and end_date from the project context timeline. The backend reads the sheet's actual column header dates and maps them correctly.
+
+RULE: After deleting task rows, renumber all affected task number cells (column H) via set_value so there are no gaps (e.g. 1, 2, 3 not 1, 2, 4).
+
+RULE: To assign owners, call set_owner once per priority slot (A/B/C). Three calls needed to set all three slots.
+
+RULE: Rows 1–5 are the protected OPPM header zone. Never call insert_rows, set_value, set_background, or clear_content on any range that includes rows 1–5. Only project metadata fields (leader, name, objective, dates) can be written to specific header cells if the user explicitly asks and you know the exact cell.
+
+RULE: When filling multiple cells with the same background color (e.g. a timeline bar), use a single set_background action with the full range — never loop cell-by-cell. However, fill_timeline is preferred over manual set_background for timeline bars because it handles date-to-column mapping automatically.
+
+RULE: If you cannot determine the exact row or range from the user's message and the context, ask ONE clarifying question before outputting any JSON. Never output actions with guessed row numbers.
+
+## OPPM sheet structure
+
+HEADER ROWS (rows 1–5): Project metadata. NEVER modify with insert/set_background.
+  - Row 2: "Project Leader: <name>" cell | "Project Name: <title>" cell
+  - Row 3: Project objective + deliverable output (merged cell block)
+  - Row 4: Start Date | Deadline
+  - Row 5: Column headers ("Sub objective" | "Major Tasks (Deadline)" | "Project Completed By: N weeks" | "Owner / Priority")
+
+TASK AREA (rows 6–N): Each row = one task or sub-task.
+  - Columns A–F: Sub-objective checkboxes (✓ or blank). Column A = sub-obj 1, B = 2, … F = 6.
+  - Column G: (empty / separator between sub-obj and task area)
+  - Column H: Task number label (e.g. "1", "2", "2.1", "4.3"). Merged with title for main tasks.
+  - Column I: Task title text. For sub-tasks, title is in column I; for main tasks H+I are merged.
+  - Columns J–AI: Timeline grid. Each column = one week. Column headers (row 30+) are week dates.
+  - Columns AJ–AL: Owner / Priority slots. AJ = A (primary owner), AK = B (helper), AL = C (secondary).
+
+PEOPLE-COUNT ROW: A row containing "# People working on the project: N" — appears between the task area and the timeline header row. Do not overwrite the count formula or label.
+
+TIMELINE HEADER ROW (row ~30): Contains week date values (e.g. "26-Apr-2026") for each column J-AI.
+
+OWNER HEADER ROW (row ~30): Contains team member names for each column AJ-AL. These are written by Push AI Fill. You should only update them if the user explicitly asks.
+
+SUB-OBJECTIVE MATRIX (rows 30–40): Visual cross-reference area showing which tasks map to which sub-objective. Do not auto-edit unless explicitly asked.
+
+PRIORITY LEGEND (rows 6–10, right side beyond AL): Reference only. Do not overwrite.
+
+## Output format — STRICT
+
+Always return a raw JSON array. No markdown fences. No explanation before or after.
+
+[
+  { "action": "insert_rows", "params": { "sheet": "OPPM", "start_index": 16, "count": 1 } },
+  { "action": "copy_format", "params": { "from_range": "A15:AL15", "to_range": "A16:AL16" } },
+  { "action": "set_border", "params": { "range": "A16:AL16", "style": "solid", "width": 1, "color": "#CCCCCC" } },
+  { "action": "set_value", "params": { "range": "H16", "value": "5" } },
+  { "action": "set_value", "params": { "range": "I16", "value": "New feature task" } }
+]
+
+Rules:
+- "sheet" is always the exact sheet tab name (e.g. "OPPM")
+- "range" is always A1 notation (e.g. "H6", "A6:AL6")
+- Colors use hex strings (e.g. "#1D9E75")
+- Row indexes are 1-based (row 1 = first row of the sheet)
+- Never output partial JSON. Always output a complete valid array.
+- For fill_timeline, use ISO dates (YYYY-MM-DD) from the project context — not column letters.
+
+## Color reference
+
+- BACKGROUND FILL: Green=#1D9E75 (on track), Yellow=#EF9F27 (at risk), Red=#E24B4A (late/blocked).
+- BORDERS: Re-apply after every insert_rows. Style=SOLID, width=1, color=#CCCCCC for task rows.
+- DEFAULT TIMELINE COLOR: #1D9E75 (green/on-track) unless user specifies otherwise.
+- CLEARING: clear_content removes values only (not formatting). Use clear_background to remove fill color.
+"""
+
+_OPPM_SHEET_PROMPT_KEY = "oppm_sheet_prompt"
+
+# First task row in the OPPM sheet (row after the 5-row header)
+_OPPM_FIRST_TASK_ROW = 6
+
+
+async def _fetch_oppm_sheet_system_prompt(session: AsyncSession, workspace_id: str) -> str:
+    """Return the custom OPPM sheet system prompt for the workspace, falling back to the default."""
+    try:
+        from shared.models.workspace_ai_config import WorkspaceAiConfig
+        result = await session.execute(
+            select(WorkspaceAiConfig).where(
+                WorkspaceAiConfig.workspace_id == workspace_id,
+                WorkspaceAiConfig.config_key == _OPPM_SHEET_PROMPT_KEY,
+            ).limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row and row.config_value:
+            return row.config_value
+    except Exception as e:
+        logger.warning("Failed to fetch OPPM sheet prompt from DB (using default): %s", e)
+    return _OPPM_SHEET_SYSTEM_PROMPT_DEFAULT
+
+
+async def _build_oppm_sheet_context(
+    session: AsyncSession,
+    project_id: str,
+    workspace_id: str,
+    spreadsheet_id: str | None = None,
+) -> str:
+    """Build a concise project context block for the OPPM sheet AI.
+
+    Provides:
+    - Project metadata (name, leader, start/deadline)
+    - OPPM task items with ESTIMATED row numbers (sequential from row 6)
+    - Timeline week dates in use (so AI can provide correct ISO dates to fill_timeline)
+    - Sub-objective positions and labels
+    - Team member names for owner assignment
+    """
+    lines: list[str] = ["## LIVE PROJECT CONTEXT (use this — do not guess)"]
+
+    # ── Project metadata ──
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(project_id)
+    if not project:
+        return "\n".join(lines)
+
+    lines.append(f'Project Name: {project.title}')
+    if project.start_date:
+        lines.append(f'Start Date: {project.start_date.isoformat()}')
+    if project.deadline:
+        lines.append(f'Deadline: {project.deadline.isoformat()}')
+
+    # OPPM header (leader text, people count)
+    try:
+        header_result = await session.execute(
+            select(OPPMHeader).where(OPPMHeader.project_id == project_id).limit(1)
+        )
+        header = header_result.scalar_one_or_none()
+        if header:
+            if header.project_leader_text:
+                lines.append(f'Project Leader: {header.project_leader_text}')
+            if header.people_count:
+                lines.append(f'People on project: {header.people_count}')
+    except Exception as e:
+        logger.debug("OPPM header load skipped: %s", e)
+
+    if spreadsheet_id:
+        lines.append(f'Spreadsheet ID: {spreadsheet_id}')
+        lines.append('Sheet tab name: OPPM')
+
+    # ── Sub-objectives (A=pos1 … F=pos6) ──
+    try:
+        sub_obj_result = await session.execute(
+            select(OPPMSubObjective)
+            .where(OPPMSubObjective.project_id == project_id)
+            .order_by(OPPMSubObjective.position)
+        )
+        sub_objs = sub_obj_result.scalars().all()
+        if sub_objs:
+            col_letters = ["A", "B", "C", "D", "E", "F"]
+            lines.append("")
+            lines.append("### Sub-objective columns (A–F)")
+            for s in sub_objs:
+                col = col_letters[s.position - 1] if 1 <= s.position <= 6 else f"pos{s.position}"
+                lines.append(f'  Col {col} (position {s.position}): {s.label}')
+    except Exception as e:
+        logger.debug("Sub-objectives load skipped: %s", e)
+
+    # ── OPPM Task Items with estimated row numbers ──
+    try:
+        task_items_result = await session.execute(
+            select(OPPMTaskItem)
+            .where(OPPMTaskItem.project_id == project_id)
+            .order_by(OPPMTaskItem.sort_order, OPPMTaskItem.created_at)
+        )
+        task_items = task_items_result.scalars().all()
+        if task_items:
+            lines.append("")
+            lines.append(f"### OPPM Task Layout (rows start at {_OPPM_FIRST_TASK_ROW})")
+            lines.append("  Row | Number | Title                              | Deadline")
+            lines.append("  ----|--------|------------------------------------|---------")
+            for i, item in enumerate(task_items):
+                estimated_row = _OPPM_FIRST_TASK_ROW + i
+                deadline_part = item.deadline_text or ""
+                lines.append(
+                    f"  {estimated_row:<4} | {item.number_label:<6} | {item.title[:34]:<34} | {deadline_part}"
+                )
+            next_free_row = _OPPM_FIRST_TASK_ROW + len(task_items)
+            lines.append(f"  Next available row: {next_free_row}")
+    except Exception as e:
+        logger.debug("OPPM task items load skipped: %s", e)
+
+    # ── Timeline week dates ──
+    try:
+        tl_result = await session.execute(
+            select(OPPMTimelineEntry.week_start)
+            .where(OPPMTimelineEntry.project_id == project_id)
+            .order_by(OPPMTimelineEntry.week_start)
+            .distinct()
+        )
+        week_dates = sorted({str(r.week_start) for r in tl_result.all()})
+        if week_dates:
+            lines.append("")
+            lines.append("### Timeline weeks in use (ISO dates for fill_timeline)")
+            lines.append("  " + ", ".join(week_dates[:20]))
+            if len(week_dates) > 20:
+                lines.append(f"  … and {len(week_dates) - 20} more weeks")
+        elif project.start_date and project.deadline:
+            # Generate synthetic weekly dates from project dates
+            from datetime import timedelta
+            start = project.start_date
+            end = project.deadline
+            # align to Monday
+            start = start - timedelta(days=start.weekday())
+            end = end - timedelta(days=end.weekday())
+            synthetic = []
+            cur = start
+            while cur <= end and len(synthetic) < 20:
+                synthetic.append(cur.isoformat())
+                cur = cur + timedelta(weeks=1)
+            if synthetic:
+                lines.append("")
+                lines.append("### Timeline weeks (derived from project dates, ISO format)")
+                lines.append("  " + ", ".join(synthetic))
+    except Exception as e:
+        logger.debug("Timeline dates load skipped: %s", e)
+
+    # ── Team members (for set_owner) ──
+    try:
+        members_result = await session.execute(
+            select(WorkspaceMember.id, WorkspaceMember.display_name, WorkspaceMember.role)
+            .where(WorkspaceMember.workspace_id == workspace_id)
+        )
+        members = members_result.all()
+        if members:
+            lines.append("")
+            lines.append("### Team members (use their names/initials in set_owner)")
+            for m in members:
+                name = m.display_name or str(m.id)[:8]
+                lines.append(f"  - {name} ({m.role})")
+    except Exception as e:
+        logger.debug("Team members load skipped: %s", e)
+
+    lines.append("")
+    lines.append("## END PROJECT CONTEXT")
+    return "\n".join(lines)
+
 
 # ── Context budget: max ~8K tokens ≈ 32K chars ──
 _MAX_CONTEXT_CHARS = 32_000
@@ -562,12 +862,100 @@ async def chat(
     user_id: str,
     messages: list[dict],
     model_id: str | None = None,
+    oppm_sheet_mode: bool = False,
+    spreadsheet_id: str | None = None,
 ) -> dict:
     """
     Send a chat message to the AI about a project.
     Returns the AI response message + any tool call results.
     """
+    if oppm_sheet_mode:
+        return await _oppm_sheet_chat(
+            session, project_id, workspace_id, user_id, messages, model_id,
+            spreadsheet_id=spreadsheet_id,
+        )
     return await _chat_async(session, project_id, workspace_id, user_id, messages, model_id)
+
+
+async def _oppm_sheet_chat(
+    session: AsyncSession,
+    project_id: str,
+    workspace_id: str,
+    user_id: str,
+    messages: list[dict],
+    model_id: str | None = None,
+    spreadsheet_id: str | None = None,
+) -> dict:
+    """OPPM sheet mode — use the OPPM sheet system prompt + live project context.
+
+    Bypasses the agentic loop (no tool execution). The frontend parses the JSON action array
+    and applies it to the Google Sheet via the execute_sheet_actions endpoint.
+    """
+    from infrastructure.llm import call_with_fallback_tools
+    project_repo = ProjectRepository(session)
+    audit_repo = AuditRepository(session)
+
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
+        raise HTTPException(status_code=404, detail="Project not found in this workspace")
+
+    # Try to get spreadsheet_id from project metadata if not passed
+    if not spreadsheet_id:
+        metadata = project.metadata_ or {}
+        sheet_link = metadata.get("google_sheet") or {}
+        spreadsheet_id = sheet_link.get("spreadsheet_id")
+
+    last_user_msg = messages[-1]["content"] if messages else ""
+    is_safe, reason = check_input(last_user_msg)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=reason)
+
+    models = await _get_models(session, workspace_id, model_id)
+    if not models:
+        raise HTTPException(status_code=400, detail="No active AI model configured. Add one in Settings → AI Models.")
+
+    # Build system prompt + live project context
+    system_prompt = await _fetch_oppm_sheet_system_prompt(session, workspace_id)
+    project_context = await _build_oppm_sheet_context(
+        session, project_id, workspace_id, spreadsheet_id=spreadsheet_id
+    )
+    full_system_prompt = f"{system_prompt}\n\n{project_context}"
+
+    truncated_messages, _ = _truncate_prompt_history(
+        messages,
+        max_messages=_PROJECT_HISTORY_MAX_MESSAGES,
+        max_chars=_PROJECT_HISTORY_MAX_CHARS,
+    )
+    llm_messages = [{"role": "system", "content": full_system_prompt}]
+    for msg in truncated_messages:
+        llm_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+
+    try:
+        llm_response = await call_with_fallback_tools(models, llm_messages, tools=None)
+        raw_text = llm_response.text if hasattr(llm_response, "text") else str(llm_response)
+    except Exception as e:
+        logger.warning("OPPM sheet chat LLM call failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"AI model call failed: {str(e)}")
+
+    clean_text = sanitize_output(raw_text)
+
+    await audit_repo.log(
+        workspace_id, user_id,
+        "ai_chat", "oppm_sheet_chat",
+        new_data={
+            "project_id": project_id,
+            "user_message": last_user_msg[:500],
+            "ai_response": clean_text[:500],
+        },
+    )
+
+    return {
+        "message": clean_text,
+        "tool_calls": [],
+        "updated_entities": [],
+        "iterations": 1,
+        "low_confidence": False,
+    }
 
 
 async def _chat_async(

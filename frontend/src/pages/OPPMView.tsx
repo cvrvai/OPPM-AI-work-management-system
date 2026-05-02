@@ -17,6 +17,7 @@ import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import { api } from '@/lib/api'
 import { buildOppmScratchSheet } from '@/lib/oppmSheetBuilder'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useChatStore } from '@/stores/chatStore'
 
 interface GoogleSheetLinkState {
   connected: boolean
@@ -441,6 +442,16 @@ export function OPPMView() {
   const buttonsDisabled = !ws || !id
   const hasLinkedSheet = !!googleSheet?.connected
 
+  const setOppmSheet = useChatStore((s) => s.setOppmSheet)
+  useEffect(() => {
+    if (googleSheet?.connected && googleSheet.spreadsheet_id) {
+      setOppmSheet(googleSheet.spreadsheet_id)
+    } else {
+      setOppmSheet(null)
+    }
+    return () => { setOppmSheet(null) }
+  }, [googleSheet?.connected, googleSheet?.spreadsheet_id, setOppmSheet])
+
   const handleOpenLinkedSheet = () => {
     if (!linkedSheetUrl) return
     window.open(linkedSheetUrl, '_blank', 'noopener,noreferrer')
@@ -648,18 +659,20 @@ export function OPPMView() {
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Send className="h-4 w-4" />
-                {pendingDraft ? 'Review AI Draft' : 'Generate OPPM Draft'}
+                {pendingDraft ? 'Review Draft' : 'AI Draft'}
               </button>
 
-              <button
-                type="button"
-                onClick={() => saveGoogleSheetLink.mutate()}
-                disabled={buttonsDisabled || saveGoogleSheetLink.isPending}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {saveGoogleSheetLink.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-                Save Link
-              </button>
+              {!hasLinkedSheet ? (
+                <button
+                  type="button"
+                  onClick={() => saveGoogleSheetLink.mutate()}
+                  disabled={buttonsDisabled || saveGoogleSheetLink.isPending}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saveGoogleSheetLink.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                  Save Link
+                </button>
+              ) : null}
 
               <div className="group relative inline-flex">
                 <div
@@ -674,7 +687,7 @@ export function OPPMView() {
                     className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {pushToGoogleSheet.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    Push AI Fill
+                    Auto Fill
                   </button>
                 </div>
                 {pushToGoogleSheetDisabledReason ? (
@@ -689,7 +702,7 @@ export function OPPMView() {
                   to="/settings?tab=googleSheets"
                   className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100"
                 >
-                  Setup Google Sheets Write
+                  Setup Google Write
                 </Link>
               ) : null}
 
@@ -700,7 +713,7 @@ export function OPPMView() {
                 className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ExternalLink className="h-4 w-4" />
-                Open in New Tab
+                Open Sheet
               </button>
 
               <button
@@ -710,7 +723,7 @@ export function OPPMView() {
                 className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {unlinkGoogleSheet.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unplug className="h-4 w-4" />}
-                Unlink
+                Remove Link
               </button>
             </div>
 

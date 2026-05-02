@@ -80,6 +80,9 @@ interface ChatState {
   restoreSession: (contextKey: string, index: number) => void
   /** Delete a specific past session */
   deleteSession: (contextKey: string, index: number) => void
+  /** ID of the linked OPPM Google Sheet (non-null when on OPPM page with a connected sheet) */
+  oppmSheetSpreadsheetId: string | null
+  setOppmSheet: (id: string | null) => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -95,6 +98,7 @@ export const useChatStore = create<ChatState>()(
       pastSessions: {},
       panelPosition: null,
       panelSize: DEFAULT_PANEL_SIZE,
+      oppmSheetSpreadsheetId: null,
 
       toggle: () => {
         const wasOpen = get().isOpen
@@ -213,6 +217,8 @@ export const useChatStore = create<ChatState>()(
           return { pastSessions: { ...s.pastSessions, [contextKey]: sessions } }
         })
       },
+
+      setOppmSheet: (id) => set({ oppmSheetSpreadsheetId: id }),
     }),
     {
       name: 'oppm-chat-history',

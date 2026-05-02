@@ -105,6 +105,8 @@ async def chat_route(
         user_id=ws.user.id,
         messages=[m.model_dump() for m in data.messages],
         model_id=data.model_id,
+        oppm_sheet_mode=data.oppm_sheet_mode,
+        spreadsheet_id=data.spreadsheet_id,
     )
 
 

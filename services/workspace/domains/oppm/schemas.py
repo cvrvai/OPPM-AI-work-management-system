@@ -164,3 +164,43 @@ OPPMTaskItemPayload.model_rebuild()
 
 class OPPMTaskItemsReplace(BaseModel):
     items: list[OPPMTaskItemPayload]
+
+
+# ── Sheet Actions (OPPM AI sheet control) ──
+
+class SheetActionParams(BaseModel):
+    """Flexible params dict for a sheet action — validated loosely so the LLM output passes through."""
+    model_config = {"extra": "allow"}
+
+
+class SheetAction(BaseModel):
+    action: str = Field(min_length=1, max_length=50)
+    params: dict = Field(default_factory=dict)
+
+
+class SheetActionsRequest(BaseModel):
+    actions: list[SheetAction] = Field(min_length=1)
+
+
+class SheetActionResult(BaseModel):
+    action: str
+    success: bool
+    error: Optional[str] = None
+
+
+class SheetActionsResponse(BaseModel):
+    results: list[SheetActionResult]
+    success_count: int
+    error_count: int
+
+
+# ── AI Config (workspace-level prompt overrides) ──
+
+class OppmSheetPromptResponse(BaseModel):
+    config_key: str = "oppm_sheet_prompt"
+    prompt: str
+    is_default: bool
+
+
+class OppmSheetPromptUpsert(BaseModel):
+    prompt: str = Field(min_length=50, max_length=32000)

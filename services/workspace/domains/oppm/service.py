@@ -454,3 +454,37 @@ async def _verify_project_workspace(session: AsyncSession, project_id: str, work
     project = await project_repo.find_by_id(project_id)
     if not project or str(project.workspace_id) != workspace_id:
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
+
+
+# ── AI Config (workspace-level OPPM sheet prompt) ──
+
+_OPPM_SHEET_PROMPT_KEY = "oppm_sheet_prompt"
+
+# Default is defined in the intelligence service; here we just use a sentinel.
+_DEFAULT_PROMPT_SENTINEL = "__default__"
+
+
+async def get_oppm_sheet_prompt(session: AsyncSession, workspace_id: str) -> dict:
+    """Return the workspace's OPPM sheet system prompt (or signal to use the default)."""
+    from domains.oppm.ai_config_repository import WorkspaceAiConfigRepository
+    repo = WorkspaceAiConfigRepository(session)
+    row = await repo.get(workspace_id, _OPPM_SHEET_PROMPT_KEY)
+    if row is None or not row.config_value:
+        return {"config_key": _OPPM_SHEET_PROMPT_KEY, "prompt": "", "is_default": True}
+    return {"config_key": _OPPM_SHEET_PROMPT_KEY, "prompt": row.config_value, "is_default": False}
+
+
+async def upsert_oppm_sheet_prompt(session: AsyncSession, workspace_id: str, prompt: str) -> dict:
+    """Upsert a custom OPPM sheet system prompt for the workspace."""
+    from domains.oppm.ai_config_repository import WorkspaceAiConfigRepository
+    repo = WorkspaceAiConfigRepository(session)
+    row = await repo.upsert(workspace_id, _OPPM_SHEET_PROMPT_KEY, prompt)
+    return {"config_key": _OPPM_SHEET_PROMPT_KEY, "prompt": row.config_value, "is_default": False}
+
+
+async def reset_oppm_sheet_prompt(session: AsyncSession, workspace_id: str) -> dict:
+    """Delete the custom prompt, reverting the workspace to the built-in default."""
+    from domains.oppm.ai_config_repository import WorkspaceAiConfigRepository
+    repo = WorkspaceAiConfigRepository(session)
+    await repo.delete(workspace_id, _OPPM_SHEET_PROMPT_KEY)
+    return {"config_key": _OPPM_SHEET_PROMPT_KEY, "prompt": "", "is_default": True}

@@ -7,6 +7,7 @@ from shared.models.task import Task, TaskAssignee, TaskReport, TaskDependency
 from shared.models.oppm import OPPMObjective, OPPMTimelineEntry, ProjectCost, OPPMTemplate, OPPMHeader, OPPMTaskItem
 from shared.models.git import GithubAccount, RepoConfig, CommitEvent, CommitAnalysis
 from shared.models.ai_model import AIModel
+from shared.models.workspace_ai_config import WorkspaceAiConfig
 from shared.models.notification import Notification, AuditLog
 from shared.models.embedding import DocumentEmbedding
 from shared.models.agile import Epic, UserStory, Sprint, Retrospective
@@ -20,6 +21,7 @@ __all__ = [
     "OPPMObjective", "OPPMTimelineEntry", "ProjectCost", "OPPMTemplate", "OPPMHeader", "OPPMTaskItem",
     "GithubAccount", "RepoConfig", "CommitEvent", "CommitAnalysis",
     "AIModel",
+    "WorkspaceAiConfig",
     "Notification", "AuditLog",
     "DocumentEmbedding",
     "Epic", "UserStory", "Sprint", "Retrospective",

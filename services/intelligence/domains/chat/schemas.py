@@ -13,6 +13,8 @@ class ChatRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
     messages: list[ChatMessage]
     model_id: Optional[str] = None
+    oppm_sheet_mode: bool = False
+    spreadsheet_id: Optional[str] = None  # passed when in OPPM sheet mode
 
 
 class ToolCallResult(BaseModel):

@@ -14,15 +14,16 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, parseFile } from '@/lib/api'
+import { api, parseFile, executeSheetActions } from '@/lib/api'
 import { fetchWithSessionRetry } from '@/lib/sessionClient'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore, getContextKey, type FileAttachment, type PastSession, DEFAULT_PANEL_SIZE } from '@/stores/chatStore'
+import type { SheetAction, SheetActionResult } from '@/types'
 import {
   X, Send, Loader2, Bot, User, Sparkles,
   AlertTriangle, CheckCircle2, Lightbulb,
   FolderKanban, Building2, Paperclip, FileText,
-  ImageIcon, File, Clock, History, MessageSquarePlus, ChevronLeft, Trash2,
+  ImageIcon, File, Clock, History, MessageSquarePlus, ChevronLeft, Trash2, Play,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -190,6 +191,7 @@ export function ChatPanel() {
   const restoreSession = useChatStore((s) => s.restoreSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
   const pastSessions = useChatStore((s) => s.pastSessions)
+  const oppmSheetSpreadsheetId = useChatStore((s) => s.oppmSheetSpreadsheetId)
 
   // ── History panel state ──
   const [showHistory, setShowHistory] = useState(false)
@@ -215,6 +217,10 @@ export function ChatPanel() {
 
   const isProjectContext = contextType === 'project' && !!projectId
   const contextKey = getContextKey(contextType, projectId)
+  const isOppmSheetMode = isProjectContext && !!projectId && !!oppmSheetSpreadsheetId && !!ws
+  const sheetContext = isOppmSheetMode && ws && projectId
+    ? { workspaceId: ws.id, projectId }
+    : null
 
   // Capture session start index when context key changes (to mark restored history)
   useEffect(() => {
@@ -413,6 +419,30 @@ export function ChatPanel() {
       setIsChatPending(true)
       abortRef.current = new AbortController()
 
+      // OPPM sheet mode: blocking POST with oppm_sheet_mode flag, no SSE streaming
+      const isOppmSheetMode = isProjectContext && !!projectId && !!oppmSheetSpreadsheetId
+      if (isOppmSheetMode) {
+        try {
+          const data = await api.post<ChatResponse>(
+            `${wsPath}/projects/${projectId}/ai/chat`,
+            { messages: msgs, oppm_sheet_mode: true, spreadsheet_id: oppmSheetSpreadsheetId },
+          )
+          addMessage({
+            role: 'assistant',
+            content: data.message,
+            toolCalls: [],
+            updatedEntities: [],
+            lowConfidence: false,
+          })
+        } catch (err) {
+          addMessage({ role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` })
+        } finally {
+          setIsChatPending(false)
+          abortRef.current = null
+        }
+        return
+      }
+
       // Project-level uses the streaming endpoint; workspace-level falls back to blocking POST
       const isStreamable = isProjectContext && !!projectId
       const path = isStreamable
@@ -510,7 +540,7 @@ export function ChatPanel() {
         abortRef.current = null
       }
     },
-    [ws, isProjectContext, projectId, wsPath, addMessage, invalidateEntities],
+    [ws, isProjectContext, projectId, wsPath, addMessage, invalidateEntities, oppmSheetSpreadsheetId],
   )
 
   // ── Suggest plan mutation ──
@@ -916,6 +946,7 @@ export function ChatPanel() {
                 key={`n-${i}`}
                 msg={msg}
                 onChoiceSelect={i === arr.length - 1 ? handleQuickSend : undefined}
+                sheetContext={sheetContext}
               />
             ))}
           </>
@@ -928,6 +959,7 @@ export function ChatPanel() {
               key={i}
               msg={msg}
               onChoiceSelect={i === arr.length - 1 ? handleQuickSend : undefined}
+              sheetContext={sheetContext}
             />
           ))}
 
@@ -1136,6 +1168,105 @@ export function ChatPanel() {
   )
 }
 
+// ── SheetActionPreview sub-component ──
+
+function tryParseSheetActions(content: string): SheetAction[] | null {
+  try {
+    const clean = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    const parsed = JSON.parse(clean)
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      typeof parsed[0] === 'object' &&
+      'action' in parsed[0] &&
+      'params' in parsed[0]
+    ) {
+      return parsed as SheetAction[]
+    }
+  } catch {
+    // not JSON
+  }
+  return null
+}
+
+function SheetActionPreview({
+  actions,
+  workspaceId,
+  projectId,
+}: {
+  actions: SheetAction[]
+  workspaceId: string
+  projectId: string
+}) {
+  const [results, setResults] = useState<SheetActionResult[] | null>(null)
+  const [isApplying, setIsApplying] = useState(false)
+  const [applyError, setApplyError] = useState<string | null>(null)
+
+  const handleApply = async () => {
+    setIsApplying(true)
+    setApplyError(null)
+    try {
+      const response = await executeSheetActions(workspaceId, projectId, actions)
+      setResults(response.results)
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsApplying(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-semibold text-blue-800 text-xs uppercase tracking-wide">
+          {actions.length} Sheet Action{actions.length !== 1 ? 's' : ''}
+        </span>
+        {!results && (
+          <button
+            onClick={handleApply}
+            disabled={isApplying}
+            className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded px-2.5 py-1 disabled:opacity-50"
+          >
+            {isApplying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            Apply to Sheet
+          </button>
+        )}
+      </div>
+      <ul className="space-y-1">
+        {actions.map((action, i) => {
+          const result = results?.[i]
+          return (
+            <li key={i} className="flex items-center gap-2 text-xs text-blue-700">
+              {result ? (
+                result.success ? (
+                  <CheckCircle2 className="h-3 w-3 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+                )
+              ) : (
+                <span className="h-3 w-3 rounded-full border border-blue-400 shrink-0 inline-block" />
+              )}
+              <span className="font-mono font-medium text-blue-900">{action.action}</span>
+              {result && !result.success && result.error && (
+                <span className="text-red-500 ml-1">{result.error}</span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {applyError && (
+        <p className="mt-2 text-xs text-red-600">{applyError}</p>
+      )}
+      {results && (
+        <p className="mt-2 text-xs text-gray-500">
+          {results.filter((r) => r.success).length} succeeded,{' '}
+          {results.filter((r) => !r.success).length} failed
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── MessageBubble sub-component ──
 
 function AttachmentChip({ att }: { att: FileAttachment }) {
@@ -1160,11 +1291,23 @@ function AttachmentChip({ att }: { att: FileAttachment }) {
   )
 }
 
-function MessageBubble({ msg, onChoiceSelect }: { msg: { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallResult[]; attachments?: FileAttachment[]; lowConfidence?: boolean }; onChoiceSelect?: (text: string) => void }) {
+function MessageBubble({
+  msg,
+  onChoiceSelect,
+  sheetContext,
+}: {
+  msg: { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCallResult[]; attachments?: FileAttachment[]; lowConfidence?: boolean }
+  onChoiceSelect?: (text: string) => void
+  sheetContext?: { workspaceId: string; projectId: string } | null
+}) {
   const [customInput, setCustomInput] = useState('')
   const { displayContent, choices, hasCustom } = msg.role === 'assistant'
     ? parseChoices(msg.content)
     : { displayContent: msg.content, choices: [], hasCustom: false }
+
+  const sheetActions = msg.role === 'assistant' && sheetContext
+    ? tryParseSheetActions(msg.content)
+    : null
   return (
     <div
       className={cn(
@@ -1195,6 +1338,13 @@ function MessageBubble({ msg, onChoiceSelect }: { msg: { role: 'user' | 'assista
 
         {/* Message content */}
         {msg.role === 'assistant' ? (
+          sheetActions && sheetContext ? (
+            <SheetActionPreview
+              actions={sheetActions}
+              workspaceId={sheetContext.workspaceId}
+              projectId={sheetContext.projectId}
+            />
+          ) : (
           <div className="prose prose-sm max-w-none break-words
             prose-p:my-1 prose-p:leading-relaxed
             prose-headings:font-semibold prose-headings:mt-2 prose-headings:mb-1
@@ -1210,6 +1360,7 @@ function MessageBubble({ msg, onChoiceSelect }: { msg: { role: 'user' | 'assista
               {displayContent}
             </ReactMarkdown>
           </div>
+          )
         ) : (
           <div className="whitespace-pre-wrap break-words">{msg.content}</div>
         )}

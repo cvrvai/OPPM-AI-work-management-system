@@ -320,3 +320,21 @@ export interface Notification {
   metadata: Record<string, unknown>
   created_at: string
 }
+
+// ── OPPM AI Sheet Actions ──
+export interface SheetAction {
+  action: string
+  params: Record<string, unknown>
+}
+
+export interface SheetActionResult {
+  action: string
+  success: boolean
+  error?: string | null
+}
+
+export interface SheetActionsResponse {
+  results: SheetActionResult[]
+  success_count: number
+  error_count: number
+}
