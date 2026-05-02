@@ -134,12 +134,14 @@ def _resolve_timeline_weeks(
     if limit <= 0:
         return []
 
+    # Prefer actual task timeline weeks over project start/deadline
+    weeks = _collect_timeline_weeks(tasks, limit)
+    if weeks:
+        return weeks
+
     start = _parse_iso_date(fills.get("start_date"))
     deadline = _parse_iso_date(fills.get("deadline"))
     if not start and not deadline:
-        weeks = _collect_timeline_weeks(tasks, limit)
-        if weeks:
-            return weeks
         return _collect_task_due_date_weeks(tasks, limit)
 
     if not start:
@@ -148,21 +150,21 @@ def _resolve_timeline_weeks(
         deadline = start
 
     if start is None or deadline is None:
-        return _collect_timeline_weeks(tasks, limit)
+        return []
 
     start_monday = start - timedelta(days=start.weekday())
     deadline_monday = deadline - timedelta(days=deadline.weekday())
 
-    weeks: list[str] = []
+    result: list[str] = []
     current = start_monday
-    while current <= deadline_monday and len(weeks) < limit:
-        weeks.append(current.isoformat())
+    while current <= deadline_monday and len(result) < limit:
+        result.append(current.isoformat())
         current += timedelta(weeks=1)
 
-    if not weeks:
-        weeks.append(start_monday.isoformat())
+    if not result:
+        result.append(start_monday.isoformat())
 
-    return weeks[:limit]
+    return result[:limit]
 
 
 def _timeline_symbol(status: str | None) -> str:
@@ -230,6 +232,9 @@ def _oppm_timeline_header_value(fills: dict[str, str | None]) -> str:
     completed_by = fills.get("completed_by_text") or "—"
     start_date = fills.get("start_date") or ""
     deadline = fills.get("deadline") or ""
+    # If completed_by already looks like a date or date range, just return it
+    if completed_by and completed_by != "—":
+        return f"Project Completed By: {completed_by}"
     if start_date and deadline:
         return f"Project Completed By: {completed_by} | {start_date} -> {deadline}"
     if start_date:
@@ -279,8 +284,7 @@ def _extend_task_rows_for_overflow(
     index_col = task_start_col - 1
 
     extended = list(task_rows)
-    last_row = max(int(slot["row"]) for slot in task_rows)
-    current_row = last_row + 1
+    current_row = max(int(slot["row"]) for slot in task_rows) + 1
 
     for i in range(len(task_rows), len(tasks)):
         task = tasks[i]
@@ -365,6 +369,66 @@ def _build_task_row_merge_requests(
                     "mergeType": "MERGE_ALL",
                 }
             })
+
+    return requests
+
+
+def _build_task_row_border_requests(
+    task_rows: list[dict[str, int | str]],
+    tasks: list[Any | None],
+    sheet_id: int,
+    index_col: int,
+    end_col: int,
+    original_max_rows: int,
+) -> list[dict[str, Any]]:
+    """Move the thick bottom border from the original last task row to the new last task row."""
+    requests: list[dict[str, Any]] = []
+    if len(task_rows) <= original_max_rows:
+        return requests
+
+    # Original last task row (0-based)
+    original_last = task_rows[original_max_rows - 1]
+    original_row_idx = int(original_last["row"]) - 1
+
+    # New actual last task row (0-based)
+    new_last = task_rows[-1]
+    new_row_idx = int(new_last["row"]) - 1
+
+    # Remove thick bottom border from original last row
+    requests.append({
+        "updateBorders": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": original_row_idx,
+                "endRowIndex": original_row_idx + 1,
+                "startColumnIndex": index_col - 1,
+                "endColumnIndex": end_col,
+            },
+            "bottom": {
+                "style": "SOLID",
+                "width": 1,
+                "color": {"red": 0.0, "green": 0.0, "blue": 0.0},
+            },
+        }
+    })
+
+    # Add thick bottom border to new last row
+    requests.append({
+        "updateBorders": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": new_row_idx,
+                "endRowIndex": new_row_idx + 1,
+                "startColumnIndex": index_col - 1,
+                "endColumnIndex": end_col,
+            },
+            "bottom": {
+                "style": "SOLID_MEDIUM",
+                "width": 2,
+                "color": {"red": 0.0, "green": 0.0, "blue": 0.0},
+            },
+        }
+    })
 
     return requests
 
@@ -706,8 +770,45 @@ def _write_oppm_sheet_values(
     task_rows_to_write = min(len(tasks), max_task_rows) if task_column and first_task_row > 0 and max_task_rows > 0 else 0
     task_text_region = regions.get("task_text")
 
+    sheet_id = _get_sheet_id_by_title(service, spreadsheet_id, _OPPM_SHEET_TITLE)
+
+    overflow = len(tasks) - max_task_rows if task_rows and max_task_rows > 0 else 0
+    if overflow > 0 and first_task_row > 0 and max_task_rows > 0 and sheet_id is not None:
+        insert_at = first_task_row + max_task_rows - 1
+        try:
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={
+                    "requests": [
+                        {
+                            "insertDimension": {
+                                "range": {
+                                    "sheetId": sheet_id,
+                                    "dimension": "ROWS",
+                                    "startIndex": insert_at,
+                                    "endIndex": insert_at + overflow,
+                                },
+                                "inheritFromBefore": True,
+                            }
+                        }
+                    ]
+                },
+            ).execute()
+            max_task_rows += overflow
+            task_anchor = {**task_anchor, "max_rows": max_task_rows}
+            regions = {
+                k: ({**v, **{
+                    f: int(v[f]) + overflow
+                    for f in ("max_rows", "date_header_row", "member_header_row")
+                    if f in v
+                }} if isinstance(v, dict) else v)
+                for k, v in regions.items()
+            }
+            task_rows_to_write = min(len(tasks), max_task_rows)
+        except Exception:
+            logger.debug("Failed to insert overflow rows into OPPM sheet")
+
     if task_rows:
-        # Extend task_rows if tasks exceed the pre-planned layout
         task_rows = _extend_task_rows_for_overflow(task_rows, tasks, task_text_region)
         rendered_tasks = _align_tasks_to_grouped_rows(tasks, task_rows)
         oppm_rows_written = sum(1 for task in rendered_tasks if task)
@@ -721,20 +822,24 @@ def _write_oppm_sheet_values(
         task_end_col = int(task_text_region_safe.get("end_col") or 0)
         task_start_col = int(task_text_region_safe.get("start_col") or 0)
         index_col = task_start_col - 1
-        if index_col >= 1 and task_end_col >= task_start_col:
-            sheet_id = _get_sheet_id_by_title(service, spreadsheet_id, _OPPM_SHEET_TITLE)
-            if sheet_id is not None:
-                merge_requests = _build_task_row_merge_requests(
-                    task_rows, rendered_tasks, sheet_id, index_col, task_end_col
+        if index_col >= 1 and task_end_col >= task_start_col and sheet_id is not None:
+            merge_requests = _build_task_row_merge_requests(
+                task_rows, rendered_tasks, sheet_id, index_col, task_end_col
+            )
+            original_max_rows = int(mapping.get("task_anchor", {}).get("max_rows", 0))
+            if original_max_rows > 0:
+                border_requests = _build_task_row_border_requests(
+                    task_rows, rendered_tasks, sheet_id, index_col, task_end_col, original_max_rows
                 )
-                if merge_requests:
-                    try:
-                        service.spreadsheets().batchUpdate(
-                            spreadsheetId=spreadsheet_id,
-                            body={"requests": merge_requests},
-                        ).execute()
-                    except Exception:
-                        logger.debug("Failed to apply task row merge/unmerge requests")
+                merge_requests.extend(border_requests)
+            if merge_requests:
+                try:
+                    service.spreadsheets().batchUpdate(
+                        spreadsheetId=spreadsheet_id,
+                        body={"requests": merge_requests},
+                    ).execute()
+                except Exception:
+                    logger.debug("Failed to apply task row merge/unmerge requests")
 
         data.extend(_grouped_task_text_updates(task_rows, rendered_tasks))
     elif task_text_region:
