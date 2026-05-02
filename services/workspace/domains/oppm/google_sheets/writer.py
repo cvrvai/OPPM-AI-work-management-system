@@ -331,6 +331,24 @@ def _build_task_row_merge_requests(
                     "mergeType": "MERGE_ALL",
                 }
             })
+            # Force left alignment so merged main-task text stays on the left
+            requests.append({
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": row_idx,
+                        "endRowIndex": row_idx + 1,
+                        "startColumnIndex": index_col - 1,
+                        "endColumnIndex": end_col,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "horizontalAlignment": "LEFT"
+                        }
+                    },
+                    "fields": "userEnteredFormat.horizontalAlignment",
+                }
+            })
         else:
             # Leave 1 cell for index, merge the rest (from title_col to end_col)
             slot_index_col = int(slot.get("index_col") or slot.get("write_col") or index_col)
