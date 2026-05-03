@@ -174,6 +174,8 @@ class SheetActionParams(BaseModel):
 
 
 class SheetAction(BaseModel):
+    """A single sheet action. Supports both nested params {action, params} and flat {action, range, value}."""
+    model_config = {"extra": "allow"}
     action: str = Field(min_length=1, max_length=50)
     params: dict = Field(default_factory=dict)
 

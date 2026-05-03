@@ -274,10 +274,13 @@ async def run_agent_loop(
                     "role": "system",
                     "content": messages[0]["content"] + "\n\n" + extra,
                 }
-        # 2. Inject pre-flight snapshot as a user message right after system
+        # 2. Inject pre-flight snapshot and template summary as user messages
         snapshot = skill_context.preflight_data.get("snapshot_text", "")
+        template_summary = skill_context.preflight_data.get("template_summary", "")
         if snapshot:
             messages.insert(1, {"role": "user", "content": snapshot})
+        if template_summary:
+            messages.insert(2 if snapshot else 1, {"role": "user", "content": template_summary})
         # 3. Filter tools to only those allowed by the skill
         # (The caller is responsible for passing the filtered openai_tools /
         # anthropic_tools; we just log what the skill requested.)

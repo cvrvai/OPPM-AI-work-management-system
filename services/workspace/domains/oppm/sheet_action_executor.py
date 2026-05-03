@@ -484,6 +484,412 @@ def _exec_clear_sheet(service: Any, spreadsheet_id: str, params: dict, sheet_id:
     ).execute()
 
 
+# ── scaffold_oppm_form: deterministic full-form expansion ──
+#
+# A single high-level action that emits the complete authentic OPPM layout in
+# one call: 5-row header, N task rows numbered 1..N, bottom matrix with month
+# labels + cost area + legend, full border hierarchy (header black grid, task
+# area gray grid, timeline cleared, thick section dividers, thick outer frame),
+# standard fonts/alignment/widths/heights, and frozen header.
+#
+# This exists because the LLM was inconsistent at producing all ~80 atomic
+# actions that recreate a Clark Campbell OPPM form. With this action, the AI
+# emits ONE call and the executor produces a faithful form every time.
+
+_SCAFFOLD_HEADER_BLACK = "#000000"
+_SCAFFOLD_TASK_GRAY = "#CCCCCC"
+_SCAFFOLD_HEADER_BG = "#E8E8E8"
+_SCAFFOLD_DEFAULT_TASK_COUNT = 30
+_SCAFFOLD_BOTTOM_MATRIX_ROWS = 6  # rows under task area for cost / forecast
+_SCAFFOLD_TASK_ROW_HEIGHT = 21
+
+
+def _build_scaffold_actions(params: dict) -> list[dict]:
+    """Build the deterministic action list for a full OPPM form scaffold.
+
+    Returns a list of {action, params} dicts that, when executed in order, produce
+    a complete, authentic-looking OPPM form. Order matters: clear → values →
+    merges → dimensions → backgrounds → borders (specific overrides last) →
+    fonts → freeze.
+    """
+    title = str(params.get("title") or "[Project Name]")
+    leader = str(params.get("leader") or "[Leader Name]")
+    objective = str(params.get("objective") or "[Project Objective]")
+    start_date = str(params.get("start_date") or "[Start Date]")
+    deadline = str(params.get("deadline") or "[Deadline]")
+    weeks = params.get("completed_by_weeks")
+    weeks_label = f"{int(weeks)} weeks" if weeks else "N weeks"
+    task_count = int(params.get("task_count") or _SCAFFOLD_DEFAULT_TASK_COUNT)
+    task_count = max(1, min(30, task_count))
+
+    last_task_row = 5 + task_count                        # tasks occupy rows 6..last_task_row
+    matrix_top = last_task_row + 1                        # bottom matrix starts here
+    matrix_bottom = matrix_top + _SCAFFOLD_BOTTOM_MATRIX_ROWS - 1
+
+    a: list[dict] = []
+
+    # ── 1. Clear everything (also resets row heights + standard col widths) ──
+    a.append({"action": "clear_sheet", "params": {}})
+
+    # ── 2. Header content (rows 1-5) ──
+    a.append({"action": "set_value", "params": {"range": "A1", "value": title}})
+    a.append({"action": "set_value", "params": {"range": "A2", "value": f"Project Leader: {leader}    |    Project: {title}"}})
+    a.append({"action": "set_value", "params": {"range": "A3", "value": f"Project Objective: {objective}"}})
+    a.append({"action": "set_value", "params": {"range": "A4", "value": f"Start Date: {start_date}    |    Deadline: {deadline}"}})
+    # Row 5 — split into the four classic OPPM sub-headers (Objectives | Major Tasks | Project Completed By | Owner / Priority)
+    a.append({"action": "set_value", "params": {"range": "A5", "value": "Objectives"}})
+    a.append({"action": "set_value", "params": {"range": "H5", "value": "Major Tasks (Deadline)"}})
+    a.append({"action": "set_value", "params": {"range": "J5", "value": f"Project Completed By: {weeks_label}"}})
+    a.append({"action": "set_value", "params": {"range": "AJ5", "value": "Owner / Priority"}})
+
+    # ── 3. Task numbers 1..N in column H ──
+    for i in range(1, task_count + 1):
+        a.append({"action": "set_value", "params": {"range": f"H{5 + i}", "value": str(i)}})
+
+    # ── 4. Bottom matrix labels ──
+    # Row matrix_top: month-label timeline header (Month 01..Month 12 across J..U)
+    for m in range(1, 13):
+        col = _col_index_to_letters(9 + m)  # J=10 .. U=21
+        a.append({"action": "set_value", "params": {"range": f"{col}{matrix_top}", "value": f"Month {m:02d}"}})
+    # Owner header labels in AJ/AK/AL on matrix_top
+    for col_letter in ("AJ", "AK", "AL"):
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{matrix_top}", "value": "Owner"}})
+    # Cross-reference labels (left side) — Major Tasks / Objectives / Costs / Summary & Forecast
+    a.append({"action": "set_value", "params": {"range": f"A{matrix_top}", "value": "Major Tasks"}})
+    a.append({"action": "set_value", "params": {"range": f"A{matrix_top + 1}", "value": "Objectives"}})
+    a.append({"action": "set_value", "params": {"range": f"A{matrix_top + 3}", "value": "Costs"}})
+    a.append({"action": "set_value", "params": {"range": f"A{matrix_bottom}", "value": "Summary & Forecast"}})
+    # Cost area: Capital / Expenses / Other rows with placeholder values (column V/W)
+    cost_labels = (("Capital", matrix_top + 1), ("Expenses", matrix_top + 2), ("Other", matrix_top + 3))
+    for label, row in cost_labels:
+        a.append({"action": "set_value", "params": {"range": f"V{row}", "value": label}})
+        a.append({"action": "set_value", "params": {"range": f"W{row}", "value": "0"}})
+    # Legend in bottom-right
+    a.append({"action": "set_value", "params": {"range": f"AI{matrix_bottom}", "value": "■ Expended    ■ Budgeted"}})
+
+    # ── 5. Merges ──
+    # Header rows 1-4: full-width single merge each
+    for row in (1, 2, 3, 4):
+        a.append({"action": "merge_cells", "params": {"range": f"A{row}:AL{row}"}})
+    # Row 5: split into 4 grouped sub-headers (matches the authentic OPPM look)
+    a.append({"action": "merge_cells", "params": {"range": "A5:F5"}})       # Objectives
+    a.append({"action": "merge_cells", "params": {"range": "H5:I5"}})       # Major Tasks
+    a.append({"action": "merge_cells", "params": {"range": "J5:AI5"}})      # Project Completed By
+    a.append({"action": "merge_cells", "params": {"range": "AJ5:AL5"}})     # Owner / Priority
+
+    # ── 6. Row heights (task rows 21px) ──
+    a.append({"action": "set_row_height", "params": {"start_index": 6, "end_index": last_task_row, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
+
+    # ── 7. Backgrounds ──
+    a.append({"action": "set_background", "params": {"range": "A5:AL5", "color": _SCAFFOLD_HEADER_BG}})
+
+    # ── 8. Borders — apply LARGE FILLS first, then SPECIFIC OVERRIDES on top ──
+    # 8a. Header rows 1-5 → SOLID black grid
+    a.append({"action": "set_border", "params": {"range": "A1:AL5", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # 8b. Task area sub-objectives + task number/title (A..I) → SOLID gray grid
+    a.append({"action": "set_border", "params": {"range": f"A6:I{last_task_row}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
+    # 8c. Task area owners (AJ..AL) → SOLID gray grid
+    a.append({"action": "set_border", "params": {"range": f"AJ6:AL{last_task_row}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
+    # 8d. Bottom matrix → SOLID black grid
+    a.append({"action": "set_border", "params": {"range": f"A{matrix_top}:AL{matrix_bottom}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # 8e. Vertical thick dividers — column F (sub-obj→tasks), I (tasks→timeline), AI (timeline→owners)
+    #     Use style=NONE main + right-only override so we don't disturb other sides we just set.
+    for col in ("F", "I", "AI"):
+        a.append({
+            "action": "set_border",
+            "params": {
+                "range": f"{col}1:{col}{last_task_row}",
+                "style": "NONE",
+                "right_style": "SOLID_THICK",
+                "right_color": _SCAFFOLD_HEADER_BLACK,
+                "right_width": 3,
+            },
+        })
+    # 8f. Horizontal thick dividers — bottom of row 5 (header→tasks), bottom of last task row (tasks→matrix)
+    a.append({
+        "action": "set_border",
+        "params": {
+            "range": "A5:AL5",
+            "style": "NONE",
+            "bottom_style": "SOLID_THICK",
+            "bottom_color": _SCAFFOLD_HEADER_BLACK,
+            "bottom_width": 3,
+        },
+    })
+    a.append({
+        "action": "set_border",
+        "params": {
+            "range": f"A{last_task_row}:AL{last_task_row}",
+            "style": "NONE",
+            "bottom_style": "SOLID_THICK",
+            "bottom_color": _SCAFFOLD_HEADER_BLACK,
+            "bottom_width": 3,
+        },
+    })
+    # 8g. Outer thick frame around the whole form
+    a.append({
+        "action": "set_border",
+        "params": {
+            "range": f"A1:AL{matrix_bottom}",
+            "style": "NONE",
+            "top_style": "SOLID_THICK", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 3,
+            "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3,
+            "left_style": "SOLID_THICK", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 3,
+            "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
+        },
+    })
+
+    # ── 9. Fonts, bold, alignment, wrap ──
+    # Title row
+    a.append({"action": "set_font_size", "params": {"range": "A1:AL1", "size": 14}})
+    a.append({"action": "set_bold", "params": {"range": "A1:AL1", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": "A1:AL1", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Leader row
+    a.append({"action": "set_font_size", "params": {"range": "A2:AL2", "size": 11}})
+    a.append({"action": "set_bold", "params": {"range": "A2:AL2", "bold": True}})
+    # Objective + dates
+    a.append({"action": "set_font_size", "params": {"range": "A3:AL4", "size": 10}})
+    # Column headers (row 5)
+    a.append({"action": "set_font_size", "params": {"range": "A5:AL5", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": "A5:AL5", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": "A5:AL5", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Task numbers (column H)
+    a.append({"action": "set_font_size", "params": {"range": f"H6:H{last_task_row}", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": f"H6:H{last_task_row}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"H6:H{last_task_row}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Task titles (column I) — left aligned, CLIP wrap to preserve row height
+    a.append({"action": "set_font_size", "params": {"range": f"I6:I{last_task_row}", "size": 10}})
+    a.append({"action": "set_alignment", "params": {"range": f"I6:I{last_task_row}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_text_wrap", "params": {"range": f"I6:I{last_task_row}", "mode": "CLIP"}})
+    # Sub-objective check columns (A-F)
+    a.append({"action": "set_alignment", "params": {"range": f"A6:F{last_task_row}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Owner columns (AJ-AL)
+    a.append({"action": "set_alignment", "params": {"range": f"AJ6:AL{last_task_row}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Bottom matrix header row labels (centered, bold)
+    a.append({"action": "set_bold", "params": {"range": f"A{matrix_top}:AL{matrix_top}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"J{matrix_top}:U{matrix_top}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_alignment", "params": {"range": f"AJ{matrix_top}:AL{matrix_top}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_alignment", "params": {"range": f"A{matrix_top}:I{matrix_bottom}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+
+    # ── 10. Freeze header rows ──
+    a.append({"action": "freeze_rows", "params": {"row_count": 5}})
+
+    return a
+
+
+def _scaffold_action_to_request(action: str, params: dict, sheet_id: int) -> dict | None:
+    """Build a single Google Sheets `batchUpdate` request from a scaffold sub-action.
+
+    Returns None if the action is not a formatting/structural one (e.g. set_value
+    is handled separately via values.batchUpdate, clear_sheet is run before this).
+    Mirrors the request shapes built by the per-action _exec_* helpers — kept
+    inline so the scaffold can batch ~100 requests into a single API call.
+    """
+    if action == "merge_cells":
+        return {"mergeCells": {"range": _range_to_grid_range(str(params["range"]), sheet_id), "mergeType": "MERGE_ALL"}}
+
+    if action == "set_border":
+        range_str = str(params["range"])
+        style = str(params.get("style", "SOLID"))
+        color = str(params.get("color", "#CCCCCC"))
+        width = int(params.get("width", 1))
+        top = _border_style(str(params.get("top_style", style)), str(params.get("top_color", color)), int(params.get("top_width", width)))
+        bottom = _border_style(str(params.get("bottom_style", style)), str(params.get("bottom_color", color)), int(params.get("bottom_width", width)))
+        left = _border_style(str(params.get("left_style", style)), str(params.get("left_color", color)), int(params.get("left_width", width)))
+        right = _border_style(str(params.get("right_style", style)), str(params.get("right_color", color)), int(params.get("right_width", width)))
+        inner_h = _border_style(str(params.get("inner_horizontal_style", style)), str(params.get("inner_horizontal_color", color)), int(params.get("inner_horizontal_width", width)))
+        inner_v = _border_style(str(params.get("inner_vertical_style", style)), str(params.get("inner_vertical_color", color)), int(params.get("inner_vertical_width", width)))
+        ub: dict = {"range": _range_to_grid_range(range_str, sheet_id)}
+        if top is not None: ub["top"] = top
+        if bottom is not None: ub["bottom"] = bottom
+        if left is not None: ub["left"] = left
+        if right is not None: ub["right"] = right
+        if inner_h is not None: ub["innerHorizontal"] = inner_h
+        if inner_v is not None: ub["innerVertical"] = inner_v
+        # If every side ended up None, the API call would be a no-op — skip it.
+        if len(ub) == 1:
+            return None
+        return {"updateBorders": ub}
+
+    if action == "set_background":
+        return {
+            "repeatCell": {
+                "range": _range_to_grid_range(str(params["range"]), sheet_id),
+                "cell": {"userEnteredFormat": {"backgroundColor": _hex_to_rgb(str(params.get("color", "#FFFFFF")))}},
+                "fields": "userEnteredFormat.backgroundColor",
+            }
+        }
+
+    if action == "set_alignment":
+        return {
+            "repeatCell": {
+                "range": _range_to_grid_range(str(params["range"]), sheet_id),
+                "cell": {"userEnteredFormat": {
+                    "horizontalAlignment": str(params.get("horizontal", "LEFT")).upper(),
+                    "verticalAlignment": str(params.get("vertical", "BOTTOM")).upper(),
+                }},
+                "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment",
+            }
+        }
+
+    if action == "set_font_size":
+        return {
+            "repeatCell": {
+                "range": _range_to_grid_range(str(params["range"]), sheet_id),
+                "cell": {"userEnteredFormat": {"textFormat": {"fontSize": int(params.get("size", 10))}}},
+                "fields": "userEnteredFormat.textFormat.fontSize",
+            }
+        }
+
+    if action == "set_bold":
+        return {
+            "repeatCell": {
+                "range": _range_to_grid_range(str(params["range"]), sheet_id),
+                "cell": {"userEnteredFormat": {"textFormat": {"bold": bool(params.get("bold", True))}}},
+                "fields": "userEnteredFormat.textFormat.bold",
+            }
+        }
+
+    if action == "set_text_wrap":
+        mode = str(params.get("mode", "CLIP")).upper()
+        if mode not in ("CLIP", "WRAP", "OVERFLOW_CELL"):
+            mode = "CLIP"
+        return {
+            "repeatCell": {
+                "range": _range_to_grid_range(str(params["range"]), sheet_id),
+                "cell": {"userEnteredFormat": {"wrapStrategy": mode}},
+                "fields": "userEnteredFormat.wrapStrategy",
+            }
+        }
+
+    if action == "set_row_height":
+        start = int(params["start_index"]) - 1
+        end = int(params.get("end_index", params["start_index"]))
+        return {
+            "updateDimensionProperties": {
+                "range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": start, "endIndex": end},
+                "properties": {"pixelSize": int(params.get("height", 21))},
+                "fields": "pixelSize",
+            }
+        }
+
+    if action == "set_column_width":
+        start = int(params["start_index"]) - 1
+        end = int(params.get("end_index", params["start_index"]))
+        return {
+            "updateDimensionProperties": {
+                "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": start, "endIndex": end},
+                "properties": {"pixelSize": int(params.get("width", 100))},
+                "fields": "pixelSize",
+            }
+        }
+
+    if action == "freeze_rows":
+        return {
+            "updateSheetProperties": {
+                "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": int(params.get("row_count", 1))}},
+                "fields": "gridProperties.frozenRowCount",
+            }
+        }
+
+    return None
+
+
+def _exec_scaffold_oppm_form(
+    service: Any,
+    spreadsheet_id: str,
+    params: dict,
+    sheet_id: int,
+    sheet_title: str,
+) -> dict:
+    """Execute the full OPPM form scaffold using batched API calls.
+
+    Sequence:
+      1. clear_sheet (already a multi-call routine — runs first so the values
+         and formatting batches operate on a clean slate)
+      2. ONE values.batchUpdate carrying every set_value sub-action
+      3. ONE spreadsheets.batchUpdate carrying every formatting/structural request
+         (chunked at 200 requests per call to stay under API limits)
+
+    This collapses ~107 sequential round-trips down to ~3 round-trips so the
+    full scaffold completes well within typical gateway timeouts (~60s).
+    """
+    sub_actions = _build_scaffold_actions(params)
+
+    value_data: list[dict] = []
+    format_requests: list[dict] = []
+    has_clear = False
+
+    for sub in sub_actions:
+        sub_name = sub.get("action", "")
+        sub_params = sub.get("params", {}) or {}
+        if sub_name == "clear_sheet":
+            has_clear = True
+            continue
+        if sub_name == "set_value":
+            value_data.append({
+                "range": f"'{sheet_title}'!{sub_params['range']}",
+                "values": [[sub_params.get("value", "")]],
+            })
+            continue
+        try:
+            req = _scaffold_action_to_request(sub_name, sub_params, sheet_id)
+        except Exception as e:
+            logger.warning("scaffold: failed to build request for '%s': %s", sub_name, e)
+            continue
+        if req is not None:
+            format_requests.append(req)
+
+    errors: list[str] = []
+    executed_groups = 0
+
+    # Step 1 — clear_sheet (its own multi-call routine; safe to fail silently
+    # since an existing-form scaffold will overwrite anything left behind).
+    if has_clear:
+        try:
+            _exec_clear_sheet(service, spreadsheet_id, {}, sheet_id)
+            executed_groups += 1
+        except Exception as e:
+            logger.warning("scaffold: clear_sheet failed: %s", e)
+            errors.append(f"clear_sheet: {e}")
+
+    # Step 2 — all values in one call
+    if value_data:
+        try:
+            service.spreadsheets().values().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"valueInputOption": "USER_ENTERED", "data": value_data},
+            ).execute()
+            executed_groups += 1
+        except Exception as e:
+            logger.warning("scaffold: values.batchUpdate failed: %s", e)
+            errors.append(f"values_batch: {e}")
+
+    # Step 3 — all formatting requests, chunked to stay under per-call limits
+    chunk_size = 200
+    for i in range(0, len(format_requests), chunk_size):
+        chunk = format_requests[i:i + chunk_size]
+        try:
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": chunk},
+            ).execute()
+            executed_groups += 1
+        except Exception as e:
+            logger.warning("scaffold: format batch [%d:%d] failed: %s", i, i + len(chunk), e)
+            errors.append(f"format_batch[{i}:{i + len(chunk)}]: {e}")
+
+    summary = {
+        "sub_actions_total": len(sub_actions),
+        "value_writes": len(value_data),
+        "format_requests": len(format_requests),
+        "api_calls": executed_groups,
+        "errors": errors[:5],
+    }
+    logger.info("scaffold_oppm_form: %s", summary)
+    return summary
+
+
 def _exec_fill_timeline(
     service: Any,
     spreadsheet_id: str,
@@ -1031,6 +1437,7 @@ SUPPORTED_ACTIONS = frozenset({
     "set_hyperlink",
     "protect_range", "unprotect_range",
     "clear_sheet",
+    "scaffold_oppm_form",
 })
 
 
@@ -1136,6 +1543,10 @@ def execute_actions(
                 _exec_unprotect_range(service, spreadsheet_id, params, sheet_id)
             elif action_name == "clear_sheet":
                 _exec_clear_sheet(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "scaffold_oppm_form":
+                summary = _exec_scaffold_oppm_form(service, spreadsheet_id, params, sheet_id, sheet_title)
+                results.append({"action": action_name, "success": True, "error": None, "summary": summary})
+                continue
             results.append({"action": action_name, "success": True, "error": None})
         except Exception as e:
             logger.warning("execute_actions: action '%s' failed: %s", action_name, e)

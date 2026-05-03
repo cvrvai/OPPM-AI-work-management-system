@@ -1,0 +1,24 @@
+{
+  "name": "Make it standard",
+  "description": "User says 'make it standard' for a sheet with 30 task rows and mixed borders",
+  "user_input": "make it standard",
+  "context": {
+    "task_rows": "6-30",
+    "current_state": "Mixed borders: some thick, some missing, timeline area has borders"
+  },
+  "expected_actions": [
+    { "action": "set_border", "params": { "range": "A6:AL30", "style": "NONE" } },
+    { "action": "set_border", "params": { "range": "A6:AL30", "style": "SOLID", "color": "#CCCCCC", "width": 1 } },
+    { "action": "set_border", "params": { "range": "J6:AI30", "style": "NONE" } },
+    { "action": "set_border", "params": { "range": "A1:AL5", "style": "SOLID", "color": "#000000", "width": 1 } },
+    { "action": "set_row_height", "params": { "sheet": 0, "start_index": 6, "end_index": 30, "height": 21 } },
+    { "action": "set_background", "params": { "range": "A5:AL5", "color": "#E8E8E8" } },
+    { "action": "set_font_size", "params": { "range": "A1:AL1", "size": 14 } },
+    { "action": "set_bold", "params": { "range": "A1:AL1", "bold": true } },
+    { "action": "set_alignment", "params": { "range": "A1:AL1", "horizontal": "CENTER" } },
+    { "action": "set_font_size", "params": { "range": "A2:AL2", "size": 11 } },
+    { "action": "set_bold", "params": { "range": "A2:AL2", "bold": true } },
+    { "action": "set_font_size", "params": { "range": "A3:AL5", "size": 10 } },
+    { "action": "set_bold", "params": { "range": "A5:AL5", "bold": true } }
+  ]
+}

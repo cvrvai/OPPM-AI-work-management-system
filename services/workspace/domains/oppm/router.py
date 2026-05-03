@@ -1,5 +1,10 @@
 """OPPM routes — objectives, timeline, costs, sub-objectives, task-owners, deliverables, forecasts, risks, export."""
 
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -616,11 +621,27 @@ async def execute_sheet_actions_route(
     session: AsyncSession = Depends(get_session),
 ):
     """Execute a batch of OPPM AI sheet actions against the linked Google Sheet."""
+    actions = [a.model_dump() for a in data.actions]
+
+    # ── Template Validation (Phase 1) ──────────────────────────────────────
+    # Validate actions against OPPM template before execution
+    try:
+        from shared.perception import TemplateReference
+        template_path = Path(__file__).parent.parent.parent.parent.parent / "intelligence" / "skills" / "oppm-traditional" / "template.yaml"
+        template = TemplateReference(str(template_path))
+        for action in actions:
+            warnings = template.validate_action(action)
+            if warnings:
+                logger.warning("Template validation warnings for action %s: %s", action.get("action"), warnings)
+    except Exception as e:
+        logger.warning("Template validation skipped (non-fatal): %s", e)
+    # ───────────────────────────────────────────────────────────────────────
+
     result = await execute_sheet_actions(
         session,
         project_id,
         ws.workspace_id,
-        [a.model_dump() for a in data.actions],
+        actions,
     )
     return SheetActionsResponse(**result)
 

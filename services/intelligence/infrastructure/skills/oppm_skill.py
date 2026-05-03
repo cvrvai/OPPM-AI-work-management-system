@@ -20,12 +20,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.skills.base import Skill, SkillContext, SkillResult
+from shared.perception import TemplateReference
 from shared.models.project import Project
 from shared.models.task import Task, TaskOwner
 from shared.models.oppm import (
@@ -116,44 +118,110 @@ language instead of objective/sub-objective. Default to Traditional otherwise.
 
 ## Border editing rules
 
-When the user asks to modify cell borders (e.g. "make the header row have a
-thick bottom border", "add a red border around the risk section", or
-"remove the grid lines from the legend"), call `set_sheet_border`.
+When the user asks to modify cell borders, use `set_border` (NOT `set_sheet_border`).
 
-### Parameters
-- cell_range: A1 notation range, e.g. "A1:AL1" (header row), "H6:H10" (task rows),
-  or "A30:F35" (bottom section). Single cells like "B5" are also valid.
-- borders: Object specifying which sides to modify. Each side is optional:
-  { top?: { style, color? }, bottom?: { style, color? },
-    left?: { style, color? }, right?: { style, color? } }
+You have access to a STRUCTURED TEMPLATE REFERENCE that defines exact border rules:
+- Header rows (1-5): SOLID, width=1, color=#000000 on ALL sides
+- Task rows (6+): SOLID, width=1, color=#CCCCCC on ALL sides
+- Timeline area (J-AI in task rows): NONE (no borders)
 
-### Style values
-- "thin"    → style: 1  (default for internal grid lines)
-- "medium"  → style: 8  (default for section dividers in OPPM)
-- "thick"   → style: 9  (use for emphasis, outer frames, header emphasis)
-- "dashed"  → style: 4  (use for temporary / draft / placeholder areas)
-- "dotted"  → style: 3  (use for subtle separators)
-- "none"    → style: 0  (removes the border on that side)
+The TEMPLATE REFERENCE is injected into your context automatically. Use it for exact values.
 
-### Color values
-- "#000000" → black (default for structural borders)
-- "#CCCCCC" → light gray (subtle dividers, secondary grid)
-- "#FF0000" → red (highlighting issues, at-risk markers)
-- "#1D9E75" → green (on-track emphasis)
-- "#EF9F27" → yellow (warning emphasis)
+### Real OPPM Form Border Structure
+
+The authentic OPPM form (per Clark Campbell) uses a specific visual hierarchy:
+
+**1. Outer Frame (thick black border around entire sheet)**
+- Range: A1:AL{N} where N = last row of the form
+- Top: thick, black
+- Bottom: thick, black  
+- Left: thick, black
+- Right: thick, black
+
+**2. Header Section (rows 1-5)**
+- Outer border: SOLID, black, width=1
+- Bottom of row 5: thick black (separates header from tasks)
+- Inner grid: SOLID, black, width=1
+- Background: A5:AL5 = #E8E8E8 (light gray)
+
+**3. Task Area (rows 6 to last task)**
+- Outer border: SOLID, #CCCCCC, width=1
+- Inner grid: SOLID, #CCCCCC, width=1
+- Row height: 21 pixels
+
+**4. Timeline Sub-section (within task area, columns J-AI)**
+- NO borders (style: NONE)
+- This creates the clean white grid for timeline dots
+
+**5. Section Dividers (thick lines)**
+- Bottom of row 5 (header→tasks): thick black
+- Right of column F (sub-objectives→tasks): thick black
+- Right of column I (tasks→timeline): thick black
+- Right of column AI (timeline→owners): thick black
+- Bottom of last task row (tasks→bottom matrix): thick black
+
+**6. Bottom Matrix (sub-objective cross-reference)**
+- Range: A{N+1}:AL{N+6} where N = last task row
+- Outer border: thick black
+- Inner grid: SOLID, #CCCCCC, width=1
+- Diagonal lines from top-left to bottom-right in the intersection cells
+
+**7. Priority Legend (right side)**
+- Range: AN6:AP10 (or beyond AL if sheet extends)
+- Outer border: SOLID, black
+- Inner grid: SOLID, #CCCCCC
+
+### set_border Parameters
+- range: A1 notation range, e.g. "A1:AL1" (header row), "H6:H10" (task rows)
+- style: "SOLID", "SOLID_MEDIUM", "SOLID_THICK", "NONE", "DOTTED", "DASHED"
+- color: hex color string, e.g. "#000000", "#CCCCCC"
+- width: integer width (1 for thin, 2 for medium, 3 for thick)
+- sides: list of sides to apply — ["top", "bottom", "left", "right", "innerHorizontal", "innerVertical"]
+  OR use per-side overrides: top_style, top_color, top_width, bottom_style, etc.
+
+### Style Mapping
+- "thin" / width=1  → style: "SOLID"
+- "medium" / width=2 → style: "SOLID_MEDIUM"  
+- "thick" / width=3  → style: "SOLID_THICK"
+- "none" / width=0  → style: "NONE"
+
+### Complete Border Setup Example (for 20 task rows)
+```
+# 1. Clear any existing borders
+set_border(range="A1:AL30", style="NONE", sides=["top","bottom","left","right","innerHorizontal","innerVertical"])
+
+# 2. Header section borders (rows 1-5)
+set_border(range="A1:AL5", style="SOLID", color="#000000", width=1, sides=["top","bottom","left","right","innerHorizontal","innerVertical"])
+
+# 3. Thick bottom on row 5 (header→task divider)
+set_border(range="A5:AL5", top_style="SOLID_THICK", top_color="#000000", top_width=3)
+
+# 4. Task area borders (rows 6-25)
+set_border(range="A6:AL25", style="SOLID", color="#CCCCCC", width=1, sides=["top","bottom","left","right","innerHorizontal","innerVertical"])
+
+# 5. Remove timeline grid (J-AI in task rows)
+set_border(range="J6:AI25", style="NONE", sides=["top","bottom","left","right","innerHorizontal","innerVertical"])
+
+# 6. Thick vertical dividers
+set_border(range="F1:F25", right_style="SOLID_THICK", right_color="#000000", right_width=3)
+set_border(range="I1:I25", right_style="SOLID_THICK", right_color="#000000", right_width=3)
+set_border(range="AI1:AI25", right_style="SOLID_THICK", right_color="#000000", right_width=3)
+
+# 7. Thick bottom of last task row
+set_border(range="A25:AL25", bottom_style="SOLID_THICK", bottom_color="#000000", bottom_width=3)
+
+# 8. Bottom matrix section (rows 26-31)
+set_border(range="A26:AL31", style="SOLID", color="#000000", width=1, sides=["top","bottom","left","right","innerHorizontal","innerVertical"])
+set_border(range="A26:AL31", top_style="SOLID_THICK", top_color="#000000", top_width=3)
+```
 
 ### Important notes
-- Row and column indexes in cell_range are 1-based (A1 = row 0, col 0 internally).
-  The tool converts A1 notation to 0-indexed coordinates automatically.
-- Only specify the sides you want to CHANGE — unspecified sides are left untouched.
-- To REMOVE a border side, set its style to "none".
-- After inserting new rows, ALWAYS re-apply borders to maintain visual consistency.
-- The OPPM scaffold already has borders; use this tool for ADDITIONAL emphasis
-  or CORRECTIONS requested by the user.
-- Common patterns:
-  * Thick bottom border on header row: `set_sheet_border("A1:AL1", { bottom: { style: "thick" } })`
-  * Red frame around risk section: `set_sheet_border("A25:AL28", { top: { style: "thick", color: "#FF0000" }, bottom: { style: "thick", color: "#FF0000" }, left: { style: "thick", color: "#FF0000" }, right: { style: "thick", color: "#FF0000" } })`
-  * Remove grid from legend: `set_sheet_border("AJ6:AL10", { top: { style: "none" }, bottom: { style: "none" }, left: { style: "none" }, right: { style: "none" } })`
+- Row and column indexes in range are 1-based (A1 = row 1, col 1)
+- The tool converts A1 notation to 0-indexed coordinates automatically
+- When using per-side overrides (top_style, bottom_style, etc.), ONLY those sides are modified
+- To REMOVE a border, use style="NONE" on the specific side
+- After inserting new rows, ALWAYS re-apply borders to maintain visual consistency
+- The OPPM form should look like a professional project management document with clear visual hierarchy
 """
 
 # ── Pre-flight: bulk-load project context ───────────────────────────────────
@@ -406,6 +474,12 @@ async def oppm_preflight(session: AsyncSession, ctx: SkillContext) -> dict[str, 
     project_id = ctx.project_id
     workspace_id = ctx.workspace_id
 
+    # ── Load Template Reference ─────────────────────────────────────────────
+    template_path = Path(__file__).parent.parent.parent / "skills" / "oppm-traditional" / "template.yaml"
+    template = TemplateReference(str(template_path))
+    template_summary = template.build_template_summary()
+
+    # ── Load Project Data ─────────────────────────────────────────────────
     project = await _load_project(session, project_id, workspace_id)
     header = await _load_header(session, project_id, workspace_id)
     objectives = await _load_objectives(session, project_id)
@@ -494,6 +568,8 @@ async def oppm_preflight(session: AsyncSession, ctx: SkillContext) -> dict[str, 
         "border_overrides": border_overrides,
         "today": date.today().isoformat(),
         "snapshot_text": snapshot,
+        "template_summary": template_summary,
+        "template": template,
     }
 
 

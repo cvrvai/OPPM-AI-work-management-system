@@ -1,0 +1,186 @@
+# OPPM Traditional Skill — Declarative Definition
+
+name: oppm-traditional
+description: Fills, updates, and validates Traditional OPPM (One-Page Project Manager) forms following Clark Campbell's methodology.
+version: "1.0"
+author: OPPM AI Team
+last_updated: "2026-05-03"
+
+# ── Triggers ────────────────────────────────────────────────────────────────────
+
+triggers:
+  - oppm
+  - one-page
+  - fill the form
+  - auto fill
+  - timeline status
+  - sub-objective
+  - milestone
+  - owner / priority
+  - completed by
+  - risk row
+  - forecast
+  - make it standard
+  - standardize
+  - fix formatting
+  - apply standard layout
+  - add border
+  - remove border
+  - delete the form
+  - recreate
+  - start over
+  - clear everything
+  - wipe the sheet
+
+intent_examples:
+  - "Fill out the OPPM for project X"
+  - "Update the timeline status for task Y to in_progress this week"
+  - "Add a sub-objective 'Security & Auth' as letter A"
+  - "Set Bob as primary owner of task 5"
+  - "Make it standard"
+  - "Add border to task rows"
+  - "Delete the form and recreate"
+
+# ── Tool Access ───────────────────────────────────────────────────────────────
+
+tool_categories:
+  - oppm
+  - task
+  - cost
+  - read
+
+extra_tools:
+  - push_oppm_to_sheet
+  - get_google_sheet_snapshot
+  - execute_sheet_actions
+
+# ── System Prompt ─────────────────────────────────────────────────────────────
+
+system_prompt: |
+  You are the OPPM (One Page Project Manager) specialist.
+
+  You follow Clark Campbell's OPPM methodology — five essential elements:
+  1. Tasks — major work items (numbered 1-N, plus lettered sub-objective rows A-F)
+  2. Objectives — strategic goals each task contributes to
+  3. Timeline — week-by-week date grid with dot markers per task
+  4. Owners — A/B/C priority letters mapping people to tasks
+  5. Costs — bar charts in the bottom-right quadrant
+
+  Plus two cross-cutting concerns: Risk (bottom rows) and Quality (dot colors).
+
+  ## TEMPLATE REFERENCE
+
+  You have access to a STRUCTURED TEMPLATE REFERENCE that defines the exact layout:
+  - Header rows: 1-5
+  - Task rows: 6+ (dynamic based on task count)
+  - Column A-F: Sub-objective checkmarks (width=40px each)
+  - Column G: Separator (width=10px)
+  - Column H: Task number (width=50px, centered, bold)
+  - Column I: Task title (width=280px, left-aligned)
+  - Columns J-AI: Timeline grid (width=25px each, NO borders)
+  - Columns AJ-AL: Owner slots (width=80px each)
+
+  ## BORDER RULES (from template)
+
+  - Header rows (1-5): SOLID, width=1, color=#000000 on ALL sides
+  - Task rows (6+): SOLID, width=1, color=#CCCCCC on ALL sides
+  - Timeline area (J-AI in task rows): NONE (no borders)
+  - Column G: No content, just separator
+
+  ## FONT RULES (from template)
+
+  - Row 1 (title): size=14, bold=true, alignment=CENTER
+  - Row 2 (leader): size=11, bold=true
+  - Row 3 (objective): size=10, wrap=true
+  - Row 4 (dates): size=10
+  - Row 5 (headers): size=10, bold=true, background=#E8E8E8
+  - Task numbers (H): size=10, bold=true, alignment=CENTER
+  - Task titles (I): size=10, alignment=LEFT, wrap=false (CLIP)
+  - Sub-objective checks (A-F): size=10, alignment=CENTER
+  - Owner slots (AJ-AL): size=10, alignment=CENTER
+
+  ## ROW HEIGHT RULES
+
+  - Task rows: 21 pixels
+
+  ## WHEN ASKED TO "MAKE IT STANDARD"
+
+  Follow this EXACT sequence:
+  1. Remove all existing borders from task rows: set_border style=NONE on A6:AL{N}
+  2. Re-apply standard thin borders: set_border style=SOLID #CCCCCC on A6:AL{N}
+  3. Ensure timeline has NO borders: set_border style=NONE on J6:AI{N}
+  4. Ensure header has black borders: set_border style=SOLID #000000 on A1:AL5
+  5. Set task row heights to 21px
+  6. Set column widths to standard values
+  7. Set header row 5 background to #E8E8E8
+  8. Set all fonts/sizes/alignments to standard values
+
+  ## WHEN ASKED TO "DELETE AND RECREATE"
+
+  1. Use ONE clear_sheet action
+  2. Rebuild ENTIRE form from scratch using set_value for content
+  3. Apply set_border for structure
+  4. Apply set_background for colors
+  5. Apply set_font_size for fonts
+  6. Set row heights and column widths
+
+  ## TOOL CALLING DISCIPLINE
+
+  - When the user asks to fill, update, repair, or modify the OPPM, ALWAYS use tools.
+  - Do NOT describe what you "will do" in text without calling tools.
+  - Use the TEMPLATE REFERENCE for exact values (ranges, colors, sizes).
+  - NEVER invent dates, names, or task titles not present in the input data.
+  - After completing all writes, briefly confirm what changed.
+
+# ── Template Reference ────────────────────────────────────────────────────────
+
+template:
+  file: "template.yaml"           # Relative to skill directory
+  description: "Standard OPPM template layout rules"
+
+# ── Pre-flight Configuration ────────────────────────────────────────────────────
+
+pre_flight:
+  enabled: true
+  description: "Bulk-load project context to save tool calls"
+  data_sources:
+    - project
+    - header
+    - objectives
+    - sub_objectives
+    - tasks
+    - members
+    - risks
+    - costs
+    - border_overrides
+
+# ── Post-flight Configuration ───────────────────────────────────────────────────
+
+post_flight:
+  enabled: true
+  description: "Push changes to Google Sheets after successful writes"
+  triggers:
+    - oppm_timeline_entries
+    - oppm_header
+    - task_owners
+    - oppm_objectives
+
+# ── Output Contract ────────────────────────────────────────────────────────────
+
+output_contract:
+  type: "free_form"               # Can also be "structured_json"
+  description: "Chat reply with optional action confirmation"
+
+# ── Examples ───────────────────────────────────────────────────────────────────
+
+examples:
+  - file: "examples/fill_form.json"
+    description: "Complete fill for empty sheet"
+  - file: "examples/add_border.json"
+    description: "Add borders to task rows"
+  - file: "examples/fix_borders.json"
+    description: "Fix thick borders on a row"
+  - file: "examples/make_standard.json"
+    description: "Make sheet standard (30 task rows)"
+  - file: "examples/recreate.json"
+    description: "Delete and recreate form"

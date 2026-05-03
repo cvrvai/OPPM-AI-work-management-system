@@ -1,0 +1,725 @@
+# OPPM Traditional Template — Structured Reference for AI
+
+# This file teaches the AI the exact layout of a standard OPPM sheet.
+# It replaces text-only prompts with structured, programmatic rules.
+
+metadata:
+  name: oppm-traditional
+  version: "1.0"
+  description: Standard One-Page Project Manager template (Clark Campbell methodology)
+  author: OPPM AI Team
+  last_updated: "2026-05-03"
+
+# ── Sheet Structure ──────────────────────────────────────────────────────────
+
+sheet:
+  name: "OPPM"                    # Sheet tab name
+  frozen_rows: 5                  # Keep header visible while scrolling
+  frozen_columns: 0
+
+# ── Row Definitions ───────────────────────────────────────────────────────────
+
+rows:
+  header:
+    start: 1
+    end: 5
+    description: "Project metadata and column labels"
+    
+  task_area:
+    start: 6
+    end: null                     # Dynamic: 6 + number of tasks
+    description: "Task rows (one per task or sub-task)"
+    
+  people_count:
+    description: "Row with '# People working on the project: N'"
+    # Positioned after last task row
+    
+  timeline_header:
+    description: "Row with week date values (e.g. '26-Apr-2026')"
+    # Positioned after people_count row
+    
+  owner_header:
+    description: "Row with team member names for AJ-AL columns"
+    # Positioned after timeline_header
+    
+  sub_objective_matrix:
+    start: null                   # Dynamic
+    end: null
+    description: "Visual cross-reference showing task→sub-objective mapping"
+    
+  priority_legend:
+    description: "Reference legend for A/B/C priority meanings"
+    # Positioned on right side beyond column AL
+
+# ── Column Definitions ────────────────────────────────────────────────────────
+
+columns:
+  - id: A
+    index: 1
+    name: "sub_objective_1"
+    description: "Sub-objective 1 checkmark column"
+    width: 40
+    
+  - id: B
+    index: 2
+    name: "sub_objective_2"
+    description: "Sub-objective 2 checkmark column"
+    width: 40
+    
+  - id: C
+    index: 3
+    name: "sub_objective_3"
+    description: "Sub-objective 3 checkmark column"
+    width: 40
+    
+  - id: D
+    index: 4
+    name: "sub_objective_4"
+    description: "Sub-objective 4 checkmark column"
+    width: 40
+    
+  - id: E
+    index: 5
+    name: "sub_objective_5"
+    description: "Sub-objective 5 checkmark column"
+    width: 40
+    
+  - id: F
+    index: 6
+    name: "sub_objective_6"
+    description: "Sub-objective 6 checkmark column"
+    width: 40
+    
+  - id: G
+    index: 7
+    name: "separator"
+    description: "Narrow separator between sub-objectives and task area"
+    width: 10
+    
+  - id: H
+    index: 8
+    name: "task_number"
+    description: "Task number label (e.g. '1', '2.1')"
+    width: 50
+    
+  - id: I
+    index: 9
+    name: "task_title"
+    description: "Task title text"
+    width: 280
+    
+  - id: J
+    index: 10
+    name: "timeline_week_1"
+    description: "Timeline week 1"
+    width: 25
+    
+  # ... columns K through AI are timeline weeks 2-35
+  # For brevity, we define the range:
+  - id: "J:AI"
+    index: "10:35"
+    name: "timeline"
+    description: "Week-by-week timeline grid (35 weeks)"
+    width: 25
+    
+  - id: AJ
+    index: 36
+    name: "owner_primary"
+    description: "Primary owner (Priority A)"
+    width: 80
+    
+  - id: AK
+    index: 37
+    name: "owner_helper"
+    description: "Primary helper (Priority B)"
+    width: 80
+    
+  - id: AL
+    index: 38
+    name: "owner_secondary"
+    description: "Secondary helper (Priority C)"
+    width: 80
+
+# ── Border Rules ──────────────────────────────────────────────────────────────
+
+borders:
+  header:
+    range: "A1:AL5"
+    style: "SOLID"
+    width: 1
+    color: "#000000"            # Black
+    sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+    
+  task_area:
+    range: "A6:AL{N}"          # {N} = last task row
+    style: "SOLID"
+    width: 1
+    color: "#CCCCCC"            # Light gray
+    sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+    
+  timeline:
+    range: "J6:AI{N}"          # Timeline area within task rows
+    style: "NONE"               # No borders
+    sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+    
+  # Note: timeline border rule OVERRIDES task_area border rule for J-AI columns
+  # Priority: specific range > general range
+
+# ── Background Colors ───────────────────────────────────────────────────────
+
+backgrounds:
+  header_row_5:
+    range: "A5:AL5"
+    color: "#E8E8E8"            # Light gray for column labels
+    
+  timeline_on_track:
+    color: "#1D9E75"            # Green
+    
+  timeline_at_risk:
+    color: "#EF9F27"            # Yellow
+    
+  timeline_late:
+    color: "#E24B4A"            # Red
+    
+  timeline_planned:
+    color: null                  # White / no fill
+
+# ── Font Rules ────────────────────────────────────────────────────────────────
+
+fonts:
+  project_title:
+    range: "A1:AL1"
+    size: 14
+    bold: true
+    alignment: center
+    
+  project_leader:
+    range: "A2:AL2"
+    size: 11
+    bold: true
+    
+  project_objective:
+    range: "A3:AL3"
+    size: 10
+    wrap: true
+    
+  dates:
+    range: "A4:AL4"
+    size: 10
+    
+  column_headers:
+    range: "A5:AL5"
+    size: 10
+    bold: true
+    background: "#E8E8E8"
+    
+  task_number:
+    range: "H6:H{N}"
+    size: 10
+    bold: true
+    alignment: center
+    
+  task_title:
+    range: "I6:I{N}"
+    size: 10
+    alignment: left
+    wrap: false                 # CLIP mode to preserve row height
+    
+  sub_objective_check:
+    range: "A6:F{N}"
+    size: 10
+    alignment: center
+    
+  owner_slot:
+    range: "AJ6:AL{N}"
+    size: 10
+    alignment: center
+
+# ── Row Heights ───────────────────────────────────────────────────────────────
+
+row_heights:
+  header:
+    rows: "1:5"
+    height: null                # Default/auto
+    
+  task_rows:
+    rows: "6:{N}"
+    height: 21                  # Pixels
+
+# ── Content Templates ───────────────────────────────────────────────────────
+
+content:
+  row_1: "Project: {project_name}"
+  row_2: "Project Leader: {leader_name} | Project Name: {project_name}"
+  row_3: "Project Objective: {objective_text}"
+  row_4: "Start Date: {start_date} | Deadline: {deadline}"
+  row_5: "Sub objective | Major Tasks (Deadline) | Project Completed By: {weeks} weeks | Owner / Priority"
+  
+  people_count: "# People working on the project: {count}"
+
+# ── Merge Rules ───────────────────────────────────────────────────────────────
+
+merges:
+  project_title:
+    range: "A1:AL1"
+    
+  project_leader:
+    range: "A2:AL2"
+    
+  project_objective:
+    range: "A3:AL3"
+    
+  dates:
+    range: "A4:AL4"
+    
+  column_headers:
+    range: "A5:AL5"
+    
+  task_number_and_title:
+    description: "For main tasks (not sub-tasks), merge H and I"
+    condition: "task.is_main_task == true"
+    range: "H{row}:I{row}"
+
+# ── Validation Rules ──────────────────────────────────────────────────────────
+
+validation:
+  max_tasks: 30
+  max_sub_objectives: 6
+  max_timeline_weeks: 35
+  max_owners_per_task: 3
+  
+  required_header_fields:
+    - project_name
+    - leader_name
+    - objective_text
+    - start_date
+    - deadline
+    
+  timeline_status_values:
+    - planned
+    - in_progress
+    - completed
+    - at_risk
+    - blocked
+    
+  priority_values:
+    - A
+    - B
+    - C
+
+# ── Examples for AI Training ──────────────────────────────────────────────────
+
+examples:
+  - name: "Complete fill for empty sheet"
+    description: "User says 'create the OPPM form' on an empty sheet"
+    steps:
+      - action: clear_sheet
+      - action: set_value
+        range: "A1"
+        value: "Project: National Health Record Sharing System"
+      - action: set_value
+        range: "A2"
+        value: "Project Leader: John Doe | Project Name: NHRS"
+      - action: set_value
+        range: "A3"
+        value: "Project Objective: Establish a secure framework for health record sharing"
+      - action: set_value
+        range: "A4"
+        value: "Start Date: 2026-01-01 | Deadline: 2026-08-02"
+      - action: set_value
+        range: "A5"
+        value: "Sub objective | Major Tasks (Deadline) | Project Completed By: 31 weeks | Owner / Priority"
+      # ── Border Structure: Real OPPM Form ──
+      # 1. Clear all existing borders first
+      - action: set_border
+        range: "A1:AL35"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 2. Header section (rows 1-5): solid black grid
+      - action: set_border
+        range: "A1:AL5"
+        style: "SOLID"
+        color: "#000000"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 3. Thick bottom on row 5 (header→task divider)
+      - action: set_border
+        range: "A5:AL5"
+        bottom_style: "SOLID_THICK"
+        bottom_color: "#000000"
+        bottom_width: 3
+      # 4. Task area (rows 6-25): light gray grid
+      - action: set_border
+        range: "A6:AL25"
+        style: "SOLID"
+        color: "#CCCCCC"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 5. Remove timeline grid (J-AI in task rows) — clean white for dots
+      - action: set_border
+        range: "J6:AI25"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 6. Thick vertical dividers between sections
+      - action: set_border
+        range: "F1:F25"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "I1:I25"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "AI1:AI25"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      # 7. Thick bottom of last task row (tasks→bottom matrix divider)
+      - action: set_border
+        range: "A25:AL25"
+        bottom_style: "SOLID_THICK"
+        bottom_color: "#000000"
+        bottom_width: 3
+      # 8. Bottom matrix section (rows 26-31): black outer, gray inner
+      - action: set_border
+        range: "A26:AL31"
+        style: "SOLID"
+        color: "#000000"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      - action: set_border
+        range: "A26:AL31"
+        top_style: "SOLID_THICK"
+        top_color: "#000000"
+        top_width: 3
+      # ── Formatting ──
+      - action: set_background
+        range: "A5:AL5"
+        color: "#E8E8E8"
+      - action: set_font_size
+        range: "A1:AL1"
+        size: 14
+      - action: set_bold
+        range: "A1:AL1"
+        bold: true
+      - action: set_alignment
+        range: "A1:AL1"
+        horizontal: "CENTER"
+      - action: set_row_height
+        start_index: 6
+        end_index: 35
+        height: 21
+      - action: set_column_width
+        start_index: 1
+        end_index: 6
+        width: 40
+      - action: set_column_width
+        start_index: 7
+        end_index: 7
+        width: 10
+      - action: set_column_width
+        start_index: 8
+        end_index: 8
+        width: 50
+      - action: set_column_width
+        start_index: 9
+        end_index: 9
+        width: 280
+      - action: set_column_width
+        start_index: 10
+        end_index: 35
+        width: 25
+      - action: set_column_width
+        start_index: 36
+        end_index: 38
+        width: 80
+
+  - name: "Add borders to task rows"
+    description: "User says 'add border to task rows'"
+    context:
+      current_state: "Task rows 6-20 have no borders"
+    steps:
+      # 1. Clear existing borders in task area
+      - action: set_border
+        range: "A6:AL20"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 2. Apply light gray grid to task area
+      - action: set_border
+        range: "A6:AL20"
+        style: "SOLID"
+        color: "#CCCCCC"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 3. Remove timeline grid (clean white for dots)
+      - action: set_border
+        range: "J6:AI20"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 4. Thick vertical dividers between sections
+      - action: set_border
+        range: "F6:F20"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "I6:I20"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "AI6:AI20"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      # 5. Thick bottom on last task row
+      - action: set_border
+        range: "A20:AL20"
+        bottom_style: "SOLID_THICK"
+        bottom_color: "#000000"
+        bottom_width: 3
+
+  - name: "Fix thick borders on row 10"
+    description: "User says 'fix the borders' when row 10 has thick black borders"
+    context:
+      current_state: "Row 10 has b='T:K2#000000|B:K2#000000|L:K2#000000|R:K2#000000'"
+    steps:
+      - action: set_border
+        range: "A10:AL10"
+        style: "NONE"
+      - action: set_border
+        range: "A10:AL10"
+        style: "SOLID"
+        color: "#CCCCCC"
+        width: 1
+
+  - name: "Make it standard"
+    description: "User says 'make it standard' for a sheet with 30 task rows"
+    context:
+      current_state: "Mixed borders, some thick, some missing"
+    steps:
+      # 1. Clear all borders
+      - action: set_border
+        range: "A1:AL40"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 2. Header section borders
+      - action: set_border
+        range: "A1:AL5"
+        style: "SOLID"
+        color: "#000000"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 3. Thick bottom on row 5
+      - action: set_border
+        range: "A5:AL5"
+        bottom_style: "SOLID_THICK"
+        bottom_color: "#000000"
+        bottom_width: 3
+      # 4. Task area borders
+      - action: set_border
+        range: "A6:AL30"
+        style: "SOLID"
+        color: "#CCCCCC"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 5. Remove timeline grid
+      - action: set_border
+        range: "J6:AI30"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      # 6. Thick vertical dividers
+      - action: set_border
+        range: "F1:F30"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "I1:I30"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "AI1:AI30"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      # 7. Thick bottom of last task row
+      - action: set_border
+        range: "A30:AL30"
+        bottom_style: "SOLID_THICK"
+        bottom_color: "#000000"
+        bottom_width: 3
+      # 8. Bottom matrix section
+      - action: set_border
+        range: "A31:AL36"
+        style: "SOLID"
+        color: "#000000"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      - action: set_border
+        range: "A31:AL36"
+        top_style: "SOLID_THICK"
+        top_color: "#000000"
+        top_width: 3
+      # Formatting
+      - action: set_row_height
+        start_index: 6
+        end_index: 30
+        height: 21
+      - action: set_background
+        range: "A5:AL5"
+        color: "#E8E8E8"
+      - action: set_font_size
+        range: "A1:AL1"
+        size: 14
+      - action: set_bold
+        range: "A1:AL1"
+        bold: true
+      - action: set_alignment
+        range: "A1:AL1"
+        horizontal: "CENTER"
+      - action: set_font_size
+        range: "A2:AL2"
+        size: 11
+      - action: set_bold
+        range: "A2:AL2"
+        bold: true
+      - action: set_font_size
+        range: "A3:AL5"
+        size: 10
+      - action: set_bold
+        range: "A5:AL5"
+        bold: true
+
+  - name: "Recreate form from scratch"
+    description: "User says 'delete the form and recreate'"
+    steps:
+      - action: clear_sheet
+      - action: set_value
+        range: "A1"
+        value: "Project: [Project Name]"
+      - action: set_value
+        range: "A2"
+        value: "Project Leader: [Name]"
+      - action: set_value
+        range: "A3"
+        value: "Project Objective: [Text]"
+      - action: set_value
+        range: "A4"
+        value: "Start Date: [Date] | Deadline: [Date]"
+      - action: set_value
+        range: "A5"
+        value: "Sub objective | Major Tasks (Deadline) | Project Completed By: N weeks | Owner / Priority"
+      # ── Full Border Structure ──
+      - action: set_border
+        range: "A1:AL35"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      - action: set_border
+        range: "A1:AL5"
+        style: "SOLID"
+        color: "#000000"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      - action: set_border
+        range: "A5:AL5"
+        bottom_style: "SOLID_THICK"
+        bottom_color: "#000000"
+        bottom_width: 3
+      - action: set_border
+        range: "A6:AL25"
+        style: "SOLID"
+        color: "#CCCCCC"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      - action: set_border
+        range: "J6:AI25"
+        style: "NONE"
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      - action: set_border
+        range: "F1:F25"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "I1:I25"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "AI1:AI25"
+        right_style: "SOLID_THICK"
+        right_color: "#000000"
+        right_width: 3
+      - action: set_border
+        range: "A25:AL25"
+        bottom_style: "SOLID_THICK"
+        bottom_color: "#000000"
+        bottom_width: 3
+      - action: set_border
+        range: "A26:AL31"
+        style: "SOLID"
+        color: "#000000"
+        width: 1
+        sides: [top, bottom, left, right, innerHorizontal, innerVertical]
+      - action: set_border
+        range: "A26:AL31"
+        top_style: "SOLID_THICK"
+        top_color: "#000000"
+        top_width: 3
+      # ── Formatting ──
+      - action: set_background
+        range: "A5:AL5"
+        color: "#E8E8E8"
+      - action: set_font_size
+        range: "A1:AL1"
+        size: 14
+      - action: set_bold
+        range: "A1:AL1"
+        bold: true
+      - action: set_alignment
+        range: "A1:AL1"
+        horizontal: "CENTER"
+      - action: set_font_size
+        range: "A2:AL2"
+        size: 11
+      - action: set_bold
+        range: "A2:AL2"
+        bold: true
+      - action: set_font_size
+        range: "A3:AL5"
+        size: 10
+      - action: set_bold
+        range: "A5:AL5"
+        bold: true
+      - action: set_row_height
+        start_index: 6
+        end_index: 35
+        height: 21
+      - action: set_column_width
+        start_index: 1
+        end_index: 6
+        width: 40
+      - action: set_column_width
+        start_index: 7
+        end_index: 7
+        width: 10
+      - action: set_column_width
+        start_index: 8
+        end_index: 8
+        width: 50
+      - action: set_column_width
+        start_index: 9
+        end_index: 9
+        width: 280
+      - action: set_column_width
+        start_index: 10
+        end_index: 35
+        width: 25
+      - action: set_column_width
+        start_index: 36
+        end_index: 38
+        width: 80

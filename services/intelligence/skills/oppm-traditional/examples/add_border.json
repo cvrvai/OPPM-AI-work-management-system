@@ -1,0 +1,13 @@
+{
+  "name": "Add borders to task rows",
+  "description": "User says 'add border to task rows' when task rows 6-20 have no borders",
+  "user_input": "add border to task rows",
+  "context": {
+    "task_rows": "6-20",
+    "current_state": "Task rows have no borders (b field is empty or N)"
+  },
+  "expected_actions": [
+    { "action": "set_border", "params": { "range": "A6:AL20", "style": "SOLID", "color": "#CCCCCC", "width": 1 } },
+    { "action": "set_border", "params": { "range": "J6:AI20", "style": "NONE" } }
+  ]
+}
