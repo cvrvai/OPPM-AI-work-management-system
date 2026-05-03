@@ -106,7 +106,7 @@ export async function executeSheetActions(
   actions: SheetAction[],
 ): Promise<SheetActionsResponse> {
   const response = await fetchWithSessionRetry(
-    `/api/v1/workspaces/${workspaceId}/projects/${projectId}/oppm/google-sheet/actions`,
+    `/v1/workspaces/${workspaceId}/projects/${projectId}/oppm/google-sheet/actions`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -119,10 +119,35 @@ export async function executeSheetActions(
   return response.json()
 }
 
+export async function getGoogleSheetSnapshot(
+  workspaceId: string,
+  projectId: string,
+): Promise<{
+  spreadsheet_id: string
+  sheet_title: string
+  max_row: number
+  max_col: number
+  merge_ranges: string[]
+  cells: Array<{
+    r: number
+    c: number
+    v?: string
+    n?: string
+    bg?: string
+    b?: string
+    bold?: boolean
+    fs?: number
+    fg?: string
+  }>
+  cell_count: number
+}> {
+  return api.get(`/v1/workspaces/${workspaceId}/projects/${projectId}/oppm/google-sheet/snapshot`)
+}
+
 export async function getOppmSheetPrompt(
   workspaceId: string,
 ): Promise<{ config_key: string; prompt: string; is_default: boolean }> {
-  return api.get(`/api/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`)
+  return api.get(`/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`)
 }
 
 export async function updateOppmSheetPrompt(

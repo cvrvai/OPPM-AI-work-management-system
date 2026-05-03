@@ -19,6 +19,25 @@ def _a1(column_number: int, row_number: int) -> str:
     return f"{_column_letter(column_number)}{row_number}"
 
 
+def _parse_a1(a1_ref: str) -> tuple[int, int]:
+    """Parse an A1-style reference like 'G8' or 'AB12' into (column_number, row_number)."""
+    match = re.match(r"^([A-Z]+)(\d+)$", a1_ref.upper().strip())
+    if not match:
+        raise ValueError(f"Invalid A1 reference: {a1_ref}")
+    col_letters = match.group(1)
+    row_number = int(match.group(2))
+    column_number = 0
+    for ch in col_letters:
+        column_number = column_number * 26 + (ord(ch) - ord("A") + 1)
+    return column_number, row_number
+
+
+def _shift_a1_row(a1_ref: str, delta: int) -> str:
+    """Shift an A1 reference vertically by delta rows (positive = down)."""
+    col, row = _parse_a1(a1_ref)
+    return _a1(col, row + delta)
+
+
 def _normalize_cell_text(value: str | None) -> str:
     if not value:
         return ""

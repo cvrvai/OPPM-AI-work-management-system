@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .cells import _a1
+from .cells import _a1, _parse_a1, _shift_a1_row
 from .constants import (
     _CLASSIC_MAX_TASK_ROWS,
     _CLASSIC_VISIBLE_TASK_ROWS,
@@ -253,7 +253,11 @@ def _oppm_task_title(task: Any) -> str:
 
 
 def _oppm_grouped_task_title(task: Any) -> str:
-    return str(_get_item_value(task, "title", "") or "")
+    title = str(_get_item_value(task, "title", "") or "")
+    deadline = _get_item_value(task, "deadline")
+    if deadline:
+        title = f"{title}  ({deadline})"
+    return title
 
 
 def _oppm_grouped_task_label(task: Any) -> str:
@@ -306,6 +310,27 @@ def _extend_task_rows_for_overflow(
         current_row += 1
 
     return extended
+
+
+def _shift_anchors_by_overflow(
+    anchors: dict[str, str],
+    overflow: int,
+    first_task_row: int,
+) -> dict[str, str]:
+    """Shift any anchor A1 references that lie at or below the insertion point."""
+    if overflow <= 0:
+        return anchors
+    shifted: dict[str, str] = {}
+    for field_id, a1_ref in anchors.items():
+        try:
+            _, row = _parse_a1(a1_ref)
+            if row >= first_task_row:
+                shifted[field_id] = _shift_a1_row(a1_ref, overflow)
+            else:
+                shifted[field_id] = a1_ref
+        except Exception:
+            shifted[field_id] = a1_ref
+    return shifted
 
 
 def _build_task_row_merge_requests(
@@ -381,44 +406,122 @@ def _build_task_row_border_requests(
     end_col: int,
     original_max_rows: int,
 ) -> list[dict[str, Any]]:
-    """Move the thick bottom border from the original last task row to the new last task row."""
+    """Reset task-block bottom borders so a single thick line sits at the new
+    last task row.
+
+    Earlier versions only cleared the border at ``original_max_rows - 1`` and
+    added a new one at the actual last row. Repeated pushes with growing task
+    counts therefore accumulated stale thick lines at every previous "last row"
+    (e.g. row 23 from an 18-task push survived into a 38-task push). This
+    version normalizes the entire task region every push:
+
+      1. Clear bottom borders to thin SOLID across every task row except the
+         actual last one. This wipes any leftover thick lines from prior runs.
+      2. Apply the SOLID_MEDIUM thick border at the true last task row.
+    """
     requests: list[dict[str, Any]] = []
-    if len(task_rows) <= original_max_rows:
+    if not task_rows:
         return requests
 
-    # Original last task row (0-based)
-    original_last = task_rows[original_max_rows - 1]
-    original_row_idx = int(original_last["row"]) - 1
-
-    # New actual last task row (0-based)
     new_last = task_rows[-1]
     new_row_idx = int(new_last["row"]) - 1
+    first_row_idx = int(task_rows[0]["row"]) - 1
 
-    # Remove thick bottom border from original last row
-    requests.append({
-        "updateBorders": {
-            "range": {
-                "sheetId": sheet_id,
-                "startRowIndex": original_row_idx,
-                "endRowIndex": original_row_idx + 1,
-                "startColumnIndex": index_col - 1,
-                "endColumnIndex": end_col,
-            },
-            "bottom": {
-                "style": "SOLID",
-                "width": 1,
-                "color": {"red": 0.0, "green": 0.0, "blue": 0.0},
-            },
-        }
-    })
+    # 1. Reset every task row's bottom border to a thin SOLID line. This wipes
+    #    accumulated thick borders from previous pushes regardless of where they
+    #    landed.
+    if new_row_idx > first_row_idx:
+        requests.append({
+            "updateBorders": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": first_row_idx,
+                    "endRowIndex": new_row_idx,  # exclusive — skips the new last row
+                    "startColumnIndex": index_col - 1,
+                    "endColumnIndex": end_col,
+                },
+                "bottom": {
+                    "style": "SOLID",
+                    "width": 1,
+                    "color": {"red": 0.0, "green": 0.0, "blue": 0.0},
+                },
+            }
+        })
 
-    # Add thick bottom border to new last row
+    # 2. Thick bottom border at the new last task row to separate the task
+    #    block from whatever sits below (sub-objective letter rows, summary…).
     requests.append({
         "updateBorders": {
             "range": {
                 "sheetId": sheet_id,
                 "startRowIndex": new_row_idx,
                 "endRowIndex": new_row_idx + 1,
+                "startColumnIndex": index_col - 1,
+                "endColumnIndex": end_col,
+            },
+            "bottom": {
+                "style": "SOLID_MEDIUM",
+                "width": 2,
+                "color": {"red": 0.0, "green": 0.0, "blue": 0.0},
+            },
+        }
+    })
+
+    return requests
+
+
+def _build_bottom_section_shift_requests(
+    sheet_id: int,
+    overflow: int,
+    original_last_task_row: int,
+    new_last_task_row: int,
+    index_col: int,
+    end_col: int,
+    layout: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Shift borders of the bottom Summary / Costs / Risks block downward by overflow rows."""
+    requests: list[dict[str, Any]] = []
+    if overflow <= 0 or not layout:
+        return requests
+
+    merges = layout.get("merges", [])
+    # Find all merged regions that start at or below the original last task row
+    # and are not part of the task block itself (we already handled task borders).
+    for merge in merges:
+        start_row = int(merge.get("startRowIndex", 0)) + 1
+        end_row = int(merge.get("endRowIndex", 0))
+        start_col = int(merge.get("startColumnIndex", 0)) + 1
+        end_col_m = int(merge.get("endColumnIndex", 0))
+        # Skip anything fully inside the original task block
+        if end_row <= original_last_task_row:
+            continue
+        # Skip sub-objective / timeline / owner columns (handled by region writes)
+        if start_col < index_col and end_col_m <= index_col - 1:
+            continue
+
+        # Shift the merge range down by overflow
+        requests.append({
+            "mergeCells": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": start_row - 1 + overflow,
+                    "endRowIndex": end_row + overflow,
+                    "startColumnIndex": start_col - 1,
+                    "endColumnIndex": end_col_m,
+                },
+                "mergeType": "MERGE_ALL",
+            }
+        })
+
+    # Re-apply a thick bottom border to the new last task row so the task block
+    # is visually separated from whatever shifted down below it.
+    new_last_idx = new_last_task_row - 1
+    requests.append({
+        "updateBorders": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": new_last_idx,
+                "endRowIndex": new_last_idx + 1,
                 "startColumnIndex": index_col - 1,
                 "endColumnIndex": end_col,
             },
@@ -804,7 +907,39 @@ def _write_oppm_sheet_values(
                 }} if isinstance(v, dict) else v)
                 for k, v in regions.items()
             }
+            # Shift any anchors that lie at or below the insertion point so they
+            # still point to the correct cells after rows are inserted.
+            anchors = _shift_anchors_by_overflow(anchors, overflow, first_task_row)
+            if summary_block_anchor:
+                summary_block_anchor = _shift_a1_row(summary_block_anchor, overflow)
+            if summary_block_range and ":" not in summary_block_range:
+                summary_block_range = _shift_a1_row(summary_block_range, overflow)
+            elif summary_block_range and ":" in summary_block_range:
+                start_a1, end_a1 = summary_block_range.split(":", 1)
+                summary_block_range = f"{_shift_a1_row(start_a1, overflow)}:{_shift_a1_row(end_a1, overflow)}"
             task_rows_to_write = min(len(tasks), max_task_rows)
+            # After inserting rows, shift the bottom-section borders so the
+            # Summary / Costs / Risks blocks move down with the content.
+            try:
+                layout = _read_sheet_layout(service, spreadsheet_id, _OPPM_SHEET_TITLE)
+                original_last_row = first_task_row + int(mapping.get("task_anchor", {}).get("max_rows", max_task_rows)) - 1
+                new_last_row = first_task_row + max_task_rows - 1
+                shift_requests = _build_bottom_section_shift_requests(
+                    sheet_id,
+                    overflow,
+                    original_last_row,
+                    new_last_row,
+                    index_col=int(task_text_region.get("start_col", 7)) - 1 if task_text_region else 6,
+                    end_col=int(task_text_region.get("end_col", 20)) if task_text_region else 20,
+                    layout=layout,
+                )
+                if shift_requests:
+                    service.spreadsheets().batchUpdate(
+                        spreadsheetId=spreadsheet_id,
+                        body={"requests": shift_requests},
+                    ).execute()
+            except Exception:
+                logger.debug("Failed to shift bottom-section borders after overflow insertion")
         except Exception:
             logger.debug("Failed to insert overflow rows into OPPM sheet")
 
@@ -826,12 +961,14 @@ def _write_oppm_sheet_values(
             merge_requests = _build_task_row_merge_requests(
                 task_rows, rendered_tasks, sheet_id, index_col, task_end_col
             )
+            # Always reset task-block borders. The function normalizes every
+            # task row's bottom border on every push so accumulated thick
+            # lines from earlier (smaller) pushes don't survive.
             original_max_rows = int(mapping.get("task_anchor", {}).get("max_rows", 0))
-            if original_max_rows > 0:
-                border_requests = _build_task_row_border_requests(
-                    task_rows, rendered_tasks, sheet_id, index_col, task_end_col, original_max_rows
-                )
-                merge_requests.extend(border_requests)
+            border_requests = _build_task_row_border_requests(
+                task_rows, rendered_tasks, sheet_id, index_col, task_end_col, original_max_rows
+            )
+            merge_requests.extend(border_requests)
             if merge_requests:
                 try:
                     service.spreadsheets().batchUpdate(
@@ -889,8 +1026,10 @@ def _write_oppm_sheet_values(
             ),
         )
         tl_first_row = int(timeline_region["first_row"])
-        tl_header_row = int(timeline_region.get("date_header_row") or tl_first_row - 1)
-        if tl_header_row >= 1:
+        tl_header_row = int(timeline_region.get("date_header_row") or 0)
+        # Only write date headers when we have a dedicated row (not the task
+        # header row, which would overwrite "Project Completed By").
+        if tl_header_row >= 1 and tl_header_row != tl_first_row - 1:
             weeks = _resolve_timeline_weeks(fills, rendered_tasks, tl_width)
             if weeks:
                 formatted_dates = []
@@ -970,6 +1109,40 @@ def _write_oppm_sheet_values(
             ).execute()
         except Exception:
             logger.debug("Failed to clear stale OPPM anchor %s", a1_ref)
+
+    # Clear old content that was pushed down by overflow row insertion
+    if overflow > 0 and sheet_id is not None:
+        if task_rows:
+            last_written_row = max(int(slot["row"]) for slot in task_rows)
+        else:
+            last_written_row = first_task_row + oppm_rows_written - 1
+
+        all_start_cols: list[int] = []
+        all_end_cols: list[int] = []
+        for region in regions.values():
+            if isinstance(region, dict) and region.get("start_col") and region.get("end_col"):
+                all_start_cols.append(int(region["start_col"]))
+                all_end_cols.append(int(region["end_col"]))
+        if task_text_region:
+            all_start_cols.append(int(task_text_region.get("start_col") or 0))
+            all_end_cols.append(int(task_text_region.get("end_col") or 0))
+
+        if all_start_cols and all_end_cols:
+            clear_start_col = min(c for c in all_start_cols if c > 0)
+            clear_end_col = max(c for c in all_end_cols if c > 0)
+            clear_start_row = last_written_row + 1
+            clear_end_row = last_written_row + overflow + max_task_rows
+            try:
+                service.spreadsheets().values().clear(
+                    spreadsheetId=spreadsheet_id,
+                    range=(
+                        f"'{_OPPM_SHEET_TITLE}'!{_a1(clear_start_col, clear_start_row)}:"
+                        f"{_a1(clear_end_col, clear_end_row)}"
+                    ),
+                    body={},
+                ).execute()
+            except Exception:
+                logger.debug("Failed to clear pushed-down old content")
 
     if not task_rows and not task_text_region and max_task_rows > 0 and oppm_rows_written < max_task_rows:
         start_row = first_task_row + oppm_rows_written

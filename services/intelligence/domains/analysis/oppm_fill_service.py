@@ -219,6 +219,14 @@ async def fill_oppm(
     )
     objectives = list(obj_result.scalars().all())
 
+    # Load sub-objectives (for lettered milestone rows)
+    so_result = await session.execute(
+        select(OPPMSubObjective)
+        .where(OPPMSubObjective.project_id == project_id)
+        .order_by(OPPMSubObjective.position)
+    )
+    sub_objectives = list(so_result.scalars().all())
+
     # Load all tasks for this project
     task_result = await session.execute(
         select(Task)
@@ -257,7 +265,7 @@ async def fill_oppm(
                 "week_start": row.week_start.isoformat(),
                 "status": row.status,
                 "quality": row.quality,
-            })
+             })
 
     sub_objective_positions_by_task: dict[str, list[int]] = {str(task_id): [] for task_id in task_ids}
     if task_ids:
@@ -272,11 +280,10 @@ async def fill_oppm(
             if 1 <= position <= 6:
                 sub_objective_positions_by_task[str(row.task_id)].append(position)
 
-    # ── Build OPPM task list: objectives as main-task rows, root tasks as sub-rows ──
-    # Template layout:  Row N   = "X. <Objective title>"  (is_sub=False)
-    #                   Row N+1 = "X.1 <Task title>"      (is_sub=True)
-    #                   Row N+2 = "X.2 <Task title>"      (is_sub=True)
-    # Only the first 3 root tasks per objective are shown (template has 3 sub-rows each).
+    # ── Build OPPM task list: flat numbered tasks + lettered sub-objective rows ──
+    # Classic OPPM layout:
+    #   Rows 1–N   = numbered work tasks (flat list, all root tasks)
+    #   Rows A–F   = sub-objective / milestone rows (lettered, below tasks)
     task_items: list[dict] = []
 
     def _fmt(d) -> str | None:
@@ -292,41 +299,38 @@ async def fill_oppm(
                 return [fallback_owner]
         return []
 
-    # Fallback behavior:
-    # - If objective-linked tasks are missing, pull from project tasks that are not linked
-    #   to any objective (common in board-only task management).
-    # - If there are fewer than 4 objectives, synthesize remaining "Task Group" rows
-    #   so tasks still appear instead of leaving template placeholders.
-    objective_ids = {str(obj.id) for obj in objectives}
-    unassigned_root_tasks = sorted(
-        [
-            task
-            for task in all_tasks
-            if task.parent_task_id is None
-            and (
-                task.oppm_objective_id is None
-                or str(task.oppm_objective_id) not in objective_ids
-            )
-        ],
+    # Flatten all root tasks into a single numbered list (classic OPPM major tasks)
+    root_tasks = sorted(
+        [task for task in all_tasks if task.parent_task_id is None],
         key=lambda task: (task.sort_order or 0, str(task.created_at)),
     )
-    unassigned_cursor = 0
 
-    def _take_unassigned(limit: int) -> list[Task]:
-        nonlocal unassigned_cursor
-        taken: list[Task] = []
-        while unassigned_cursor < len(unassigned_root_tasks) and len(taken) < limit:
-            taken.append(unassigned_root_tasks[unassigned_cursor])
-            unassigned_cursor += 1
-        return taken
-
-    rendered_main_rows = 0
-
-    for obj_idx, obj in enumerate(objectives):
-        # Main task row: the objective itself
+    for idx, task in enumerate(root_tasks, 1):
         task_items.append({
-            "index": str(obj_idx + 1),
-            "title": obj.title,
+            "index": str(idx),
+            "title": task.title,
+            "deadline": _fmt(task.due_date),
+            "status": task.status,
+            "is_sub": False,
+            "sub_objective_positions": sub_objective_positions_by_task.get(str(task.id), []),
+            "owners": _get_task_owners(task),
+            "timeline": timeline_by_task.get(str(task.id), []),
+        })
+
+    # Lettered sub-objective rows (A–F) — qualitative milestones from sub-objective labels
+    sub_obj_labels = [""] * 6
+    for so in sub_objectives:
+        pos = int(so.position) - 1
+        if 0 <= pos < 6:
+            sub_obj_labels[pos] = so.label
+
+    letter_labels = ["A", "B", "C", "D", "E", "F"]
+    for i, label in enumerate(sub_obj_labels):
+        if not label:
+            continue
+        task_items.append({
+            "index": letter_labels[i],
+            "title": label,
             "deadline": None,
             "status": None,
             "is_sub": False,
@@ -334,62 +338,6 @@ async def fill_oppm(
             "owners": [],
             "timeline": [],
         })
-        rendered_main_rows += 1
-
-        # Sub-task rows: all root tasks linked to this objective
-        obj_root = sorted(
-            [
-                task
-                for task in all_tasks
-                if str(task.oppm_objective_id) == str(obj.id) and task.parent_task_id is None
-            ],
-            key=lambda task: (task.sort_order or 0, str(task.created_at)),
-        )
-
-        selected_sub_tasks: list[Task] = list(obj_root)
-        if not selected_sub_tasks:
-            selected_sub_tasks = sorted(
-                [task for task in all_tasks if str(task.oppm_objective_id) == str(obj.id)],
-                key=lambda task: (task.sort_order or 0, str(task.created_at)),
-            )
-
-        for sub_idx, task in enumerate(selected_sub_tasks, 1):
-            task_items.append({
-                "index": f"{obj_idx + 1}.{sub_idx}",
-                "title": task.title,
-                "deadline": _fmt(task.due_date),
-                "status": task.status,
-                "is_sub": True,
-                "sub_objective_positions": sub_objective_positions_by_task.get(str(task.id), []),
-                "owners": _get_task_owners(task),
-                "timeline": timeline_by_task.get(str(task.id), []),
-            })
-
-    while unassigned_cursor < len(unassigned_root_tasks):
-        main_idx = rendered_main_rows + 1
-        task_items.append({
-            "index": str(main_idx),
-            "title": f"Task Group {main_idx}",
-            "deadline": None,
-            "status": None,
-            "is_sub": False,
-            "sub_objective_positions": [],
-            "owners": [],
-            "timeline": [],
-        })
-        rendered_main_rows += 1
-
-        for sub_idx, task in enumerate(_take_unassigned(len(unassigned_root_tasks) - unassigned_cursor), 1):
-            task_items.append({
-                "index": f"{main_idx}.{sub_idx}",
-                "title": task.title,
-                "deadline": _fmt(task.due_date),
-                "status": task.status,
-                "is_sub": True,
-                "sub_objective_positions": sub_objective_positions_by_task.get(str(task.id), []),
-                "owners": _get_task_owners(task),
-                "timeline": timeline_by_task.get(str(task.id), []),
-            })
 
     # If all three generated text fields already have content, skip the LLM call
     if fills["project_objective"] and fills["deliverable_output"] and fills["completed_by_text"]:

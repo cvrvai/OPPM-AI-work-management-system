@@ -48,6 +48,10 @@ class ToolRegistry:
             tools = [t for t in tools if t.requires_project == requires_project]
         return tools
 
+    def all_tools(self) -> list[ToolDefinition]:
+        """Return every registered tool (no filtering)."""
+        return list(self._tools.values())
+
     async def execute(
         self,
         name: str,
@@ -93,9 +97,16 @@ class ToolRegistry:
             schema["items"] = {"type": p.items_type}
         return schema
 
-    def to_openai_schema(self, category: str | None = None, requires_project: bool | None = None) -> list[dict]:
+    def to_openai_schema(
+        self,
+        category: str | None = None,
+        requires_project: bool | None = None,
+        filter_names: set[str] | None = None,
+    ) -> list[dict]:
         """Generate OpenAI-compatible function definitions."""
         tools = self.get_tools(category=category, requires_project=requires_project)
+        if filter_names is not None:
+            tools = [t for t in tools if t.name in filter_names]
         result = []
         for t in tools:
             properties = {}
@@ -119,9 +130,16 @@ class ToolRegistry:
             })
         return result
 
-    def to_anthropic_schema(self, category: str | None = None, requires_project: bool | None = None) -> list[dict]:
+    def to_anthropic_schema(
+        self,
+        category: str | None = None,
+        requires_project: bool | None = None,
+        filter_names: set[str] | None = None,
+    ) -> list[dict]:
         """Generate Anthropic-compatible tool definitions."""
         tools = self.get_tools(category=category, requires_project=requires_project)
+        if filter_names is not None:
+            tools = [t for t in tools if t.name in filter_names]
         result = []
         for t in tools:
             properties = {}
@@ -142,9 +160,11 @@ class ToolRegistry:
             })
         return result
 
-    def to_prompt_text(self, category: str | None = None) -> str:
+    def to_prompt_text(self, category: str | None = None, filter_names: set[str] | None = None) -> str:
         """Generate markdown tool descriptions for prompt-based calling."""
         tools = self.get_tools(category=category)
+        if filter_names is not None:
+            tools = [t for t in tools if t.name in filter_names]
         if not tools:
             return ""
 

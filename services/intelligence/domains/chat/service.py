@@ -26,6 +26,7 @@ from infrastructure.llm.base import ProviderUnavailableError
 from infrastructure.tools.registry import get_registry
 from infrastructure.rag.agent_loop import run_agent_loop
 from infrastructure.rag.guardrails import check_input, sanitize_output
+from infrastructure.skills import pick_skill, SkillContext, SkillResult, GENERAL_SKILL
 from shared.models.ai_model import AIModel
 from shared.models.workspace import Workspace, WorkspaceMember, MemberSkill
 from shared.models.project import Project, ProjectMember
@@ -270,6 +271,8 @@ _OPPM_SHEET_SYSTEM_PROMPT_DEFAULT = """You are OPPM AI, an intelligent assistant
 
 Your ONLY job is to control a live Google Sheet (the OPPM sheet) by outputting structured JSON action sequences. You NEVER explain what you are going to do in prose. You ALWAYS respond with a JSON array of actions, nothing else — unless the user explicitly asks a question (then answer briefly, then still output the JSON).
 
+You are ALWAYS talking about the OPPM Google Sheet. When the user says "the form", "the sheet", "this", "it", "the oppm", or "make it standard", they are ALWAYS referring to the OPPM Google Sheet you control. Never ask "what do you mean" for these references — interpret them as sheet editing requests.
+
 A LIVE PROJECT CONTEXT block is appended to every request. It contains:
 - The exact row number of every task currently in the OPPM sheet
 - The project's start date, deadline, and timeline week dates (ISO format)
@@ -278,19 +281,97 @@ A LIVE PROJECT CONTEXT block is appended to every request. It contains:
 
 Use this context to produce correct row numbers and dates. Never guess row numbers — derive them from the context.
 
+## Standard OPPM Format Reference
+
+When the user asks to "make it standard", "standardize", "fix formatting", or "apply standard layout", use these exact rules:
+
+### Header rows (rows 1–5)
+- Row 1: Project title row — set_font_size=14, set_bold=true, set_alignment horizontal=CENTER
+- Row 2: "Project Leader: X | Project Name: Y" — set_font_size=11, set_bold=true
+- Row 3: Project objective text — set_font_size=10, set_text_wrap=WRAP
+- Row 4: "Start Date: X | Deadline: Y" — set_font_size=10
+- Row 5: Column headers — set_font_size=10, set_bold=true, set_background="#E8E8E8"
+- All header rows: set_border with style=SOLID, width=1, color="#000000" on all sides
+
+### Task rows (rows 6+)
+- Task number (column H): set_font_size=10, set_bold=true, set_alignment horizontal=CENTER
+- Task title (column I): set_font_size=10, set_alignment horizontal=LEFT
+- Sub-objective checkmarks (columns A–F): set_font_size=10, set_alignment horizontal=CENTER
+- Owner slots (AJ–AL): set_font_size=10, set_alignment horizontal=CENTER
+- Row height: set_row_height=21 pixels for all task rows
+- Borders: set_border with style=SOLID, width=1, color="#CCCCCC" on all sides (top, bottom, left, right, innerHorizontal, innerVertical)
+- Timeline area (J–AI): NO borders (use set_border with style=NONE)
+
+### Timeline bars
+- On-track / planned: set_background="#1D9E75" (green)
+- At risk: set_background="#EF9F27" (yellow)
+- Late / blocked: set_background="#E24B4A" (red)
+- No status: clear_background (white)
+
+### Column widths (standard)
+- Columns A–F (sub-objectives): width=40 pixels
+- Column G (separator): width=10 pixels
+- Column H (task numbers): width=50 pixels
+- Column I (task titles): width=280 pixels
+- Columns J–AI (timeline): width=25 pixels each
+- Columns AJ–AL (owners): width=80 pixels each
+
+### What "make it standard" means step-by-step
+1. Remove all existing borders from task rows (set_border style=NONE on rows 6+)
+2. Re-apply standard thin borders (#CCCCCC) to all task rows
+3. Ensure all header rows have solid black borders
+4. Set all task row heights to 21px
+5. Set all column widths to standard values
+6. Ensure timeline area has NO borders
+7. Ensure header row 5 has gray background (#E8E8E8)
+8. Set all text to standard fonts/sizes
+
+## Current Sheet State (live snapshot)
+
+A CURRENT SHEET STATE block is also appended when available. It shows the actual live content and formatting of the Google Sheet right now.
+
+Cell notation: (r,c) = row, column (both 1-based). Column A=1, B=2, etc.
+Cell fields:
+- v = formatted value text
+- bg = background color hex (e.g. #1D9E75)
+- b = border summary string. Format: T:{style}{width}{color}|B:...|L:...|R:...
+  Example: b="T:S1#CCCCCC|B:S1#CCCCCC" means top and bottom borders are SOLID, width 1, color #CCCCCC
+  Style letters: S=SOLID, M=SOLID_MEDIUM, K=SOLID_THICK, D=DASHED, O=DOTTED, U=DOUBLE, N=NONE
+- bold = text is bold
+- fs = font size in points
+- fg = text color hex
+
+Use the CURRENT SHEET STATE to detect what actually needs changing. For example:
+- If a task row has thick borders (K or M) instead of thin (S), remove them first with style=NONE then re-apply SOLID.
+- If the timeline area has borders, remove them.
+- If row heights are not 21px, adjust them.
+- If column widths differ from standard, adjust them.
+
 ## Available actions
 
+### Row / Column operations
 - **insert_rows**: Add rows in task area
   params: { sheet, start_index, count }
 
 - **delete_rows**: Remove task rows
   params: { sheet, start_index, count }
 
+- **set_row_height**: Set pixel height for one or more rows
+  params: { sheet, start_index, end_index, height (pixels) }
+
+- **set_column_width**: Set pixel width for one or more columns
+  params: { sheet, start_index, end_index, width (pixels) }
+  Use column index numbers (A=1, B=2, …).
+
+### Formatting operations
 - **copy_format**: Clone style from row
   params: { from_range, to_range }
 
-- **set_border**: Apply border to range
-  params: { range, style, color, width }
+- **set_border**: Apply or remove borders on a range. Supports per-side control and style selection.
+  params: { range, style (SOLID/SOLID_MEDIUM/SOLID_THICK/DASHED/DOTTED/DOUBLE/NONE), color, width }
+  Per-side overrides (optional): top_style, top_color, top_width, bottom_style, bottom_color, bottom_width, left_style, left_color, left_width, right_style, right_color, right_width, inner_horizontal_style, inner_horizontal_color, inner_horizontal_width, inner_vertical_style, inner_vertical_color, inner_vertical_width
+  Use style=NONE to remove borders. Example to remove all borders: { "range": "A1:B2", "style": "NONE" }
+  Example to add a thick top border only: { "range": "A1:B2", "style": "NONE", "top_style": "SOLID_THICK", "top_color": "#000000", "top_width": 2 }
 
 - **set_background**: Fill cells with color
   params: { range, color (hex) }
@@ -301,12 +382,47 @@ Use this context to produce correct row numbers and dates. Never guess row numbe
 - **set_text_wrap**: CLIP / WRAP / OVERFLOW
   params: { range, mode }
 
+- **set_bold**: Toggle bold text
+  params: { range, bold (true/false) }
+
+- **set_text_color**: Change font color
+  params: { range, color (hex) }
+
+- **set_font_size**: Change font size in points
+  params: { range, size (integer, e.g. 10, 12, 14) }
+
+- **set_font_family**: Change font family
+  params: { range, family (e.g. "Arial", "Roboto") }
+
+- **set_alignment**: Horizontal and vertical alignment
+  params: { range, horizontal (LEFT/CENTER/RIGHT), vertical (TOP/MIDDLE/BOTTOM) }
+
+- **set_number_format**: Apply number/currency/date format
+  params: { range, pattern (e.g. "#,##0", "$#,##0.00", "yyyy-mm-dd", "0%") }
+
+### Cell content operations
 - **set_value**: Write text into a cell
   params: { range, value }
+
+- **set_formula**: Write a formula into a cell
+  params: { range, formula (e.g. "=SUM(A1:A10)") }
 
 - **clear_content**: Erase cell values
   params: { range }
 
+- **set_note**: Attach a note/comment to a cell
+  params: { range, note }
+
+- **set_hyperlink**: Add a clickable link
+  params: { range, url, text (optional display text) }
+
+- **merge_cells**: Merge a range into one cell
+  params: { range }
+
+- **unmerge_cells**: Split a merged cell back into individual cells
+  params: { range }
+
+### Timeline & ownership
 - **fill_timeline**: Color timeline bar for a task row. The backend maps dates → columns automatically.
   params: { task_row, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), color (hex, optional) }
 
@@ -316,6 +432,25 @@ Use this context to produce correct row numbers and dates. Never guess row numbe
 - **set_owner**: Write one owner for one priority slot on a task row. Call once per priority level needed.
   params: { task_row, owner (initials/name), priority (A/B/C) }
   A = Primary/Owner column (AJ), B = Primary Helper (AK), C = Secondary Helper (AL)
+
+### Sheet structure operations
+- **freeze_rows**: Freeze top N rows so they stay visible while scrolling
+  params: { sheet, row_count }
+
+- **freeze_columns**: Freeze left N columns so they stay visible while scrolling
+  params: { sheet, column_count }
+
+- **set_conditional_formatting**: Apply color rules based on cell values
+  params: { range, rule_type (NUMBER_GREATER/NUMBER_LESS/TEXT_CONTAINS/BLANK/NOT_BLANK), value, color (hex) }
+
+- **set_data_validation**: Restrict what values can be entered
+  params: { range, criteria (ONE_OF_LIST/NUMBER_GREATER/NUMBER_BETWEEN/TEXT_CONTAINS), values (array), allow_empty (true/false) }
+
+- **protect_range**: Lock a range so only certain users can edit it
+  params: { range, description (optional) }
+
+- **unprotect_range**: Remove protection from a range
+  params: { range }
 
 ## Decision rules
 
@@ -340,6 +475,29 @@ RULE: Rows 1–5 are the protected OPPM header zone. Never call insert_rows, set
 RULE: When filling multiple cells with the same background color (e.g. a timeline bar), use a single set_background action with the full range — never loop cell-by-cell. However, fill_timeline is preferred over manual set_background for timeline bars because it handles date-to-column mapping automatically.
 
 RULE: If you cannot determine the exact row or range from the user's message and the context, ask ONE clarifying question before outputting any JSON. Never output actions with guessed row numbers.
+
+RULE: When the user says "make it standard", "standardize", "fix formatting", or "apply standard layout", you MUST output a comprehensive sequence that: (1) sets all column widths to standard values, (2) sets all task row heights to 21px, (3) removes all existing borders from task rows, (4) re-applies standard thin #CCCCCC borders to task rows, (5) ensures header rows have black borders, (6) sets header row 5 background to #E8E8E8, (7) sets all fonts/sizes/alignments to standard values, (8) ensures timeline area has NO borders. Use the Standard OPPM Format Reference section above for exact values.
+
+RULE: When a CURRENT SHEET STATE snapshot is provided, compare it against the Standard OPPM Format Reference BEFORE outputting actions. Only output actions for cells/rows that deviate from the standard. For example, if a task row already has thin #CCCCCC borders, do NOT output set_border for that row. If a cell has thick borders (K/M style) or wrong colors, first remove with style=NONE then re-apply the correct format.
+
+RULE: For merge_cells, only merge ranges that are rectangular (e.g. "A1:B2"). Never merge across the timeline area (J–AI) unless the user explicitly asks.
+
+RULE: For set_formula, always prefix with = and use English function names (e.g. =SUM, =AVERAGE, =IF, =VLOOKUP). The formula is entered with USER_ENTERED mode so relative references adjust automatically.
+
+RULE: For set_number_format, use Google Sheets pattern syntax:
+  - Number: "#,##0" or "#,##0.00"
+  - Currency: "$#,##0.00" or "¥#,##0"
+  - Percentage: "0%" or "0.00%"
+  - Date: "yyyy-mm-dd" or "dd-mmm-yyyy"
+  - Time: "hh:mm:ss"
+
+RULE: For set_conditional_formatting, keep rules simple. One rule per action call. Common rule_type values: NUMBER_GREATER, NUMBER_LESS, TEXT_CONTAINS, BLANK, NOT_BLANK.
+
+RULE: For set_data_validation, criteria values:
+  - ONE_OF_LIST → values = ["Option A", "Option B"]
+  - NUMBER_GREATER → values = [10]
+  - NUMBER_BETWEEN → values = [0, 100]
+  - TEXT_CONTAINS → values = ["keyword"]
 
 ## OPPM sheet structure
 
@@ -864,6 +1022,8 @@ async def chat(
     model_id: str | None = None,
     oppm_sheet_mode: bool = False,
     spreadsheet_id: str | None = None,
+    sheet_snapshot: dict | None = None,
+    force_skill: str | None = None,
 ) -> dict:
     """
     Send a chat message to the AI about a project.
@@ -873,8 +1033,12 @@ async def chat(
         return await _oppm_sheet_chat(
             session, project_id, workspace_id, user_id, messages, model_id,
             spreadsheet_id=spreadsheet_id,
+            sheet_snapshot=sheet_snapshot,
         )
-    return await _chat_async(session, project_id, workspace_id, user_id, messages, model_id)
+    return await _chat_async(
+        session, project_id, workspace_id, user_id, messages, model_id,
+        force_skill=force_skill,
+    )
 
 
 async def _oppm_sheet_chat(
@@ -885,6 +1049,7 @@ async def _oppm_sheet_chat(
     messages: list[dict],
     model_id: str | None = None,
     spreadsheet_id: str | None = None,
+    sheet_snapshot: dict | None = None,
 ) -> dict:
     """OPPM sheet mode — use the OPPM sheet system prompt + live project context.
 
@@ -919,7 +1084,47 @@ async def _oppm_sheet_chat(
     project_context = await _build_oppm_sheet_context(
         session, project_id, workspace_id, spreadsheet_id=spreadsheet_id
     )
+
+    # Append live sheet snapshot if provided
+    snapshot_context = ""
+    if sheet_snapshot:
+        snapshot_lines = ["## CURRENT SHEET STATE (live snapshot — use this to detect what needs changing)"]
+        snapshot_lines.append(f"Sheet: {sheet_snapshot.get('sheet_title', 'OPPM')}")
+        snapshot_lines.append(f"Dimensions: {sheet_snapshot.get('max_row', 0)} rows x {sheet_snapshot.get('max_col', 0)} cols")
+
+        merges = sheet_snapshot.get("merge_ranges", [])
+        if merges:
+            snapshot_lines.append(f"Merged cells: {', '.join(merges[:10])}")
+            if len(merges) > 10:
+                snapshot_lines.append(f"  ... and {len(merges) - 10} more merges")
+
+        cells = sheet_snapshot.get("cells", [])
+        if cells:
+            snapshot_lines.append("")
+            snapshot_lines.append("### Non-empty / formatted cells (r=row, c=col, v=value, bg=background, b=borders, bold, fs=fontSize, fg=foreground)")
+            # Show first 60 cells to stay within token budget
+            for cell in cells[:60]:
+                parts = [f"({cell['r']},{cell['c']})"]
+                if "v" in cell:
+                    parts.append(f"v='{cell['v']}'")
+                if "bg" in cell:
+                    parts.append(f"bg={cell['bg']}")
+                if "b" in cell:
+                    parts.append(f"b={cell['b']}")
+                if cell.get("bold"):
+                    parts.append("bold")
+                if "fs" in cell:
+                    parts.append(f"fs={cell['fs']}")
+                if "fg" in cell:
+                    parts.append(f"fg={cell['fg']}")
+                snapshot_lines.append("  " + " | ".join(parts))
+            if len(cells) > 60:
+                snapshot_lines.append(f"  ... and {len(cells) - 60} more formatted cells")
+        snapshot_context = "\n".join(snapshot_lines)
+
     full_system_prompt = f"{system_prompt}\n\n{project_context}"
+    if snapshot_context:
+        full_system_prompt = f"{full_system_prompt}\n\n{snapshot_context}"
 
     truncated_messages, _ = _truncate_prompt_history(
         messages,
@@ -966,6 +1171,7 @@ async def _chat_async(
     messages: list[dict],
     model_id: str | None = None,
     on_tool_result=None,
+    force_skill: str | None = None,
 ) -> dict:
     project_repo = ProjectRepository(session)
     audit_repo = AuditRepository(session)
@@ -1008,10 +1214,37 @@ async def _chat_async(
     if memory_context:
         full_rag = f"{memory_context}\n\n{rag_context}"
 
+    # ── Skill Router ──
+    # Pick a skill based on the user's last message. The skill determines which
+    # tools are exposed and what system prompt specialization is injected.
+    skill = await pick_skill(last_user_msg, models=models)
+    skill_ctx = None
+    if skill.name != "general":
+        skill_ctx = SkillContext(
+            project_id=project_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        if skill.pre_flight is not None:
+            preflight_data = await skill.pre_flight(session, skill_ctx)
+            skill_ctx.preflight_data = preflight_data
+            skill_ctx.extra_system_prompt = skill.system_prompt
+        else:
+            skill_ctx.extra_system_prompt = skill.system_prompt
+        logger.info("project_chat: activated skill=%s", skill.name)
+    else:
+        logger.debug("project_chat: no skill matched — general fallback")
+
     # ── Build tool section and system prompt ──
     registry = get_registry()
     primary_provider = models[0]["provider"] if models else ""
     use_native_tools = primary_provider in NATIVE_TOOL_PROVIDERS
+
+    # Filter tools to only those allowed by the skill
+    all_tools = registry.all_tools()
+    allowed_names = skill.allowed_tool_names(all_tools)
+    if skill.name != "general":
+        logger.debug("project_chat: skill=%s allowed_tools=%s", skill.name, sorted(allowed_names))
 
     if use_native_tools:
         tool_section = (
@@ -1021,7 +1254,7 @@ async def _chat_async(
             "You may call multiple tools across multiple turns to gather all needed information."
         )
     else:
-        tool_section = registry.to_prompt_text()
+        tool_section = registry.to_prompt_text(filter_names=allowed_names)
 
     system_prompt = SYSTEM_PROMPT.format(
         project_context=context,
@@ -1054,8 +1287,8 @@ async def _chat_async(
         len(memory_context),
     )
 
-    openai_tools = registry.to_openai_schema() if use_native_tools else None
-    anthropic_tools = registry.to_anthropic_schema() if use_native_tools else None
+    openai_tools = registry.to_openai_schema(filter_names=allowed_names) if use_native_tools else None
+    anthropic_tools = registry.to_anthropic_schema(filter_names=allowed_names) if use_native_tools else None
 
     # Closure that re-runs RAG for a knowledge gap phrase mid-loop
     async def _rag_requery(gap_phrase: str) -> str:
@@ -1081,6 +1314,7 @@ async def _chat_async(
             anthropic_tools=anthropic_tools,
             rag_requery=_rag_requery,
             on_tool_result=on_tool_result,
+            skill_context=skill_ctx,
         )
     except ProviderUnavailableError as e:
         logger.warning("All LLM providers unavailable: %s", e)
@@ -1091,6 +1325,21 @@ async def _chat_async(
 
     # ── Output guardrail ──
     clean_text = sanitize_output(loop_result.final_text)
+
+    # ── Skill post-flight ──
+    if skill_ctx is not None and skill.post_flight is not None:
+        try:
+            skill_result = SkillResult(
+                final_text=clean_text,
+                tool_results=loop_result.all_tool_results,
+                updated_entities=loop_result.updated_entities,
+                iterations=loop_result.iterations,
+                low_confidence=loop_result.low_confidence,
+            )
+            postflight = await skill.post_flight(session, skill_ctx, skill_result)
+            logger.info("project_chat: skill=%s post_flight=%s", skill.name, postflight)
+        except Exception as e:
+            logger.warning("project_chat: skill=%s post_flight failed: %s", skill.name, e)
 
     await audit_repo.log(
         workspace_id, user_id,

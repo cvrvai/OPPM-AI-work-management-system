@@ -203,11 +203,13 @@ def _resolve_task_layout_regions(layout: dict[str, Any]) -> dict[str, Any] | Non
             "max_rows": max_rows,
         }
     if timeline_region:
-        timeline_date_header_row = (
-            people_count_cell[0] + 1
-            if people_count_cell and people_count_cell[0] > first_task_row
-            else first_task_row - 1
-        )
+        # Only set a dedicated date header row when the #people cell gives us a
+        # clear gap below the task block.  Otherwise leave it unset so the writer
+        # does not overwrite the "Project Completed By" header row.
+        if people_count_cell and people_count_cell[0] > first_task_row:
+            timeline_date_header_row = people_count_cell[0] + 1
+        else:
+            timeline_date_header_row = 0
         regions["timeline"] = {
             "start_col": int(timeline_region["start_col"]),
             "end_col": int(timeline_region["end_col"]),
@@ -216,11 +218,12 @@ def _resolve_task_layout_regions(layout: dict[str, Any]) -> dict[str, Any] | Non
             "date_header_row": timeline_date_header_row,
         }
     if owner_region:
-        owner_member_header_row = (
-            people_count_cell[0] + 1
-            if people_count_cell and people_count_cell[0] > first_task_row
-            else first_task_row - 1
-        )
+        # Same logic as timeline: only set a dedicated member header row when
+        # there is a clear gap below the task block.
+        if people_count_cell and people_count_cell[0] > first_task_row:
+            owner_member_header_row = people_count_cell[0] + 1
+        else:
+            owner_member_header_row = 0
         regions["owners"] = {
             "start_col": int(owner_region["start_col"]),
             "end_col": int(owner_region["end_col"]),

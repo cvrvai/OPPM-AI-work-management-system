@@ -77,8 +77,9 @@ from domains.oppm.google_sheets import (
     push_google_sheet_fill,
     download_linked_google_sheet_xlsx,
     execute_sheet_actions,
+    get_google_sheet_snapshot,
 )
-from domains.oppm.repository import OPPMTemplateRepository
+from domains.oppm.repository import OPPMTemplateRepository, OPPMBorderOverrideRepository
 
 router = APIRouter()
 
@@ -406,6 +407,79 @@ async def delete_spreadsheet_route(
     return {"deleted": True}
 
 
+# ── Border Overrides ──
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/border-overrides")
+async def get_border_overrides_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return all border overrides for this project."""
+    repo = OPPMBorderOverrideRepository(session)
+    rows = await repo.find_by_project(project_id)
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+                "cell_row": r.cell_row,
+                "cell_col": r.cell_col,
+                "side": r.side,
+                "style": r.style,
+                "color": r.color,
+                "created_by": str(r.created_by) if r.created_by else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.put("/workspaces/{workspace_id}/projects/{project_id}/oppm/border-overrides")
+async def upsert_border_overrides_route(
+    project_id: str,
+    data: dict,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    """Batch upsert border overrides for this project."""
+    repo = OPPMBorderOverrideRepository(session)
+    overrides = data.get("overrides", [])
+    results = []
+    for o in overrides:
+        row = await repo.upsert(
+            project_id=project_id,
+            workspace_id=ws.workspace_id,
+            cell_row=o["cell_row"],
+            cell_col=o["cell_col"],
+            side=o["side"],
+            style=o["style"],
+            color=o.get("color", "#000000"),
+            created_by=ws.user_id,
+        )
+        results.append({
+            "id": str(row.id),
+            "cell_row": row.cell_row,
+            "cell_col": row.cell_col,
+            "side": row.side,
+            "style": row.style,
+            "color": row.color,
+        })
+    return {"upserted": len(results), "items": results}
+
+
+@router.delete("/workspaces/{workspace_id}/projects/{project_id}/oppm/border-overrides")
+async def delete_border_overrides_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    """Clear all border overrides for this project."""
+    repo = OPPMBorderOverrideRepository(session)
+    count = await repo.delete_by_project(project_id)
+    return {"deleted": count}
+
+
 # ── Google Sheets MVP ──
 
 @router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet", response_model=GoogleSheetLinkResponse)
@@ -546,10 +620,21 @@ async def execute_sheet_actions_route(
         session,
         project_id,
         ws.workspace_id,
-        ws.user.id,
         [a.model_dump() for a in data.actions],
     )
     return SheetActionsResponse(**result)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/oppm/google-sheet/snapshot",
+)
+async def get_google_sheet_snapshot_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return a compact snapshot of the current OPPM Google Sheet state for AI context."""
+    return await get_google_sheet_snapshot(session, project_id, ws.workspace_id)
 
 
 # ── OPPM AI Config (workspace-level system prompt) ──

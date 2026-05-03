@@ -175,3 +175,43 @@ class OPPMTaskItem(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class OPPMBorderOverride(Base):
+    """Cell-level border overrides for FortuneSheet OPPM rendering.
+
+    Stores AI or user edits to cell borders. Applied as a delta layer
+    on top of the generated scaffold in oppmSheetBuilder.ts.
+    """
+    __tablename__ = "oppm_border_overrides"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cell_row: Mapped[int] = mapped_column(Integer, nullable=False)
+    cell_col: Mapped[int] = mapped_column(Integer, nullable=False)
+    side: Mapped[str] = mapped_column(
+        String(10), nullable=False
+    )
+    style: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#000000")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("side IN ('top', 'bottom', 'left', 'right')", name="ck_border_override_side"),
+        CheckConstraint(
+            "style IN ('thin', 'medium', 'thick', 'dashed', 'dotted', 'none')",
+            name="ck_border_override_style",
+        ),
+        UniqueConstraint("project_id", "cell_row", "cell_col", "side", name="uq_border_override_cell_side"),
+    )

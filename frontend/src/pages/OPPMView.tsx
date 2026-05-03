@@ -6,15 +6,16 @@
  * to focus on rebuilding layout structure step-by-step.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CheckCircle2, ExternalLink, FileImage, Link2, Loader2, Send, ScanLine, Unplug, X, CloudDownload } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ExternalLink, FileImage, Link2, Loader2, Send, ScanLine, Sparkles, Unplug, X, CloudDownload } from 'lucide-react'
 import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
 import { useChatContext } from '@/hooks/useChatContext'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import { api } from '@/lib/api'
+import { fetchWithSessionRetry } from '@/lib/sessionClient'
 import { buildOppmScratchSheet } from '@/lib/oppmSheetBuilder'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -207,6 +208,106 @@ function createBlankOppmTemplate(): any[] {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Border override merge helper
+// ══════════════════════════════════════════════════════════════
+
+/** FortuneSheet border style number mapping */
+const BORDER_STYLE_MAP: Record<string, number> = {
+  thin: 1,
+  hair: 2,
+  dotted: 3,
+  dashed: 4,
+  medium_dash_dot: 5,
+  medium: 8,
+  double: 7,
+  thick: 9,
+  medium_dashed: 10,
+  slant_dash_dot: 11,
+  none: 0,
+}
+
+const SIDE_KEYS: Record<string, string> = {
+  top: 't',
+  bottom: 'b',
+  left: 'l',
+  right: 'r',
+}
+
+interface BorderOverride {
+  cell_row: number
+  cell_col: number
+  side: string
+  style: string
+  color: string
+}
+
+/**
+ * Merge AI/user border overrides into a FortuneSheet sheet's config.borderInfo.
+ * Overrides are applied ON TOP of existing borders (last-write-wins per cell side).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mergeBorderOverrides(sheet: any[], overrides: BorderOverride[]): any[] {
+  if (!sheet || sheet.length === 0 || !overrides || overrides.length === 0) {
+    return sheet
+  }
+
+  const patched = sheet.map((s) => {
+    if (!s.config) return s
+    const existing: any[] = s.config.borderInfo || []
+    const existingMap = new Map<string, any>()
+
+    // Index existing borders by "row_col_side"
+    for (const bi of existing) {
+      if (bi.rangeType === 'cell' && bi.value) {
+        const v = bi.value
+        for (const side of ['l', 'r', 't', 'b']) {
+          if (v[side]) {
+            existingMap.set(`${v.row_index}_${v.col_index}_${side}`, bi)
+          }
+        }
+      }
+    }
+
+    // Apply overrides
+    for (const o of overrides) {
+      const sideKey = SIDE_KEYS[o.side]
+      if (!sideKey) continue
+      const styleNum = BORDER_STYLE_MAP[o.style] ?? 1
+
+      const mapKey = `${o.cell_row}_${o.cell_col}_${sideKey}`
+      const existingBi = existingMap.get(mapKey)
+
+      if (existingBi) {
+        // Mutate existing borderInfo entry
+        existingBi.value[sideKey] = { style: styleNum, color: o.color }
+      } else {
+        // Create new cell-level borderInfo entry with just this side
+        const newBi = {
+          rangeType: 'cell',
+          value: {
+            row_index: o.cell_row,
+            col_index: o.cell_col,
+            [sideKey]: { style: styleNum, color: o.color },
+          },
+        }
+        existing.push(newBi)
+        existingMap.set(mapKey, newBi)
+      }
+    }
+
+    return {
+      ...s,
+      config: {
+        ...s.config,
+        borderInfo: existing,
+      },
+    }
+  })
+
+  return patched
+}
+
+// ══════════════════════════════════════════════════════════════
 // OPPMView
 // ══════════════════════════════════════════════════════════════
 export function OPPMView() {
@@ -252,6 +353,13 @@ export function OPPMView() {
   const googleSheetQuery = useQuery({
     queryKey: ['oppm-google-sheet', id, ws?.id],
     queryFn: () => api.get<GoogleSheetLinkState>(`${wsPath}/projects/${id}/oppm/google-sheet`),
+    enabled: !!ws && !!id,
+  })
+
+  // Fetch AI/user border overrides for the FortuneSheet
+  const borderOverridesQuery = useQuery({
+    queryKey: ['oppm-border-overrides', id, ws?.id],
+    queryFn: () => api.get<{ items: BorderOverride[] }>(`${wsPath}/projects/${id}/oppm/border-overrides`),
     enabled: !!ws && !!id,
   })
 
@@ -334,6 +442,104 @@ export function OPPMView() {
       setPendingDraft(normalizedDraft)
       setShowDraftComposer(true)
       setActionNotice('AI draft generated. Review it below and apply it when ready.')
+    },
+    onError: (error: Error) => setActionNotice(error.message),
+  })
+
+  interface AgentFillResponse {
+    message: string
+    tool_calls: Array<{
+      tool: string
+      input: Record<string, unknown>
+      result: Record<string, unknown>
+      success: boolean
+      error?: string | null
+    }>
+    updated_entities: string[]
+    iterations: number
+    low_confidence: boolean
+  }
+
+  // Streaming agent fill (SSE). The blocking endpoint is kept on the backend
+  // for callers that don't need progress, but this UI uses the streaming
+  // variant so the user sees each tool call as it happens and the gateway
+  // doesn't time out on long runs.
+  const agentFill = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('No project selected')
+      const path = `${wsPath}/projects/${id}/ai/oppm-agent-fill/stream`
+      const res = await fetchWithSessionRetry(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || 'Agent fill failed')
+      }
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('No response body')
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let final: AgentFillResponse | null = null
+      const seenEntities = new Set<string>()
+      let toolsRun = 0
+
+      const invalidate = (entities: string[]) => {
+        for (const e of entities) seenEntities.add(e)
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+        for (const part of parts) {
+          let event = 'message'
+          let dataStr = ''
+          for (const line of part.split('\n')) {
+            if (line.startsWith('event: ')) event = line.slice(7).trim()
+            else if (line.startsWith('data: ')) dataStr = line.slice(6).trim()
+          }
+          if (!dataStr) continue
+          let payload: Record<string, unknown>
+          try { payload = JSON.parse(dataStr) } catch { continue }
+
+          if (event === 'tool_call') {
+            toolsRun += 1
+            const toolName = (payload.tool as string) || 'tool'
+            const ok = payload.success !== false
+            setActionNotice(
+              `Agent fill: ${ok ? '✓' : '✗'} ${toolName} (${toolsRun} call${toolsRun === 1 ? '' : 's'} so far)`
+            )
+            const entities = (payload.updated_entities as string[] | undefined) ?? []
+            if (entities.length) invalidate(entities)
+          } else if (event === 'message') {
+            final = payload as unknown as AgentFillResponse
+            invalidate(final.updated_entities ?? [])
+          } else if (event === 'error') {
+            throw new Error((payload.detail as string) || 'Agent fill failed')
+          }
+        }
+      }
+
+      if (!final) throw new Error('Stream ended without a final message')
+      return { ...final, updated_entities: Array.from(seenEntities) }
+    },
+    onSuccess: (data) => {
+      const entitySummary = data.updated_entities.length > 0
+        ? ` Updated: ${data.updated_entities.join(', ')}.`
+        : ''
+      setActionNotice(
+        `Agent fill complete.${entitySummary} Iterations: ${data.iterations}. Pushing to Google Sheet…`
+      )
+      queryClient.invalidateQueries({ queryKey: ['oppm-google-sheet', id, ws?.id] })
+      // Auto-push so the sheet reflects what the agent just wrote — the
+      // intelligence service deliberately defers this (it has no Sheets
+      // credentials), so without this chain the user sees stale numbering
+      // from earlier OCR/AI-Draft pushes even though the DB is now clean.
+      pushToGoogleSheet.mutate()
     },
     onError: (error: Error) => setActionNotice(error.message),
   })
@@ -441,6 +647,12 @@ export function OPPMView() {
   const previewSrc = embedPreviewUrl ? `${embedPreviewUrl}${embedPreviewUrl.includes('?') ? '&' : '?'}refresh=${sheetRefreshToken}` : null
   const buttonsDisabled = !ws || !id
   const hasLinkedSheet = !!googleSheet?.connected
+
+  // Merge border overrides into the FortuneSheet data before rendering
+  const patchedSheetData = useMemo(() => {
+    const overrides = borderOverridesQuery.data?.items ?? []
+    return mergeBorderOverrides(sheetData, overrides)
+  }, [sheetData, borderOverridesQuery.data])
 
   const setOppmSheet = useChatStore((s) => s.setOppmSheet)
   useEffect(() => {
@@ -695,6 +907,21 @@ export function OPPMView() {
                     {pushToGoogleSheetDisabledReason}
                   </div>
                 ) : null}
+              </div>
+
+              <div className="group relative inline-flex">
+                <button
+                  type="button"
+                  onClick={() => agentFill.mutate()}
+                  disabled={!id || agentFill.isPending}
+                  className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {agentFill.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  Agent Fill
+                </button>
+                <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-80 rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-lg group-hover:block">
+                  Runs the OPPM skill agent end-to-end: writes header, timeline, owners, sub-objectives, risks, costs — then pushes to Google Sheets.
+                </div>
               </div>
 
               {!googleSheet?.backend_configured ? (
@@ -1137,11 +1364,11 @@ export function OPPMView() {
               className="bg-white border border-gray-300 rounded-lg overflow-hidden"
               style={{ height: 'calc(100vh - 160px)', minHeight: 520 }}
             >
-              {sheetData.length > 0 ? (
+              {patchedSheetData.length > 0 ? (
                 <Workbook
                   key={sheetKey}
                   ref={sheetRef}
-                  data={sheetData}
+                  data={patchedSheetData}
                   allowEdit={true}
                   showToolbar={true}
                   showFormulaBar={true}
@@ -1243,7 +1470,7 @@ export function OPPMView() {
               </>
             )}
           />
-        ) : sheetData.length > 0 ? (
+        ) : patchedSheetData.length > 0 ? (
           <div
             className="bg-white border border-gray-300 rounded-lg overflow-hidden"
             style={{ height: 'calc(100vh - 120px)', minHeight: 520 }}
@@ -1251,7 +1478,7 @@ export function OPPMView() {
             <Workbook
               key={sheetKey}
               ref={sheetRef}
-              data={sheetData}
+              data={patchedSheetData}
               allowEdit={true}
               showToolbar={true}
               showFormulaBar={true}

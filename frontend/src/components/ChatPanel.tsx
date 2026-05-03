@@ -14,7 +14,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, parseFile, executeSheetActions } from '@/lib/api'
+import { api, parseFile, executeSheetActions, getGoogleSheetSnapshot } from '@/lib/api'
 import { fetchWithSessionRetry } from '@/lib/sessionClient'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore, getContextKey, type FileAttachment, type PastSession, DEFAULT_PANEL_SIZE } from '@/stores/chatStore'
@@ -423,9 +423,26 @@ export function ChatPanel() {
       const isOppmSheetMode = isProjectContext && !!projectId && !!oppmSheetSpreadsheetId
       if (isOppmSheetMode) {
         try {
+          // Fetch live sheet snapshot so the AI can see current borders/colors/values
+          let snapshot: Record<string, unknown> | undefined
+          try {
+            snapshot = await getGoogleSheetSnapshot(ws.id, projectId)
+          } catch (snapErr) {
+            console.warn('Failed to fetch sheet snapshot:', snapErr)
+          }
+
+          const payload: Record<string, unknown> = {
+            messages: msgs,
+            oppm_sheet_mode: true,
+            spreadsheet_id: oppmSheetSpreadsheetId,
+          }
+          if (snapshot) {
+            payload.sheet_snapshot = snapshot
+          }
+
           const data = await api.post<ChatResponse>(
             `${wsPath}/projects/${projectId}/ai/chat`,
-            { messages: msgs, oppm_sheet_mode: true, spreadsheet_id: oppmSheetSpreadsheetId },
+            payload,
           )
           addMessage({
             role: 'assistant',
@@ -1089,12 +1106,45 @@ export function ChatPanel() {
                   handleSend()
                 }
               }}
+              onPaste={(e) => {
+                const items = e.clipboardData?.items
+                if (!items) return
+                const imageItems: DataTransferItem[] = []
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.startsWith('image/')) {
+                    imageItems.push(items[i])
+                  }
+                }
+                if (imageItems.length === 0) return
+                e.preventDefault()
+                setFileError(null)
+                const remaining = MAX_FILES_PER_MSG - attachments.length
+                if (remaining <= 0) {
+                  setFileError(`Maximum ${MAX_FILES_PER_MSG} files per message.`)
+                  return
+                }
+                const toProcess = imageItems.slice(0, remaining)
+                if (imageItems.length > remaining) {
+                  setFileError(`Only the first ${remaining} image(s) added (max ${MAX_FILES_PER_MSG}).`)
+                }
+                Promise.all(
+                  toProcess.map(async (item) => {
+                    const file = item.getAsFile()
+                    if (!file) return null
+                    const dataUrl = await readAsDataURL(file)
+                    return { name: file.name || 'pasted-image.png', type: 'image' as const, content: dataUrl, size: file.size }
+                  }),
+                ).then((results) => {
+                  const valid = results.filter((r): r is PendingAttachment => r !== null)
+                  setAttachments((prev) => [...prev, ...valid])
+                })
+              }}
               placeholder={
                 !ws
                   ? 'Select a workspace to start chatting…'
                   : isProjectContext
-                  ? 'Ask about your project…'
-                  : 'Ask about your workspace…'
+                  ? 'Ask about your project… (Ctrl+V to paste image)'
+                  : 'Ask about your workspace… (Ctrl+V to paste image)'
               }
               rows={1}
               className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 placeholder:text-gray-400"

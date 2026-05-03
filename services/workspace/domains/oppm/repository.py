@@ -12,6 +12,7 @@ from shared.models.oppm import (
     OPPMSubObjective, TaskSubObjective,
     OPPMDeliverable, OPPMForecast, OPPMRisk,
     OPPMTemplate, OPPMHeader, OPPMTaskItem,
+    OPPMBorderOverride,
 )
 from shared.models.task import Task, TaskAssignee, TaskOwner
 from shared.models.workspace import WorkspaceMember
@@ -405,3 +406,72 @@ class OPPMTaskItemRepository(BaseRepository):
                 pd["children"].append(_row_to_dict(sub))
             result_rows.append(pd)
         return result_rows
+
+
+# ─── OPPM Border Overrides ──────────────────────────────────
+
+class OPPMBorderOverrideRepository(BaseRepository):
+    """Repository for FortuneSheet cell border overrides.
+
+    Stores AI/user edits as a delta layer on top of the generated scaffold.
+    Each row = one cell side (top/bottom/left/right).
+    """
+
+    model = OPPMBorderOverride
+
+    async def find_by_project(self, project_id: str) -> list[OPPMBorderOverride]:
+        stmt = (
+            select(OPPMBorderOverride)
+            .where(OPPMBorderOverride.project_id == project_id)
+            .order_by(OPPMBorderOverride.cell_row, OPPMBorderOverride.cell_col)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def upsert(
+        self,
+        project_id: str,
+        workspace_id: str,
+        cell_row: int,
+        cell_col: int,
+        side: str,
+        style: str,
+        color: str,
+        created_by: str | None = None,
+    ) -> OPPMBorderOverride:
+        stmt = (
+            select(OPPMBorderOverride)
+            .where(
+                OPPMBorderOverride.project_id == project_id,
+                OPPMBorderOverride.cell_row == cell_row,
+                OPPMBorderOverride.cell_col == cell_col,
+                OPPMBorderOverride.side == side,
+            )
+            .limit(1)
+        )
+        existing = (await self.session.execute(stmt)).scalar_one_or_none()
+        if existing:
+            existing.style = style
+            existing.color = color
+            existing.updated_at = datetime.utcnow()
+            await self.session.flush()
+            return existing
+        instance = OPPMBorderOverride(
+            project_id=project_id,
+            workspace_id=workspace_id,
+            cell_row=cell_row,
+            cell_col=cell_col,
+            side=side,
+            style=style,
+            color=color,
+            created_by=created_by,
+        )
+        self.session.add(instance)
+        await self.session.flush()
+        return instance
+
+    async def delete_by_project(self, project_id: str) -> int:
+        stmt = sa_delete(OPPMBorderOverride).where(OPPMBorderOverride.project_id == project_id)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount or 0

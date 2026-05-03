@@ -1,105 +1,58 @@
-# Current Phase Tracker
+# Phase Tracker — AI Border Editing Tool for OPPM
 
 ## Task
-Move workspace membership cache from in-process Python dict to Redis for shared consistency across instances.
+Implement `set_sheet_border` tool and teach the OPPM skill agent to edit FortuneSheet cell borders.
 
 ## Goal
-- Eliminate stale role data in multi-instance deployments
-- Keep fast in-process cache as L1, add Redis as L2 shared cache
-- Maintain graceful fallback if Redis is unavailable
-- Preserve existing invalidation behavior
+- Add a new AI-callable tool `set_sheet_border` to the ToolRegistry
+- Store border overrides in the database (project-scoped)
+- Teach the OPPM skill system prompt about border editing
+- Update the frontend to merge AI border overrides into the FortuneSheet `config.borderInfo`
+- Document the FortuneSheet border schema for AI consumption
 
 ## Plan
 
-### Phase 1: Archive old tracker
-- [x] Move current `docs/PHASE-TRACKER.md` to `docs/phase-history/2026-05-01-000000-microservice-rename.md`
-- [x] Create new tracker for Redis membership cache
+### Phase 1: Architecture & Schema Documentation
+- [x] Document FortuneSheet `borderInfo` cell-level schema for AI prompts
+- [x] Document component architecture and data pipeline
+- [x] Design DB storage for border overrides (`oppm_sheet_overrides` or extend `oppm_templates`)
 
-### Phase 2: Update `shared/auth.py`
-- [ ] Import `get_redis` from `shared.redis_client`
-- [ ] Add Redis cache key helper: `auth:membership:{user_id}:{workspace_id}`
-- [ ] Update `get_workspace_context` to check Redis after in-process miss
-- [ ] Update `get_workspace_context` to write to Redis on DB hit
-- [ ] Update `invalidate_membership_cache` to also delete from Redis
-- [ ] Add graceful fallback: if Redis unavailable, log warning and continue with DB only
-- [ ] Keep in-process cache as L1 for speed
+### Phase 2: Backend — Tool Implementation
+- [x] Add `set_sheet_border` handler in `services/intelligence/infrastructure/tools/oppm_tools.py`
+- [x] Register tool in ToolRegistry with proper schema
+- [x] Add DB model / migration for storing border overrides
+- [x] Add repository method to upsert border overrides
+- [x] Wire tool into OPPM skill system prompt
 
-### Phase 3: Update callers (if needed)
-- [ ] Verify `invalidate_membership_cache` callers still work (sync function)
-- [ ] Check if any new callers need invalidation (invite acceptance, etc.)
+### Phase 3: Backend — API & Retrieval
+- [x] Add GET endpoint to retrieve border overrides for a project
+- [x] Add PUT endpoint to batch upsert border overrides
+- [x] Add DELETE endpoint to clear border overrides
+- [x] Ensure overrides are returned in the spreadsheet snapshot
 
-### Phase 4: Testing
-- [ ] Test cache hit (Redis → fast response)
-- [ ] Test cache miss (DB query → stored in Redis)
-- [ ] Test invalidation (role change → cleared from both caches)
-- [ ] Test Redis unavailable (falls back to in-process + DB)
-- [ ] Test multi-instance consistency (instance A invalidates, instance B sees update)
+### Phase 4: Frontend — Integration
+- [x] Fetch border overrides alongside sheet data
+- [x] Merge overrides into `config.borderInfo` before rendering FortuneSheet
+- [ ] Handle override conflicts (AI vs user manual edits) — deferred to future iteration
 
-### Phase 5: Documentation
-- [ ] Update `docs/architecture/overview.md` Redis usage table
-- [ ] Update `docs/features/auth/authentication.md` if needed
+### Phase 5: Testing
+- [ ] Test tool execution via agent loop
+- [ ] Test border override persistence
+- [ ] Test frontend merge logic
+- [ ] Test edge cases (out-of-range cells, invalid styles)
 
 ## Status
-Completed - All phases done + Gateway restructured + Security fix applied
-
-### Phase 2 Completed
-- [x] Import `get_redis` from `shared.redis_client`
-- [x] Add Redis cache key helper: `auth:membership:{user_id}:{workspace_id}`
-- [x] Update `get_workspace_context` to check Redis after in-process miss
-- [x] Update `get_workspace_context` to write to Redis on DB hit
-- [x] Update `invalidate_membership_cache` to also delete from Redis
-- [x] Add graceful fallback: if Redis unavailable, log warning and continue with DB only
-- [x] Keep in-process cache as L1 for speed
-- [x] Code compiles cleanly (`python -m py_compile shared/auth.py`)
-
-### Gateway Restructure (Post-Phase 2)
-- [x] Created `services/gateway/infrastructure/load_balancer.py` (moved from root)
-- [x] Created `services/gateway/middleware/logging.py` (extracted from main.py)
-- [x] Updated `services/gateway/main.py` imports to use new paths
-- [x] Removed inline logging middleware from main.py (now uses imported middleware)
-- [x] Old `services/gateway/load_balancer.py` deleted (no remaining imports)
-
-### Security Fix (Post-Phase 2)
-- [x] Removed `X-Internal-API-Key` from CORS `allow_headers` in `services/gateway/main.py`
-- [x] Added security comment explaining why internal headers are excluded from CORS
-- [x] Updated `.claude/rules/security.md` with explicit CORS guidance for internal headers
-- [x] Verified internal service-to-service calls bypass CORS entirely (direct HTTP between services)
-
-### Phase 3 Completed
-- [x] Verified `invalidate_membership_cache` callers still work (sync function)
-  - `services/workspace/domains/workspace/service.py:108` — `update_member_role`
-  - `services/workspace/domains/workspace/service.py:123` — `remove_member`
-- [x] No new callers need invalidation (invite acceptance creates new membership, no cache entry exists yet)
-
-### Phase 4 Completed
-- [x] Test cache hit path (L1 → immediate return)
-- [x] Test cache miss + Redis store path (DB → L1 + L2)
-- [x] Test invalidation clears both L1 and L2
-- [x] Test Redis unavailable (falls back to in-process + DB)
-- [x] Multi-instance consistency: Redis invalidation is shared across instances
-
-### Phase 5 Completed
-- [x] Updated `docs/architecture/overview.md` Redis usage table
-- [x] No changes needed to `docs/features/auth/authentication.md` (feature doc stays high-level)
-- [x] Created `docs/SECURITY-FIX-PLAN.md` documenting the CORS fix
-- [x] Restructured `services/gateway/` into `infrastructure/` and `middleware/` subfolders
+Completed — Phases 1-4 implemented. Phase 5 (testing) pending manual verification.
 
 ## Expected Files
-| File | Change |
-|---|---|
-| `shared/auth.py` | Add Redis L2 cache logic |
-| `shared/redis_client.py` | No change (reuse existing) |
-| `services/workspace/domains/workspace/service.py` | No change (invalidation already calls `invalidate_membership_cache`) |
-| `docs/architecture/overview.md` | Update Redis usage table |
+- `services/intelligence/infrastructure/tools/oppm_tools.py` (add `set_sheet_border`)
+- `services/intelligence/infrastructure/skills/oppm_skill.py` (update system prompt)
+- `shared/models/oppm.py` (add border override model)
+- `services/workspace/domains/oppm/...` (repository + API)
+- `frontend/src/lib/oppmSheetBuilder.ts` or `OPPMView.tsx` (merge overrides)
+- `docs/...` (border schema documentation)
 
-## Verification
-- [x] `python -m py_compile shared/auth.py`
-- [x] `python -m py_compile services/gateway/main.py`
-- [x] Role change reflects immediately across instances
-- [x] Redis down → app still works with DB fallback
-
-## Notes
-- Cache TTL: keep 60s (same as current)
-- Redis key prefix: `auth:membership:`
-- Serialization: JSON string `{role, member_id, expires_at}`
-- Graceful degradation: log warning, do not fail request
+## Verification Notes
+- Agent Fill should be able to say "add a thick bottom border to the header row"
+- Border overrides must survive page reload
+- Manual user edits via FortuneSheet toolbar should coexist with AI overrides

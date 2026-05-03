@@ -3,7 +3,20 @@
 Supported actions (matching the OPPM AI system prompt contract):
   insert_rows, delete_rows, copy_format, set_border, set_background,
   clear_background, set_text_wrap, set_value, clear_content,
-  fill_timeline, clear_timeline, set_owner
+  fill_timeline, clear_timeline, set_owner,
+  set_bold, set_text_color, set_note,
+  merge_cells, unmerge_cells,
+  set_formula, set_number_format, set_alignment,
+  set_font_size, set_font_family,
+  set_row_height, set_column_width,
+  freeze_rows, freeze_columns,
+  set_conditional_formatting, set_data_validation,
+  set_hyperlink,
+  protect_range, unprotect_range
+
+Border styles supported: NONE, DOTTED, DASHED, SOLID, SOLID_MEDIUM, SOLID_THICK, DOUBLE.
+Per-side overrides (top_*, bottom_*, left_*, right_*, inner_horizontal_*, inner_vertical_*)
+allow fine-grained border control. style=NONE removes borders entirely.
 """
 
 import logging
@@ -77,9 +90,20 @@ def _hex_to_rgb(hex_color: str) -> dict:
     return {"red": r / 255.0, "green": g / 255.0, "blue": b / 255.0}
 
 
-def _border_style(style: str, color: str = "#CCCCCC", width: int = 1) -> dict:
+def _border_style(style: str, color: str = "#CCCCCC", width: int = 1) -> dict | None:
+    """Return a border dict for Sheets API updateBorders.
+
+    Returns None when style is NONE so the caller can omit the side key
+    entirely (which removes the border for that side).
+    """
+    style_upper = style.upper() if style else "SOLID"
+    if style_upper == "NONE":
+        return None
+    # Google Sheets API border styles: NONE, DOTTED, DASHED, SOLID, SOLID_MEDIUM, SOLID_THICK, DOUBLE
+    valid_styles = {"NONE", "DOTTED", "DASHED", "SOLID", "SOLID_MEDIUM", "SOLID_THICK", "DOUBLE"}
+    api_style = style_upper if style_upper in valid_styles else "SOLID"
     return {
-        "style": "SOLID",
+        "style": api_style,
         "width": width,
         "color": _hex_to_rgb(color),
     }
@@ -240,26 +264,39 @@ def _exec_copy_format(service: Any, spreadsheet_id: str, params: dict, sheet_id:
 
 def _exec_set_border(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
     range_str = str(params["range"])
+    style = str(params.get("style", "SOLID"))
     color = str(params.get("color", "#CCCCCC"))
     width = int(params.get("width", 1))
-    border = _border_style("SOLID", color, width)
+
+    # Build per-side border objects; None means remove that side
+    top = _border_style(str(params.get("top_style", style)), str(params.get("top_color", color)), int(params.get("top_width", width)))
+    bottom = _border_style(str(params.get("bottom_style", style)), str(params.get("bottom_color", color)), int(params.get("bottom_width", width)))
+    left = _border_style(str(params.get("left_style", style)), str(params.get("left_color", color)), int(params.get("left_width", width)))
+    right = _border_style(str(params.get("right_style", style)), str(params.get("right_color", color)), int(params.get("right_width", width)))
+    inner_h = _border_style(str(params.get("inner_horizontal_style", style)), str(params.get("inner_horizontal_color", color)), int(params.get("inner_horizontal_width", width)))
+    inner_v = _border_style(str(params.get("inner_vertical_style", style)), str(params.get("inner_vertical_color", color)), int(params.get("inner_vertical_width", width)))
+
+    request: dict = {
+        "updateBorders": {
+            "range": _range_to_grid_range(range_str, sheet_id),
+        }
+    }
+    if top is not None:
+        request["updateBorders"]["top"] = top
+    if bottom is not None:
+        request["updateBorders"]["bottom"] = bottom
+    if left is not None:
+        request["updateBorders"]["left"] = left
+    if right is not None:
+        request["updateBorders"]["right"] = right
+    if inner_h is not None:
+        request["updateBorders"]["innerHorizontal"] = inner_h
+    if inner_v is not None:
+        request["updateBorders"]["innerVertical"] = inner_v
+
     service.spreadsheets().batchUpdate(
         spreadsheetId=spreadsheet_id,
-        body={
-            "requests": [
-                {
-                    "updateBorders": {
-                        "range": _range_to_grid_range(range_str, sheet_id),
-                        "top": border,
-                        "bottom": border,
-                        "left": border,
-                        "right": border,
-                        "innerHorizontal": border,
-                        "innerVertical": border,
-                    }
-                }
-            ]
-        },
+        body={"requests": [request]},
     ).execute()
 
 
@@ -503,6 +540,383 @@ def _exec_set_note(service: Any, spreadsheet_id: str, params: dict, sheet_id: in
     ).execute()
 
 
+def _exec_merge_cells(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "mergeCells": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                        "mergeType": "MERGE_ALL",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_unmerge_cells(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "unmergeCells": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_formula(service: Any, spreadsheet_id: str, params: dict, sheet_title: str) -> None:
+    range_str = str(params["range"])
+    formula = str(params.get("formula", ""))
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{sheet_title}'!{range_str}",
+        valueInputOption="USER_ENTERED",
+        body={"values": [[formula]]},
+    ).execute()
+
+
+def _exec_set_number_format(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    pattern = str(params.get("pattern", "General"))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                        "cell": {
+                            "userEnteredFormat": {
+                                "numberFormat": {
+                                    "type": "NUMBER",
+                                    "pattern": pattern,
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_alignment(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    horizontal = str(params.get("horizontal", "LEFT")).upper()
+    vertical = str(params.get("vertical", "BOTTOM")).upper()
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                        "cell": {
+                            "userEnteredFormat": {
+                                "horizontalAlignment": horizontal,
+                                "verticalAlignment": vertical,
+                            }
+                        },
+                        "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_font_size(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    size = int(params.get("size", 10))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                        "cell": {
+                            "userEnteredFormat": {
+                                "textFormat": {"fontSize": size}
+                            }
+                        },
+                        "fields": "userEnteredFormat.textFormat.fontSize",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_font_family(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    family = str(params.get("family", "Arial"))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                        "cell": {
+                            "userEnteredFormat": {
+                                "textFormat": {"fontFamily": family}
+                            }
+                        },
+                        "fields": "userEnteredFormat.textFormat.fontFamily",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_row_height(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    start = int(params["start_index"]) - 1
+    end = int(params.get("end_index", params["start_index"]))
+    height = int(params.get("height", 21))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "updateDimensionProperties": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "dimension": "ROWS",
+                            "startIndex": start,
+                            "endIndex": end,
+                        },
+                        "properties": {"pixelSize": height},
+                        "fields": "pixelSize",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_column_width(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    start = int(params["start_index"]) - 1
+    end = int(params.get("end_index", params["start_index"]))
+    width = int(params.get("width", 100))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "updateDimensionProperties": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "dimension": "COLUMNS",
+                            "startIndex": start,
+                            "endIndex": end,
+                        },
+                        "properties": {"pixelSize": width},
+                        "fields": "pixelSize",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_freeze_rows(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    count = int(params.get("row_count", 1))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": sheet_id,
+                            "gridProperties": {"frozenRowCount": count},
+                        },
+                        "fields": "gridProperties.frozenRowCount",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_freeze_columns(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    count = int(params.get("column_count", 1))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": sheet_id,
+                            "gridProperties": {"frozenColumnCount": count},
+                        },
+                        "fields": "gridProperties.frozenColumnCount",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_conditional_formatting(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    rule_type = str(params.get("rule_type", "NUMBER_GREATER")).upper()
+    value = params.get("value", 0)
+    color_hex = str(params.get("color", "#1D9E75"))
+
+    rgb = _hex_to_rgb(color_hex)
+    condition: dict = {"type": rule_type}
+    if rule_type in ("NUMBER_GREATER", "NUMBER_GREATER_THAN_EQ", "NUMBER_LESS", "NUMBER_LESS_THAN_EQ", "NUMBER_EQ"):
+        condition["values"] = [{"userEnteredValue": str(value)}]
+    elif rule_type in ("TEXT_CONTAINS", "TEXT_NOT_CONTAINS", "TEXT_STARTS_WITH", "TEXT_ENDS_WITH"):
+        condition["values"] = [{"userEnteredValue": str(value)}]
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "addConditionalFormatRule": {
+                        "rule": {
+                            "ranges": [_range_to_grid_range(range_str, sheet_id)],
+                            "booleanRule": {
+                                "condition": condition,
+                                "format": {
+                                    "backgroundColor": rgb,
+                                },
+                            },
+                        },
+                        "index": 0,
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_data_validation(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    criteria = str(params.get("criteria", "ONE_OF_LIST")).upper()
+    values = params.get("values", [])
+    allow_empty = bool(params.get("allow_empty", True))
+
+    condition: dict = {"type": criteria}
+    if criteria == "ONE_OF_LIST":
+        condition["values"] = [{"userEnteredValue": str(v)} for v in values]
+    elif criteria in ("NUMBER_GREATER", "NUMBER_LESS", "NUMBER_EQ"):
+        condition["values"] = [{"userEnteredValue": str(values[0])}] if values else []
+    elif criteria == "NUMBER_BETWEEN":
+        condition["values"] = [
+            {"userEnteredValue": str(values[0])},
+            {"userEnteredValue": str(values[1])},
+        ] if len(values) >= 2 else []
+    elif criteria == "TEXT_CONTAINS":
+        condition["values"] = [{"userEnteredValue": str(values[0])}] if values else []
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "setDataValidation": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                        "rule": {
+                            "condition": condition,
+                            "showCustomUi": True,
+                            "strict": not allow_empty,
+                        },
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_set_hyperlink(service: Any, spreadsheet_id: str, params: dict, sheet_title: str) -> None:
+    range_str = str(params["range"])
+    url = str(params.get("url", ""))
+    text = str(params.get("text", url))
+    formula = f'=HYPERLINK("{url}","{text}")'
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{sheet_title}'!{range_str}",
+        valueInputOption="USER_ENTERED",
+        body={"values": [[formula]]},
+    ).execute()
+
+
+def _exec_protect_range(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    description = str(params.get("description", "Protected range"))
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "addProtectedRange": {
+                        "protectedRange": {
+                            "range": _range_to_grid_range(range_str, sheet_id),
+                            "description": description,
+                            "warningOnly": False,
+                        }
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_unprotect_range(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    range_str = str(params["range"])
+    # Find existing protected range ID for this range, then delete it
+    resp = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets.protectedRanges.protectedRangeId,sheets.protectedRanges.range",
+    ).execute()
+    target_id = None
+    for sheet in resp.get("sheets", []):
+        for pr in sheet.get("protectedRanges", []):
+            pr_range = pr.get("range", {})
+            if (
+                pr_range.get("sheetId") == sheet_id
+                and pr_range.get("startRowIndex") == _parse_range(range_str)[0] - 1
+                and pr_range.get("startColumnIndex") == _parse_range(range_str)[1] - 1
+            ):
+                target_id = pr["protectedRangeId"]
+                break
+        if target_id:
+            break
+
+    if target_id is None:
+        raise ValueError(f"No protected range found for {range_str}")
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "deleteProtectedRange": {
+                        "protectedRangeId": target_id,
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
 # ── Public dispatcher ──
 
 _SHEET_NAME_FROM_PARAMS = "OPPM"
@@ -512,6 +926,14 @@ SUPPORTED_ACTIONS = frozenset({
     "set_background", "clear_background", "set_text_wrap",
     "set_value", "clear_content", "fill_timeline", "clear_timeline", "set_owner",
     "set_bold", "set_text_color", "set_note",
+    "merge_cells", "unmerge_cells",
+    "set_formula", "set_number_format", "set_alignment",
+    "set_font_size", "set_font_family",
+    "set_row_height", "set_column_width",
+    "freeze_rows", "freeze_columns",
+    "set_conditional_formatting", "set_data_validation",
+    "set_hyperlink",
+    "protect_range", "unprotect_range",
 })
 
 
@@ -579,6 +1001,38 @@ def execute_actions(
                 _exec_set_text_color(service, spreadsheet_id, params, sheet_id)
             elif action_name == "set_note":
                 _exec_set_note(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "merge_cells":
+                _exec_merge_cells(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "unmerge_cells":
+                _exec_unmerge_cells(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_formula":
+                _exec_set_formula(service, spreadsheet_id, params, sheet_title)
+            elif action_name == "set_number_format":
+                _exec_set_number_format(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_alignment":
+                _exec_set_alignment(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_font_size":
+                _exec_set_font_size(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_font_family":
+                _exec_set_font_family(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_row_height":
+                _exec_set_row_height(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_column_width":
+                _exec_set_column_width(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "freeze_rows":
+                _exec_freeze_rows(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "freeze_columns":
+                _exec_freeze_columns(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_conditional_formatting":
+                _exec_set_conditional_formatting(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_data_validation":
+                _exec_set_data_validation(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_hyperlink":
+                _exec_set_hyperlink(service, spreadsheet_id, params, sheet_title)
+            elif action_name == "protect_range":
+                _exec_protect_range(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "unprotect_range":
+                _exec_unprotect_range(service, spreadsheet_id, params, sheet_id)
             results.append({"action": action_name, "success": True, "error": None})
         except Exception as e:
             logger.warning("execute_actions: action '%s' failed: %s", action_name, e)

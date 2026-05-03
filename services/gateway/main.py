@@ -61,6 +61,11 @@ app = FastAPI(title="OPPM API Gateway", lifespan=lifespan)
 # ── Route table — order matters, most specific first ────────────────────────
 ROUTES: list[tuple[re.Pattern, str, int]] = [
     # pattern, service, timeout_seconds
+    # Long-running AI endpoints (agent loops, SSE streaming) — must come before
+    # the generic /ai/ catch-all. SSE keeps the connection warm but the
+    # client-side httpx still needs a generous read timeout.
+    (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/ai/oppm-agent-fill"), "intelligence", 600),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/ai/chat/stream"),     "intelligence", 600),
     (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/ai/"), "intelligence",  120),
     (re.compile(r"^/api/v1/workspaces/[^/]+/rag/"),                "intelligence",  120),
     (re.compile(r"^/api/v1/workspaces/[^/]+/ai/"),                 "intelligence",  120),

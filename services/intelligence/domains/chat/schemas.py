@@ -15,6 +15,8 @@ class ChatRequest(BaseModel):
     model_id: Optional[str] = None
     oppm_sheet_mode: bool = False
     spreadsheet_id: Optional[str] = None  # passed when in OPPM sheet mode
+    sheet_snapshot: Optional[dict] = None  # live Google Sheet state from /snapshot endpoint
+    force_skill: Optional[str] = None   # e.g. "oppm" to bypass skill router
 
 
 class ToolCallResult(BaseModel):

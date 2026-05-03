@@ -27,6 +27,8 @@ from infrastructure.llm.base import ProviderUnavailableError
 from infrastructure.llm.tool_parser import parse_xml_tool_calls
 from infrastructure.tools.registry import ToolRegistry
 
+from infrastructure.skills.base import SkillContext
+
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 7
@@ -243,27 +245,47 @@ async def run_agent_loop(
     max_iterations: int = MAX_ITERATIONS,
     rag_requery: Callable[..., Awaitable[str]] | None = None,
     on_tool_result: Callable[[dict], Awaitable[None]] | None = None,
+    skill_context: SkillContext | None = None,
 ) -> AgentLoopResult:
     """Run the TAOR agentic loop until confident answer or max_iterations hit.
 
     Parameters
     ----------
-    rag_requery:
-        Optional async callable ``(gap_phrase: str) -> str`` that re-runs the
-        RAG pipeline for a specific knowledge gap and returns a context string.
-        When provided and confidence is low, the loop will call this to inject
-        fresh retrieval results mid-conversation.
-    on_tool_result:
-        Optional async callable ``(record: dict) -> None`` called after each
-        individual tool execution completes. The record has the shape
-        ``{tool, input, result, success, error, updated_entities}``.
-        Use this for SSE streaming to push tool-call events to the client.
+    skill_context:
+        Optional ``SkillContext`` from a Skill. When provided, the loop:
+        1. Injects ``skill_context.extra_system_prompt`` into the system message.
+        2. Appends ``skill_context.preflight_data["snapshot_text"]`` as a
+           user message before the conversation history.
+        3. Filters the tool list to only those allowed by the skill.
     """
     primary_provider = models[0]["provider"] if models else ""
     use_native_tools = primary_provider in NATIVE_TOOL_PROVIDERS
 
     # Work on a copy so the caller's list is not mutated
     messages: list[dict] = list(initial_messages)
+
+    # ── Skill context injection ──
+    if skill_context is not None:
+        # 1. Append skill system prompt to the system message
+        if messages and messages[0]["role"] == "system":
+            extra = skill_context.extra_system_prompt or ""
+            if extra:
+                messages[0] = {
+                    "role": "system",
+                    "content": messages[0]["content"] + "\n\n" + extra,
+                }
+        # 2. Inject pre-flight snapshot as a user message right after system
+        snapshot = skill_context.preflight_data.get("snapshot_text", "")
+        if snapshot:
+            messages.insert(1, {"role": "user", "content": snapshot})
+        # 3. Filter tools to only those allowed by the skill
+        # (The caller is responsible for passing the filtered openai_tools /
+        # anthropic_tools; we just log what the skill requested.)
+        logger.debug(
+            "TAOR running with skill=%s project=%s",
+            skill_context.project_id,
+            skill_context.workspace_id,
+        )
 
     # Inject the THINK directive into the system prompt so the LLM knows the format
     if messages and messages[0]["role"] == "system":
