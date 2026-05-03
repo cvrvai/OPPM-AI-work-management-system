@@ -388,6 +388,102 @@ def _exec_clear_content(service: Any, spreadsheet_id: str, params: dict, sheet_t
     ).execute()
 
 
+def _exec_clear_sheet(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    """Clear the entire OPPM sheet: values, formatting, merges, then reset dimensions."""
+    # 1. Clear all values
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"'OPPM'!A1:AL1000",
+        body={},
+    ).execute()
+
+    # 2. Unmerge all cells
+    merges = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        ranges=["'OPPM'"],
+        fields="sheets.merges",
+    ).execute()
+    merge_requests = []
+    for sheet in merges.get("sheets", []):
+        for merge in sheet.get("merges", []):
+            merge_requests.append({"unmergeCells": {"range": merge}})
+    if merge_requests:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": merge_requests},
+        ).execute()
+
+    # 3. Clear all formatting (borders, backgrounds, fonts, alignment, number format, etc.)
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "updateCells": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 40,
+                        },
+                        "fields": "userEnteredFormat",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+    # 4. Reset row heights to default (21px for all rows)
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "updateDimensionProperties": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "dimension": "ROWS",
+                            "startIndex": 0,
+                            "endIndex": 1000,
+                        },
+                        "properties": {"pixelSize": 21},
+                        "fields": "pixelSize",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+    # 5. Reset column widths to standard OPPM values
+    col_widths = [
+        (0, 6, 40),    # A-F: 40px
+        (6, 7, 10),    # G: 10px
+        (7, 8, 50),    # H: 50px
+        (8, 9, 280),   # I: 280px
+        (9, 35, 25),   # J-AI: 25px
+        (35, 38, 80),  # AJ-AL: 80px
+    ]
+    requests = []
+    for start, end, width in col_widths:
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": start,
+                    "endIndex": end,
+                },
+                "properties": {"pixelSize": width},
+                "fields": "pixelSize",
+            }
+        })
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": requests},
+    ).execute()
+
+
 def _exec_fill_timeline(
     service: Any,
     spreadsheet_id: str,
@@ -934,6 +1030,7 @@ SUPPORTED_ACTIONS = frozenset({
     "set_conditional_formatting", "set_data_validation",
     "set_hyperlink",
     "protect_range", "unprotect_range",
+    "clear_sheet",
 })
 
 
@@ -960,7 +1057,11 @@ def execute_actions(
     results: list[dict] = []
     for action_obj in actions:
         action_name = str(action_obj.get("action", ""))
-        params = dict(action_obj.get("params", {}))
+        # Support both nested params {action, params: {...}} and flat {action, range, value}
+        if "params" in action_obj:
+            params = dict(action_obj.get("params", {}))
+        else:
+            params = {k: v for k, v in action_obj.items() if k != "action"}
 
         if action_name not in SUPPORTED_ACTIONS:
             results.append({"action": action_name, "success": False, "error": f"Unsupported action: {action_name}"})
@@ -1033,6 +1134,8 @@ def execute_actions(
                 _exec_protect_range(service, spreadsheet_id, params, sheet_id)
             elif action_name == "unprotect_range":
                 _exec_unprotect_range(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "clear_sheet":
+                _exec_clear_sheet(service, spreadsheet_id, params, sheet_id)
             results.append({"action": action_name, "success": True, "error": None})
         except Exception as e:
             logger.warning("execute_actions: action '%s' failed: %s", action_name, e)

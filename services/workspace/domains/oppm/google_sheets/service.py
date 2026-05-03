@@ -232,7 +232,9 @@ async def execute_sheet_actions(
     credential_info, _, _ = await _resolve_workspace_service_account_info(session, workspace_id, strict=True)
     service = await asyncio.to_thread(_build_sheets_service, credential_info)
     results = await asyncio.to_thread(execute_actions, service, spreadsheet_id, actions)
-    return {"results": results}
+    success_count = sum(1 for r in results if r.get("success"))
+    error_count = len(results) - success_count
+    return {"results": results, "success_count": success_count, "error_count": error_count}
 
 
 async def get_google_sheet_snapshot(

@@ -1228,8 +1228,7 @@ function tryParseSheetActions(content: string): SheetAction[] | null {
       Array.isArray(parsed) &&
       parsed.length > 0 &&
       typeof parsed[0] === 'object' &&
-      'action' in parsed[0] &&
-      'params' in parsed[0]
+      'action' in parsed[0]
     ) {
       return parsed as SheetAction[]
     }

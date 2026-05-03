@@ -324,7 +324,7 @@ export interface Notification {
 // ── OPPM AI Sheet Actions ──
 export interface SheetAction {
   action: string
-  params: Record<string, unknown>
+  params?: Record<string, unknown>
 }
 
 export interface SheetActionResult {

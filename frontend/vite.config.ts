@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
 
   const gatewayProxy: ProxyMap = {
     '/api': { target: proxyBase || 'http://127.0.0.1:80', changeOrigin: true },
+    '/v1': { target: proxyBase || 'http://127.0.0.1:80', changeOrigin: true },
     '/mcp': { target: proxyBase || 'http://127.0.0.1:80', changeOrigin: true },
   }
 
@@ -38,6 +39,7 @@ export default defineConfig(({ mode }) => {
 
     // Everything else goes to the core service (port 8000)
     '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+    '/v1': { target: 'http://127.0.0.1:8000', changeOrigin: true },
 
     '/mcp': { target: 'http://127.0.0.1:8003', changeOrigin: true },
   }
