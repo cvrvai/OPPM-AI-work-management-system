@@ -200,9 +200,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "merge_cells", "params": {"range": "G5:L5"}})
     a.append({"action": "merge_cells", "params": {"range": "M5:AC5"}})
     a.append({"action": "merge_cells", "params": {"range": "AD5:AI5"}})
-    # Task rows: G:H merged per row so task number occupies both columns
+    # Task rows: G holds the task number (same width as identity letter column)
+    # H:L merged per row as the task title/description area
     for i in range(1, task_count + 1):
-        a.append({"action": "merge_cells", "params": {"range": f"G{5 + i}:H{5 + i}"}})
+        a.append({"action": "merge_cells", "params": {"range": f"H{5 + i}:L{5 + i}"}})
     # Identity rows 36-41: merge H:L on each row to give a description/label area
     for r in range(R_IDENTITY_START, R_IDENTITY_END + 1):
         a.append({"action": "merge_cells", "params": {"range": f"H{r}:L{r}"}})
@@ -212,9 +213,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     for col_idx in range(1, 7):
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_FORM_BOTTOM}"}})
-    # Timeline date header columns (M:AC) and owner columns (AD:AI): each column merged vertically rows 42-46
-    # so the rotated labels occupy a taller area; grid cells start at row 47
-    R_DATE_HEADER_END = R_MATRIX_HEADER + 4  # = 46
+    # Timeline date header columns (M:AC) and owner columns (AD:AI): each column merged vertically rows 42-48
+    # so the rotated labels occupy a taller area; grid cells start at row 49
+    R_DATE_HEADER_END = R_MATRIX_HEADER + 6  # = 48
     for col_idx in range(13, 36):  # M=13 to AI=35 (1-based)
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}:{col_letter}{R_DATE_HEADER_END}"}})
@@ -241,8 +242,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_HEADER, "end_index": R_MATRIX_HEADER, "height": 21}})
     # Rows 43-54 (matrix body A:L): compact height
     a.append({"action": "set_row_height", "params": {"start_index": X_TOP, "end_index": R_MATRIX_BOTTOM, "height": 21}})
-    # Identity rows (A-F, one per row) stay compact
-    a.append({"action": "set_row_height", "params": {"start_index": R_IDENTITY_START, "end_index": R_IDENTITY_END, "height": 30}})
+    # Identity rows (A-F, one per row) — same height as task rows
+    a.append({"action": "set_row_height", "params": {"start_index": R_IDENTITY_START, "end_index": R_IDENTITY_END, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
     # Column G wider so identity letters are clearly visible
     a.append({"action": "set_column_width", "params": {"start_index": 7, "end_index": 7, "width": 50}})
 
@@ -372,14 +373,14 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_font_size", "params": {"range": "A5:AI5", "size": 10}})
     a.append({"action": "set_bold", "params": {"range": "A5:AI5", "bold": True}})
     a.append({"action": "set_alignment", "params": {"range": "A5:AI5", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Task numbers (columns G:H merged per row)
-    a.append({"action": "set_font_size", "params": {"range": f"G6:H{LAST_TASK}", "size": 10}})
-    a.append({"action": "set_bold", "params": {"range": f"G6:H{LAST_TASK}", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": f"G6:H{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Task titles (column I) — left aligned, CLIP to preserve row height
-    a.append({"action": "set_font_size", "params": {"range": f"I6:I{LAST_TASK}", "size": 10}})
-    a.append({"action": "set_alignment", "params": {"range": f"I6:I{LAST_TASK}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
-    a.append({"action": "set_text_wrap", "params": {"range": f"I6:I{LAST_TASK}", "mode": "CLIP"}})
+    # Task numbers (column G only — same width as identity letter column)
+    a.append({"action": "set_font_size", "params": {"range": f"G6:G{LAST_TASK}", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": f"G6:G{LAST_TASK}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"G6:G{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Task titles (H:L merged per row) — left aligned, CLIP to preserve row height
+    a.append({"action": "set_font_size", "params": {"range": f"H6:L{LAST_TASK}", "size": 10}})
+    a.append({"action": "set_alignment", "params": {"range": f"H6:L{LAST_TASK}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_text_wrap", "params": {"range": f"H6:L{LAST_TASK}", "mode": "CLIP"}})
     # Sub-objective check columns (A-F) and owner columns (AD-AI)
     a.append({"action": "set_alignment", "params": {"range": f"A6:F{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_alignment", "params": {"range": f"AD6:AI{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
