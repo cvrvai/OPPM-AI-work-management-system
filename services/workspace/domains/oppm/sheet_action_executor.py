@@ -686,13 +686,13 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_value", "params": {"range": "A3", "value": metadata_block}})
     # Row 5: 4 sub-headers
     a.append({"action": "set_value", "params": {"range": "A5", "value": "Sub objective"}})
-    a.append({"action": "set_value", "params": {"range": "H5", "value": "Major Tasks (Deadline)"}})
+    a.append({"action": "set_value", "params": {"range": "G5", "value": "Major Tasks (Deadline)"}})
     a.append({"action": "set_value", "params": {"range": "J5", "value": f"Project Completed By: {weeks_label}"}})
     a.append({"action": "set_value", "params": {"range": "AJ5", "value": "Owner / Priority"}})
 
-    # ── 3. Task numbers 1..N in column H ──
+    # ── 3. Task numbers 1..N in column G (G:H merged per row) ──
     for i in range(1, task_count + 1):
-        a.append({"action": "set_value", "params": {"range": f"H{5 + i}", "value": str(i)}})
+        a.append({"action": "set_value", "params": {"range": f"G{5 + i}", "value": str(i)}})
 
     # ── 4. # People working row ──
     a.append({"action": "set_value", "params": {"range": f"A{R_PEOPLE}", "value": "# People working on the project:"}})
@@ -718,7 +718,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     if matrix_image_url:
         safe_url = matrix_image_url.replace('"', '""')
         a.append({"action": "set_value", "params": {
-            "range": f"H{R_MATRIX_TOP + 1}",
+            "range": f"G{R_MATRIX_TOP + 1}",
             "value": f'=IMAGE("{safe_url}",1)',
         }})
 
@@ -754,11 +754,14 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "merge_cells", "params": {"range": "O2:AL2"}})
     # Rows 3-4 metadata block
     a.append({"action": "merge_cells", "params": {"range": "A3:AL4"}})
-    # Row 5 sub-headers
+    # Row 5 sub-headers — G merges with H so "Major Tasks" spans G:I
     a.append({"action": "merge_cells", "params": {"range": "A5:F5"}})
-    a.append({"action": "merge_cells", "params": {"range": "H5:I5"}})
+    a.append({"action": "merge_cells", "params": {"range": "G5:I5"}})
     a.append({"action": "merge_cells", "params": {"range": "J5:AI5"}})
     a.append({"action": "merge_cells", "params": {"range": "AJ5:AL5"}})
+    # Task rows: G:H merged per row so task number occupies both columns
+    for i in range(1, task_count + 1):
+        a.append({"action": "merge_cells", "params": {"range": f"G{5 + i}:H{5 + i}"}})
     # # People row (full width)
     a.append({"action": "merge_cells", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}"}})
     # Bottom matrix sub-objective columns: each column merged across full matrix height for rotated text
@@ -768,14 +771,14 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Bottom matrix owner columns: each merged across full matrix height
     for col_letter in ("AJ", "AK", "AL"):
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_TOP}:{col_letter}{R_MATRIX_BOTTOM}"}})
-    # Bottom matrix center area — ALWAYS merge H..AI from row matrix_top+1
-    # down into one big rectangle. Either =IMAGE() fills it, or the user
-    # drops their X-pattern diagram in via "Insert → Image → Image in cell".
-    a.append({"action": "merge_cells", "params": {"range": f"H{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}"}})
-    # Summary/Forecast/Risk: rotated G-column labels span their section rows
-    a.append({"action": "merge_cells", "params": {"range": f"G{R_SUMMARY_START}:G{R_SUMMARY_DELIV_END}"}})
-    a.append({"action": "merge_cells", "params": {"range": f"G{R_FORECAST_START}:G{R_FORECAST_END}"}})
-    a.append({"action": "merge_cells", "params": {"range": f"G{R_RISK_START}:G{R_RISK_END}"}})
+    # Bottom matrix center area — merge G..AI from row matrix_top+1 so column G
+    # joins the center block (no narrow orphan strip between sub-obj and image area).
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}"}})
+    # Summary/Forecast/Risk: rotated labels now span G:H so the label column is
+    # visually the same width as the task-number column above it.
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_SUMMARY_START}:H{R_SUMMARY_DELIV_END}"}})
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_FORECAST_START}:H{R_FORECAST_END}"}})
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_RISK_START}:H{R_RISK_END}"}})
     # Each summary/forecast/risk text row spans I:AL
     for r in range(R_SUMMARY_START, R_SUMMARY_DELIV_END + 1):
         a.append({"action": "merge_cells", "params": {"range": f"I{r}:AL{r}"}})
@@ -856,10 +859,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_font_size", "params": {"range": "A5:AL5", "size": 10}})
     a.append({"action": "set_bold", "params": {"range": "A5:AL5", "bold": True}})
     a.append({"action": "set_alignment", "params": {"range": "A5:AL5", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Task numbers (column H)
-    a.append({"action": "set_font_size", "params": {"range": f"H6:H{LAST_TASK}", "size": 10}})
-    a.append({"action": "set_bold", "params": {"range": f"H6:H{LAST_TASK}", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": f"H6:H{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Task numbers (columns G:H merged per row)
+    a.append({"action": "set_font_size", "params": {"range": f"G6:H{LAST_TASK}", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": f"G6:H{LAST_TASK}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"G6:H{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     # Task titles (column I) — left aligned, CLIP to preserve row height
     a.append({"action": "set_font_size", "params": {"range": f"I6:I{LAST_TASK}", "size": 10}})
     a.append({"action": "set_alignment", "params": {"range": f"I6:I{LAST_TASK}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
@@ -885,14 +888,14 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_alignment", "params": {"range": f"AJ{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_font_size", "params": {"range": f"AJ{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "size": 9}})
     a.append({"action": "set_bold", "params": {"range": f"AJ{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "bold": True}})
-    # Bottom matrix center area (X-pattern labels): bold + center
-    a.append({"action": "set_bold", "params": {"range": f"H{R_MATRIX_TOP}:AI{R_MATRIX_BOTTOM}", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": f"H{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Summary section: rotated G-column labels
-    a.append({"action": "set_text_rotation", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "angle": 90}})
-    a.append({"action": "set_alignment", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_bold", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "bold": True}})
-    a.append({"action": "set_font_size", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "size": 9}})
+    # Bottom matrix center area (X-pattern / image): bold + center — now from G
+    a.append({"action": "set_bold", "params": {"range": f"G{R_MATRIX_TOP}:AI{R_MATRIX_BOTTOM}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"G{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Summary section: rotated labels span G:H (matches task-number column width above)
+    a.append({"action": "set_text_rotation", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_bold", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "bold": True}})
+    a.append({"action": "set_font_size", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "size": 9}})
     # Summary text rows: smaller font, left-align, wrap
     a.append({"action": "set_font_size", "params": {"range": f"I{R_SUMMARY_START}:AL{R_RISK_END}", "size": 9}})
     a.append({"action": "set_alignment", "params": {"range": f"I{R_SUMMARY_START}:AL{R_RISK_END}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
