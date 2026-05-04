@@ -208,10 +208,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "merge_cells", "params": {"range": f"H{r}:L{r}"}})
     # Big white image area: one rectangle spanning G42:L54 (combines header row G:L + body G column + X-pattern)
     a.append({"action": "merge_cells", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}"}})
-    # Sub-objective body merges: each column A-F merged vertically above the identity rows
+    # Sub-objective body merges: each column A-F merged vertically from row 43 to row 66 (bottom of risk section)
     for col_idx in range(1, 7):
         col_letter = _col_index_to_letters(col_idx)
-        a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_MATRIX_BOTTOM}"}})
+        a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_FORM_BOTTOM}"}})
     # Timeline date header columns (M:AC) and owner columns (AD:AI): each column merged vertically rows 42-46
     # so the rotated labels occupy a taller area; grid cells start at row 47
     R_DATE_HEADER_END = R_MATRIX_HEADER + 4  # = 46
