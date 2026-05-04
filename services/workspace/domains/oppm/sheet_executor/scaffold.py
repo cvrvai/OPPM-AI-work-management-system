@@ -134,7 +134,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "set_value", "params": {"range": f"G{5 + i}", "value": str(i)}})
 
     # ── 4. Bottom matrix content ──
-    # 4a. Sub-objective numbers removed (no auto-generated numbers in matrix header)
+    # 4a. Sub-objective numbers 1..6 in the matrix header row A:F (row 42)
+    for col_idx in range(1, 7):
+        col_letter = _col_index_to_letters(col_idx)
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": str(col_idx)}})
     # 4a-ii. Sub-objective labels in the matrix body — each column A-F is merged vertically
     sub_obj_labels = ["Sub Obj 1", "Sub Obj 2", "Sub Obj 3", "Sub Obj 4", "Sub Obj 5", "Sub Obj 6"]
     for col_idx, label in enumerate(sub_obj_labels, start=1):
@@ -203,12 +206,18 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Identity rows 36-41: merge H:L on each row to give a description/label area
     for r in range(R_IDENTITY_START, R_IDENTITY_END + 1):
         a.append({"action": "merge_cells", "params": {"range": f"H{r}:L{r}"}})
-    # X-pattern center area — one large blank rectangle merge
-    a.append({"action": "merge_cells", "params": {"range": f"H{X_TOP}:L{X_BOTTOM}"}})
+    # Big white image area: one rectangle spanning G42:L54 (combines header row G:L + body G column + X-pattern)
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}"}})
     # Sub-objective body merges: each column A-F merged vertically above the identity rows
     for col_idx in range(1, 7):
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_MATRIX_BOTTOM}"}})
+    # Timeline date header columns (M:AC): each column merged vertically rows 42-46
+    # so the rotated date labels occupy a taller area; timeline grid cells start at row 47
+    R_DATE_HEADER_END = R_MATRIX_HEADER + 4  # = 46
+    for col_idx in range(13, 30):  # M=13 to AC=29 (1-based)
+        col_letter = _col_index_to_letters(col_idx)
+        a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}:{col_letter}{R_DATE_HEADER_END}"}})
     # Summary/Forecast/Risk: rotated labels now span G:H so the label column is
     # visually the same width as the task-number column above it.
     a.append({"action": "merge_cells", "params": {"range": f"G{R_SUMMARY_START}:H{R_SUMMARY_DELIV_END}"}})
@@ -237,8 +246,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
 
     # ── 9. Backgrounds ──
     a.append({"action": "set_background", "params": {"range": "A5:AI5", "color": _SCAFFOLD_HEADER_BG}})
-    # X-pattern center area — white blank background for image insertion
-    a.append({"action": "set_background", "params": {"range": f"H{X_TOP}:L{X_BOTTOM}", "color": "#FFFFFF"}})
+    # Big white image area (G42:L54) — white blank background for image insertion
+    a.append({"action": "set_background", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "color": "#FFFFFF"}})
 
     # ── 10. Borders — large fills first, then specific overrides on top ──
     # 10a. Header rows 1-5 → black grid
@@ -264,6 +273,15 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_border", "params": {"range": f"AD6:AI{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
     # 10e. Bottom matrix → black grid (A:F + H:AI, skipping the blank image area G)
     a.append({"action": "set_border", "params": {"range": f"A{R_MATRIX_TOP}:F{R_MATRIX_BOTTOM}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # Border around the full G42:L54 merged area (outer edges only)
+    a.append({"action": "set_border", "params": {
+        "range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}",
+        "style": "NONE",
+        "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
+        "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
+        "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
+    }})
     # Timeline grid header row (H:AI row 42) — vertical grid for dates/members
     a.append({"action": "set_border", "params": {"range": f"H{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
     # Timeline grid body (H:AI rows 43-54) — aligned with X-pattern Legend height
@@ -363,6 +381,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Sub-objective check columns (A-F) and owner columns (AD-AI)
     a.append({"action": "set_alignment", "params": {"range": f"A6:F{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_alignment", "params": {"range": f"AD6:AI{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Bottom matrix sub-objective header row numbers (A:F, row 42): horizontal, centered, small, bold
+    a.append({"action": "set_alignment", "params": {"range": f"A{R_MATRIX_HEADER}:F{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"A{R_MATRIX_HEADER}:F{R_MATRIX_HEADER}", "size": 9}})
+    a.append({"action": "set_bold", "params": {"range": f"A{R_MATRIX_HEADER}:F{R_MATRIX_HEADER}", "bold": True}})
     # Bottom matrix sub-objective body merged cells: rotated 90° + center + small font + bold
     a.append({"action": "set_text_rotation", "params": {"range": f"A{R_MATRIX_HEADER + 1}:F{R_MATRIX_BOTTOM}", "angle": 90}})
     a.append({"action": "set_alignment", "params": {"range": f"A{R_MATRIX_HEADER + 1}:F{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
@@ -381,10 +403,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_alignment", "params": {"range": f"AD{R_MATRIX_HEADER}:AI{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_font_size", "params": {"range": f"AD{R_MATRIX_HEADER}:AI{R_MATRIX_HEADER}", "size": 9}})
     a.append({"action": "set_bold", "params": {"range": f"AD{R_MATRIX_HEADER}:AI{R_MATRIX_HEADER}", "bold": True}})
-    # X-pattern center area (H:L): bold labels, centered in each quadrant
-    a.append({"action": "set_alignment", "params": {"range": f"H{X_TOP}:L{X_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_font_size", "params": {"range": f"H{X_TOP}:L{X_BOTTOM}", "size": 10}})
-    a.append({"action": "set_bold", "params": {"range": f"H{X_TOP}:L{X_BOTTOM}", "bold": True}})
+    # Big white image area (G42:L54): centered
+    a.append({"action": "set_alignment", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "bold": True}})
     # Summary section: rotated labels span G:H (matches task-number column width above)
     a.append({"action": "set_text_rotation", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "angle": 90}})
     a.append({"action": "set_alignment", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
