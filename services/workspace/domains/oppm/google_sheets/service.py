@@ -218,7 +218,7 @@ async def execute_sheet_actions(
     workspace_id: str,
     actions: list[dict],
 ) -> dict[str, Any]:
-    from domains.oppm.sheet_action_executor import execute_actions
+    from domains.oppm.sheet_executor import execute_sheet_actions
 
     project = await _get_project_or_404(session, project_id, workspace_id)
     link = _extract_link(project.metadata_)
@@ -234,7 +234,7 @@ async def execute_sheet_actions(
     # Pass credential_info through so executor actions that need Drive (e.g.
     # upload_asset_to_drive, scaffold_oppm_form's matrix_image_asset path) can
     # build a Drive client lazily without re-resolving credentials.
-    results = await asyncio.to_thread(execute_actions, service, spreadsheet_id, actions, sa_info=credential_info)
+    results = await asyncio.to_thread(execute_sheet_actions, service, spreadsheet_id, actions, sa_info=credential_info)
     success_count = sum(1 for r in results if r.get("success"))
     error_count = len(results) - success_count
     return {"results": results, "success_count": success_count, "error_count": error_count}
