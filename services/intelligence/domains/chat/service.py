@@ -296,10 +296,28 @@ Trigger phrases (any of these → use scaffold_oppm_form):
 
 Output for ALL of the above is exactly:
 [
-  { "action": "scaffold_oppm_form", "params": { "title": "<project title from context>", "leader": "<leader name from context or null>", "objective": "<one-sentence objective from context or null>", "start_date": "<YYYY-MM-DD or null>", "deadline": "<YYYY-MM-DD or null>", "completed_by_weeks": <integer weeks or null>, "task_count": 30 } }
+  { "action": "scaffold_oppm_form", "params": { "title": "<project title from context>", "leader": "<leader name from context or null>", "objective": "<one-sentence objective from context or null>", "deliverable": "<one-sentence deliverable output from context or null>", "start_date": "<YYYY-MM-DD or null>", "deadline": "<YYYY-MM-DD or null>", "completed_by_weeks": <integer weeks or null>, "task_count": 30, "matrix_image_asset": "<optional local asset filename>", "matrix_image_url": "<optional public image URL>" } }
 ]
 
-All params are OPTIONAL — pass what you have from the LIVE PROJECT CONTEXT block, omit (or pass null) for what you don't. The default task_count is 30 (standard OPPM); only lower it if the user explicitly asks for fewer rows.
+Optional matrix center image — TWO ways, pick ONE:
+
+  A) `matrix_image_asset`: filename of an image inside the project's `assets/` folder (e.g. `"OPPM NHRS.png"`). The backend will upload it to Google Drive on the fly, make it publicly viewable, and embed it. This is the PREFERRED path when the user mentions a file by name like "use the OPPM NHRS image" or "use assets/foo.png". Just pass the filename — do NOT try to construct a URL.
+
+  B) `matrix_image_url`: a fully-formed public image URL (e.g. `https://drive.google.com/uc?export=view&id=FILE_ID` or any other publicly fetchable HTTPS URL). Use this when the user hands you a URL directly.
+
+If the user mentions an image but you have neither a filename in `assets/` nor a URL, ask them to either drop the file into `assets/` or share a public URL — do NOT invent or guess. If both `matrix_image_asset` and `matrix_image_url` are passed, the asset upload takes precedence.
+
+When neither is given, the matrix center is left as a clean MERGED EMPTY cell (H..AI across the bottom matrix body rows). The user can then manually insert their X-pattern diagram via Google Sheets' "Insert → Image → Image in cell" UI. We deliberately do NOT auto-place the text labels "Major Tasks / Target Dates / Sub Objectives / Costs / Summary & Forecast" anymore — they cluttered the space the user wanted for their diagram. If the user explicitly asks to "put the X-pattern labels back" or "add the diamond text labels", you can write them via individual `set_value` actions at approximately:
+  - "Major Tasks" at M{matrix_top+1}
+  - "Target Dates" at V{matrix_top+2}
+  - "Sub Objectives" at I{matrix_top+4}
+  - "Costs" at Y{matrix_top+5}
+  - "Summary & Forecast" at M{matrix_top+7}
+…but do NOT do this proactively. Only on explicit request.
+
+All params are OPTIONAL — pass what you have from the LIVE PROJECT CONTEXT block, omit (or pass null) for what you don't. The default task_count is 30 (standard OPPM); only lower it if the user explicitly asks for fewer rows (e.g. task_count=19 if they want a tighter layout).
+
+The scaffold produces the authentic Clark Campbell layout: row 1 spacer, row 2 split (Project Leader | Project Name), rows 3-4 merged metadata block (Objective + Deliverable + Start + Deadline), row 5 sub-headers, N task rows numbered 1..N, "# People working on the project:" row, 9-row bottom matrix (rotated A-F sub-objective headers, rotated J-AI date headers, rotated AJ-AL owner headers, X-pattern center labels: Major Tasks / Target Dates / Sub Objectives / Costs / Summary & Forecast), and a Summary / Forecast / Risk section at the bottom with rotated G-column section labels.
 
 DO NOT mix `scaffold_oppm_form` with other actions in the same response. The scaffold replaces the whole form; any extra actions are wasted.
 
@@ -565,9 +583,37 @@ The scaffold expands into ~80 sub-actions server-side: clear, header text, 30 ta
   params: { } (no parameters needed)
   Use clear_sheet ALONE only when the user just wants an empty sheet ("clear everything", "wipe the sheet"). For "delete the form and recreate" / "start over and rebuild" / "create the OPPM form", prefer `scaffold_oppm_form` — it does clear_sheet AND rebuilds the full form in one call.
 
-- **scaffold_oppm_form**: SERVER-SIDE MACRO — produces a complete authentic OPPM form (5 header rows + N task rows numbered 1..N + bottom matrix with Month 01-12 labels, Owner labels, Capital/Expenses/Other cost area, Summary & Forecast legend, full border hierarchy, fonts, freeze). Call this whenever the user wants the WHOLE form built or rebuilt. See "PRIORITY 1 — Full-form scaffold shortcut" above.
-  params: { "title": "...", "leader": "...", "objective": "...", "start_date": "YYYY-MM-DD", "deadline": "YYYY-MM-DD", "completed_by_weeks": N, "task_count": 30 }
-  All params optional — pass what you have from LIVE PROJECT CONTEXT, omit/null the rest. Default task_count=30. Do NOT mix with other actions in the same response.
+- **scaffold_oppm_form**: SERVER-SIDE MACRO — produces a complete authentic Clark Campbell OPPM form (row 2 split Leader|Name, rows 3-4 merged metadata block with Objective+Deliverable+Start+Deadline, row 5 sub-headers, N task rows numbered 1..N, "# People working" row, 9-row bottom matrix with rotated A-F sub-objective headers + rotated J-AI date headers + rotated AJ-AL owner headers + X-pattern center labels, Summary/Forecast/Risk section with rotated G-column labels, full border hierarchy, fonts, freeze). Call this whenever the user wants the WHOLE form built or rebuilt. See "PRIORITY 1 — Full-form scaffold shortcut" above.
+  params: { "title": "...", "leader": "...", "objective": "...", "deliverable": "...", "start_date": "YYYY-MM-DD", "deadline": "YYYY-MM-DD", "completed_by_weeks": N, "task_count": 30 }
+  All params optional — pass what you have from LIVE PROJECT CONTEXT, omit/null the rest. Default task_count=30 (use 19 for a tighter layout matching Clark Campbell's PDF). Do NOT mix with other actions in the same response.
+
+- **set_text_rotation**: Rotate text in a range. Use for vertical/sideways header labels (e.g. rotated date headers in a timeline column, or rotated section labels like "Summary Deliverable" / "Forecast" / "Risk").
+  params: { "range": "A30:F38", "angle": 90 }    — angle is degrees, range -90..90 (90 = bottom-to-top, -90 = top-to-bottom)
+  OR:    { "range": "A30:F38", "vertical": true } — stacked text (one character per line, reads top-to-bottom)
+  Examples:
+    - "rotate the column headers vertically" → `[{"action": "set_text_rotation", "params": {"range": "J30:AI30", "angle": 90}}]`
+    - "make the Summary label sideways" → `[{"action": "set_text_rotation", "params": {"range": "G40:G43", "angle": 90}}]`
+
+- **insert_image**: Embed a public image into a cell via Google Sheets' =IMAGE() formula. Use this when the user wants to replace text with a picture (e.g. a logo, the OPPM X-pattern diagram, a status badge). Best practice: merge the destination range first so the image fills a clean rectangle.
+  params: { "range": "H37:AI45", "url": "https://drive.google.com/uc?export=view&id=FILE_ID", "mode": 1 }
+  - range: A1 cell or merged-range top-left. The image fits the cell's dimensions.
+  - url: MUST be publicly fetchable by Google's servers. localhost / file:// / auth-protected URLs do NOT work. For private images, upload to Google Drive, share publicly, then use `https://drive.google.com/uc?export=view&id=FILE_ID`.
+  - mode: 1 = fit while preserving aspect (default, recommended). 2 = stretch to fill (distorts). 3 = original size (may overflow).
+  Examples:
+    - "put the logo in A1" → first ask for a public URL; then `[{"action": "merge_cells", "params": {"range": "A1:B3"}}, {"action": "insert_image", "params": {"range": "A1", "url": "<URL>", "mode": 1}}]`
+    - "use this image for the X pattern in the matrix" → if the user already has the OPPM form built, merge the matrix center then insert; if they're creating a fresh form, pass the URL as `matrix_image_url` to `scaffold_oppm_form` instead.
+  IMPORTANT: never invent a URL. If the user wants to embed an image but hasn't given a public URL, ask them to upload it (Google Drive share, Imgur, GitHub raw, etc.) and paste the link — OR use `upload_asset_to_drive` below if the file already lives in the project's `assets/` folder.
+
+- **upload_asset_to_drive**: Upload an image file from the project's local `assets/` folder to Google Drive (publicly viewable) and OPTIONALLY embed it at a target range. The backend handles the upload + public-link permission automatically using the same service account that owns the sheet. Use this whenever the user references a file by NAME (e.g. "OPPM NHRS.png", "use assets/logo.png") rather than by URL.
+  params: { "asset_filename": "OPPM NHRS.png", "range": "<optional A1 cell to embed at>", "mode": <optional 1|2|3, default 1> }
+  Returns: `{ "file_id": "...", "url": "https://drive.google.com/uc?export=view&id=...", "asset_filename": "...", "embedded_at": "..." (if range given) }`
+  - asset_filename: a plain filename — must live inside the project's `assets/` folder. No path traversal, no absolute paths.
+  - range: optional. If provided, the action also writes `=IMAGE(url, mode)` at that cell after upload.
+  - mode: 1 fit (default), 2 stretch, 3 original.
+  Examples:
+    - "embed OPPM NHRS.png at A1" → `[{"action": "upload_asset_to_drive", "params": {"asset_filename": "OPPM NHRS.png", "range": "A1"}}]`
+    - "upload the matrix diagram" (without specifying where) → `[{"action": "upload_asset_to_drive", "params": {"asset_filename": "OPPM NHRS.png"}}]` (just uploads + returns the URL; no embedding)
+  IMPORTANT: only files actually present in the project's `assets/` folder will work. The backend rejects path traversal and non-image MIME types. If the user names a file you're not sure exists, just try — the action will return a clear error if missing.
 
 ### Cell content operations
 - **set_value**: Write text into a cell

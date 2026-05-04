@@ -231,7 +231,10 @@ async def execute_sheet_actions(
 
     credential_info, _, _ = await _resolve_workspace_service_account_info(session, workspace_id, strict=True)
     service = await asyncio.to_thread(_build_sheets_service, credential_info)
-    results = await asyncio.to_thread(execute_actions, service, spreadsheet_id, actions)
+    # Pass credential_info through so executor actions that need Drive (e.g.
+    # upload_asset_to_drive, scaffold_oppm_form's matrix_image_asset path) can
+    # build a Drive client lazily without re-resolving credentials.
+    results = await asyncio.to_thread(execute_actions, service, spreadsheet_id, actions, sa_info=credential_info)
     success_count = sum(1 for r in results if r.get("success"))
     error_count = len(results) - success_count
     return {"results": results, "success_count": success_count, "error_count": error_count}

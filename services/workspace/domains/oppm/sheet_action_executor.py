@@ -7,12 +7,14 @@ Supported actions (matching the OPPM AI system prompt contract):
   set_bold, set_text_color, set_note,
   merge_cells, unmerge_cells,
   set_formula, set_number_format, set_alignment,
-  set_font_size, set_font_family,
+  set_font_size, set_font_family, set_text_rotation,
   set_row_height, set_column_width,
   freeze_rows, freeze_columns,
   set_conditional_formatting, set_data_validation,
   set_hyperlink,
-  protect_range, unprotect_range
+  protect_range, unprotect_range,
+  insert_image, upload_asset_to_drive,
+  scaffold_oppm_form
 
 Border styles supported: NONE, DOTTED, DASHED, SOLID, SOLID_MEDIUM, SOLID_THICK, DOUBLE.
 Per-side overrides (top_*, bottom_*, left_*, right_*, inner_horizontal_*, inner_vertical_*)
@@ -20,11 +22,108 @@ allow fine-grained border control. style=NONE removes borders entirely.
 """
 
 import logging
+import mimetypes
+import os
 import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ── Local asset → Drive upload (Option A image embedding) ──────────────────
+#
+# Resolves the project's `assets/` folder so the AI can reference local files
+# (e.g. "OPPM NHRS.png") and the backend uploads them to the service account's
+# Drive on demand, then embeds via =IMAGE(). Override with OPPM_ASSETS_DIR env
+# var if the layout ever changes.
+
+_DEFAULT_ASSETS_DIR = Path(__file__).resolve().parents[4] / "assets"
+_ASSETS_DIR = Path(os.environ.get("OPPM_ASSETS_DIR") or _DEFAULT_ASSETS_DIR).resolve()
+
+# Cache of (asset_filename, mtime_ns) -> {"file_id": ..., "url": ...}.
+# Avoids re-uploading the same file every scaffold call. mtime invalidates the
+# cache automatically when the user edits the asset.
+_ASSET_DRIVE_CACHE: dict[tuple[str, int], dict[str, str]] = {}
+
+_ALLOWED_IMAGE_MIME_PREFIX = "image/"
+
+
+def _resolve_safe_asset_path(asset_filename: str) -> Path:
+    """Resolve `asset_filename` inside the assets/ dir, rejecting path traversal."""
+    if not asset_filename or not isinstance(asset_filename, str):
+        raise ValueError("asset_filename is required")
+    # Strip surrounding whitespace / quotes (defensive — AI sometimes wraps args)
+    name = asset_filename.strip().strip('"').strip("'")
+    if not name:
+        raise ValueError("asset_filename is empty")
+    # Reject anything that smells like a traversal or absolute path
+    if name.startswith(("/", "\\")) or ":" in name or ".." in name.replace("\\", "/").split("/"):
+        raise ValueError(f"asset_filename must be a plain filename (no path traversal): {asset_filename!r}")
+    candidate = (_ASSETS_DIR / name).resolve()
+    # Final containment check: candidate must live inside the assets dir
+    try:
+        candidate.relative_to(_ASSETS_DIR)
+    except ValueError:
+        raise ValueError(f"asset_filename resolves outside assets dir: {asset_filename!r}")
+    if not candidate.exists() or not candidate.is_file():
+        raise FileNotFoundError(f"Asset not found: {name} (looked in {_ASSETS_DIR})")
+    return candidate
+
+
+def _upload_local_asset_to_drive(sa_info: dict[str, Any] | None, asset_filename: str) -> dict[str, str]:
+    """Upload a local asset to the service account's Drive, share it publicly,
+    and return {file_id, url}. Caches by (filename, mtime) to avoid re-uploads.
+
+    Raises ValueError on bad asset name, FileNotFoundError on missing file,
+    RuntimeError on Drive errors (caller logs and degrades gracefully).
+    """
+    if sa_info is None:
+        raise RuntimeError("Service account credentials unavailable — cannot upload to Drive")
+
+    path = _resolve_safe_asset_path(asset_filename)
+    mtime_ns = path.stat().st_mtime_ns
+    cache_key = (path.name, mtime_ns)
+    cached = _ASSET_DRIVE_CACHE.get(cache_key)
+    if cached:
+        logger.debug("upload_asset: cache hit for %s", path.name)
+        return cached
+
+    mime_type, _ = mimetypes.guess_type(path.name)
+    if not mime_type or not mime_type.startswith(_ALLOWED_IMAGE_MIME_PREFIX):
+        raise ValueError(f"Asset is not a recognised image (mime={mime_type!r}): {path.name}")
+
+    try:
+        from googleapiclient.http import MediaFileUpload
+    except ImportError as exc:
+        raise RuntimeError("googleapiclient.http is required for Drive uploads") from exc
+
+    # Lazy import keeps this module's top-level imports lean.
+    from domains.oppm.google_sheets.credentials import _build_drive_service
+
+    drive = _build_drive_service(sa_info)
+    media = MediaFileUpload(str(path), mimetype=mime_type, resumable=False)
+    created = drive.files().create(
+        body={"name": path.name},
+        media_body=media,
+        fields="id",
+        supportsAllDrives=True,
+    ).execute()
+    file_id = created["id"]
+
+    # Make publicly readable so =IMAGE() can fetch it from Google's servers
+    drive.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "reader"},
+        fields="id",
+        supportsAllDrives=True,
+    ).execute()
+
+    public_url = f"https://drive.google.com/uc?export=view&id={file_id}"
+    result = {"file_id": file_id, "url": public_url, "asset_filename": path.name, "mime_type": mime_type}
+    _ASSET_DRIVE_CACHE[cache_key] = result
+    logger.info("upload_asset: %s → %s", path.name, file_id)
+    return result
 
 # ── A1 notation helpers ──
 
@@ -500,44 +599,93 @@ _SCAFFOLD_HEADER_BLACK = "#000000"
 _SCAFFOLD_TASK_GRAY = "#CCCCCC"
 _SCAFFOLD_HEADER_BG = "#E8E8E8"
 _SCAFFOLD_DEFAULT_TASK_COUNT = 30
-_SCAFFOLD_BOTTOM_MATRIX_ROWS = 6  # rows under task area for cost / forecast
 _SCAFFOLD_TASK_ROW_HEIGHT = 21
+_SCAFFOLD_MATRIX_DATE_ROW_HEIGHT = 100  # top matrix row holds rotated date headers — needs vertical room
+_SCAFFOLD_MATRIX_BODY_ROW_HEIGHT = 30   # body matrix rows (X-pattern / image area)
+_SCAFFOLD_MATRIX_HEIGHT_ROWS = 9        # rows in the bottom cross-reference matrix
 
 
 def _build_scaffold_actions(params: dict) -> list[dict]:
     """Build the deterministic action list for a full OPPM form scaffold.
 
-    Returns a list of {action, params} dicts that, when executed in order, produce
-    a complete, authentic-looking OPPM form. Order matters: clear → values →
-    merges → dimensions → backgrounds → borders (specific overrides last) →
-    fonts → freeze.
+    Layout follows the authentic OPPM PDF reference (Clark Campbell):
+      Row 1            blank spacer
+      Row 2            split: "Project Leader: ..." (A:N) | "Project Name: ..." (O:AL)
+      Rows 3-4         MERGED A3:AL4 — multi-line block: Objective + Deliverable + Start + Deadline
+      Row 5            sub-headers: "Sub objective" (A:F) | "Major Tasks (Deadline)" (H:I)
+                       | "Project Completed By: ..." (J:AI) | "Owner / Priority" (AJ:AL)
+      Rows 6 .. 5+N    task rows, numbered 1..N in column H (default N=30)
+      R_PEOPLE         "# People working on the project:" full-width row
+      R_MATRIX         9-row bottom matrix:
+                         A:F  rotated sub-objective headers (1..6 with placeholder labels)
+                         I:AI X-pattern labels (Major Tasks / Target Dates / Sub Objectives /
+                              Costs / Summary & Forecast) + rotated week-date headers in J:U
+                         AJ:AL rotated owner-name placeholders
+      R_SUMMARY        Summary / Forecast / Risk section:
+                         G column rotated section labels (Summary Deliverable, Forecast, Risk)
+                         I:AL placeholder text rows for each section item
+
+    All cells are atomically valid — caller can fill any of them later.
     """
+    from datetime import date as _d, timedelta as _td
+
     title = str(params.get("title") or "[Project Name]")
     leader = str(params.get("leader") or "[Leader Name]")
     objective = str(params.get("objective") or "[Project Objective]")
+    deliverable = str(params.get("deliverable") or "[Deliverable Output]")
     start_date = str(params.get("start_date") or "[Start Date]")
     deadline = str(params.get("deadline") or "[Deadline]")
     weeks = params.get("completed_by_weeks")
     weeks_label = f"{int(weeks)} weeks" if weeks else "N weeks"
-    task_count = int(params.get("task_count") or _SCAFFOLD_DEFAULT_TASK_COUNT)
-    task_count = max(1, min(30, task_count))
+    task_count = max(1, min(30, int(params.get("task_count") or _SCAFFOLD_DEFAULT_TASK_COUNT)))
+    # Optional public image URL for the X-pattern matrix center (replaces the
+    # five text labels Major Tasks / Target Dates / Sub Objectives / Costs /
+    # Summary & Forecast with an embedded image). Must be publicly fetchable
+    # by Google Sheets — typically a Google Drive shared URL of the form
+    # https://drive.google.com/uc?export=view&id=FILE_ID.
+    matrix_image_url = params.get("matrix_image_url")
+    matrix_image_url = str(matrix_image_url).strip() if matrix_image_url else None
 
-    last_task_row = 5 + task_count                        # tasks occupy rows 6..last_task_row
-    matrix_top = last_task_row + 1                        # bottom matrix starts here
-    matrix_bottom = matrix_top + _SCAFFOLD_BOTTOM_MATRIX_ROWS - 1
+    # Row positions
+    LAST_TASK = 5 + task_count
+    R_PEOPLE = LAST_TASK + 1
+    R_MATRIX_TOP = R_PEOPLE + 1
+    R_MATRIX_BOTTOM = R_MATRIX_TOP + _SCAFFOLD_MATRIX_HEIGHT_ROWS - 1
+    R_SUMMARY_START = R_MATRIX_BOTTOM + 1
+    R_SUMMARY_DELIV_END = R_SUMMARY_START + 3   # 4 deliverable rows
+    R_FORECAST_START = R_SUMMARY_DELIV_END + 1
+    R_FORECAST_END = R_FORECAST_START + 1       # 2 forecast rows
+    R_RISK_START = R_FORECAST_END + 1
+    R_RISK_END = R_RISK_START + 1               # 2 risk rows
+    R_FORM_BOTTOM = R_RISK_END                   # last form row
+
+    # Try to compute real week-date labels if start_date is parseable
+    start_dt: _d | None = None
+    if start_date and start_date != "[Start Date]":
+        try:
+            start_dt = _d.fromisoformat(start_date)
+        except ValueError:
+            start_dt = None
 
     a: list[dict] = []
 
     # ── 1. Clear everything (also resets row heights + standard col widths) ──
     a.append({"action": "clear_sheet", "params": {}})
 
-    # ── 2. Header content (rows 1-5) ──
-    a.append({"action": "set_value", "params": {"range": "A1", "value": title}})
-    a.append({"action": "set_value", "params": {"range": "A2", "value": f"Project Leader: {leader}    |    Project: {title}"}})
-    a.append({"action": "set_value", "params": {"range": "A3", "value": f"Project Objective: {objective}"}})
-    a.append({"action": "set_value", "params": {"range": "A4", "value": f"Start Date: {start_date}    |    Deadline: {deadline}"}})
-    # Row 5 — split into the four classic OPPM sub-headers (Objectives | Major Tasks | Project Completed By | Owner / Priority)
-    a.append({"action": "set_value", "params": {"range": "A5", "value": "Objectives"}})
+    # ── 2. Header content ──
+    # Row 2: Project Leader (left) | Project Name (right)
+    a.append({"action": "set_value", "params": {"range": "A2", "value": f"Project Leader: {leader}"}})
+    a.append({"action": "set_value", "params": {"range": "O2", "value": f"Project Name: {title}"}})
+    # Rows 3-4 (merged): multi-line metadata block
+    metadata_block = (
+        f"Project Objective: {objective}\n"
+        f"Deliverable Output: {deliverable}\n"
+        f"Start Date: {start_date}\n"
+        f"Deadline: {deadline}"
+    )
+    a.append({"action": "set_value", "params": {"range": "A3", "value": metadata_block}})
+    # Row 5: 4 sub-headers
+    a.append({"action": "set_value", "params": {"range": "A5", "value": "Sub objective"}})
     a.append({"action": "set_value", "params": {"range": "H5", "value": "Major Tasks (Deadline)"}})
     a.append({"action": "set_value", "params": {"range": "J5", "value": f"Project Completed By: {weeks_label}"}})
     a.append({"action": "set_value", "params": {"range": "AJ5", "value": "Owner / Priority"}})
@@ -546,91 +694,146 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     for i in range(1, task_count + 1):
         a.append({"action": "set_value", "params": {"range": f"H{5 + i}", "value": str(i)}})
 
-    # ── 4. Bottom matrix labels ──
-    # Row matrix_top: month-label timeline header (Month 01..Month 12 across J..U)
-    for m in range(1, 13):
-        col = _col_index_to_letters(9 + m)  # J=10 .. U=21
-        a.append({"action": "set_value", "params": {"range": f"{col}{matrix_top}", "value": f"Month {m:02d}"}})
-    # Owner header labels in AJ/AK/AL on matrix_top
+    # ── 4. # People working row ──
+    a.append({"action": "set_value", "params": {"range": f"A{R_PEOPLE}", "value": "# People working on the project:"}})
+
+    # ── 5. Bottom matrix content ──
+    # 5a. Sub-objective rotated headers in A:F
+    sub_obj_placeholders = [
+        "1 Sub-Objective 1", "2 Sub-Objective 2", "3 Sub-Objective 3",
+        "4 Sub-Objective 4", "5 Sub-Objective 5", "6 Sub-Objective 6",
+    ]
+    for col_idx, label in enumerate(sub_obj_placeholders, start=1):
+        col_letter = _col_index_to_letters(col_idx)
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_TOP}", "value": label}})
+
+    # 5b. X-pattern center area — ALWAYS leave it as one big merged empty cell
+    #     ready for image insertion. If an explicit matrix_image_url was given,
+    #     drop the =IMAGE() formula in. Otherwise the cell stays blank — the
+    #     user can manually insert their X-pattern diagram via Google Sheets'
+    #     "Insert → Image → Image in cell" UI. We deliberately do NOT write
+    #     "Major Tasks / Target Dates / Sub Objectives / Costs / Summary &
+    #     Forecast" text labels because they look messy and clutter the area
+    #     where the user wants their actual diagram.
+    if matrix_image_url:
+        safe_url = matrix_image_url.replace('"', '""')
+        a.append({"action": "set_value", "params": {
+            "range": f"H{R_MATRIX_TOP + 1}",
+            "value": f'=IMAGE("{safe_url}",1)',
+        }})
+
+    # 5c. Week-date rotated headers in J:U (12 weekly placeholders)
+    for w in range(12):
+        col_letter = _col_index_to_letters(10 + w)  # J=10..U=21
+        if start_dt:
+            label = (start_dt + _td(weeks=w)).strftime("%d-%b-%Y")
+        else:
+            label = f"Week {w + 1}"
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_TOP}", "value": label}})
+
+    # 5d. Owner-name rotated placeholders in AJ/AK/AL
+    for idx, col_letter in enumerate(("AJ", "AK", "AL"), start=1):
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_TOP}", "value": f"Team Member {idx}"}})
+
+    # ── 6. Summary / Forecast / Risk section ──
+    # Rotated section labels in column G
+    a.append({"action": "set_value", "params": {"range": f"G{R_SUMMARY_START}", "value": "Summary Deliverable"}})
+    a.append({"action": "set_value", "params": {"range": f"G{R_FORECAST_START}", "value": "Forecast"}})
+    a.append({"action": "set_value", "params": {"range": f"G{R_RISK_START}", "value": "Risk"}})
+    # Placeholder text rows
+    for i in range(4):
+        a.append({"action": "set_value", "params": {"range": f"I{R_SUMMARY_START + i}", "value": f"Deliverable item {i + 1}: ..."}})
+    for i in range(2):
+        a.append({"action": "set_value", "params": {"range": f"I{R_FORECAST_START + i}", "value": f"Forecast: ..."}})
+    for i in range(2):
+        a.append({"action": "set_value", "params": {"range": f"I{R_RISK_START + i}", "value": f"Risk: ..."}})
+
+    # ── 7. Merges ──
+    # Row 2 split
+    a.append({"action": "merge_cells", "params": {"range": "A2:N2"}})
+    a.append({"action": "merge_cells", "params": {"range": "O2:AL2"}})
+    # Rows 3-4 metadata block
+    a.append({"action": "merge_cells", "params": {"range": "A3:AL4"}})
+    # Row 5 sub-headers
+    a.append({"action": "merge_cells", "params": {"range": "A5:F5"}})
+    a.append({"action": "merge_cells", "params": {"range": "H5:I5"}})
+    a.append({"action": "merge_cells", "params": {"range": "J5:AI5"}})
+    a.append({"action": "merge_cells", "params": {"range": "AJ5:AL5"}})
+    # # People row (full width)
+    a.append({"action": "merge_cells", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}"}})
+    # Bottom matrix sub-objective columns: each column merged across full matrix height for rotated text
+    for col_idx in range(1, 7):
+        col_letter = _col_index_to_letters(col_idx)
+        a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_TOP}:{col_letter}{R_MATRIX_BOTTOM}"}})
+    # Bottom matrix owner columns: each merged across full matrix height
     for col_letter in ("AJ", "AK", "AL"):
-        a.append({"action": "set_value", "params": {"range": f"{col_letter}{matrix_top}", "value": "Owner"}})
-    # Cross-reference labels (left side) — Major Tasks / Objectives / Costs / Summary & Forecast
-    a.append({"action": "set_value", "params": {"range": f"A{matrix_top}", "value": "Major Tasks"}})
-    a.append({"action": "set_value", "params": {"range": f"A{matrix_top + 1}", "value": "Objectives"}})
-    a.append({"action": "set_value", "params": {"range": f"A{matrix_top + 3}", "value": "Costs"}})
-    a.append({"action": "set_value", "params": {"range": f"A{matrix_bottom}", "value": "Summary & Forecast"}})
-    # Cost area: Capital / Expenses / Other rows with placeholder values (column V/W)
-    cost_labels = (("Capital", matrix_top + 1), ("Expenses", matrix_top + 2), ("Other", matrix_top + 3))
-    for label, row in cost_labels:
-        a.append({"action": "set_value", "params": {"range": f"V{row}", "value": label}})
-        a.append({"action": "set_value", "params": {"range": f"W{row}", "value": "0"}})
-    # Legend in bottom-right
-    a.append({"action": "set_value", "params": {"range": f"AI{matrix_bottom}", "value": "■ Expended    ■ Budgeted"}})
+        a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_TOP}:{col_letter}{R_MATRIX_BOTTOM}"}})
+    # Bottom matrix center area — ALWAYS merge H..AI from row matrix_top+1
+    # down into one big rectangle. Either =IMAGE() fills it, or the user
+    # drops their X-pattern diagram in via "Insert → Image → Image in cell".
+    a.append({"action": "merge_cells", "params": {"range": f"H{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}"}})
+    # Summary/Forecast/Risk: rotated G-column labels span their section rows
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_SUMMARY_START}:G{R_SUMMARY_DELIV_END}"}})
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_FORECAST_START}:G{R_FORECAST_END}"}})
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_RISK_START}:G{R_RISK_END}"}})
+    # Each summary/forecast/risk text row spans I:AL
+    for r in range(R_SUMMARY_START, R_SUMMARY_DELIV_END + 1):
+        a.append({"action": "merge_cells", "params": {"range": f"I{r}:AL{r}"}})
+    for r in range(R_FORECAST_START, R_FORECAST_END + 1):
+        a.append({"action": "merge_cells", "params": {"range": f"I{r}:AL{r}"}})
+    for r in range(R_RISK_START, R_RISK_END + 1):
+        a.append({"action": "merge_cells", "params": {"range": f"I{r}:AL{r}"}})
 
-    # ── 5. Merges ──
-    # Header rows 1-4: full-width single merge each
-    for row in (1, 2, 3, 4):
-        a.append({"action": "merge_cells", "params": {"range": f"A{row}:AL{row}"}})
-    # Row 5: split into 4 grouped sub-headers (matches the authentic OPPM look)
-    a.append({"action": "merge_cells", "params": {"range": "A5:F5"}})       # Objectives
-    a.append({"action": "merge_cells", "params": {"range": "H5:I5"}})       # Major Tasks
-    a.append({"action": "merge_cells", "params": {"range": "J5:AI5"}})      # Project Completed By
-    a.append({"action": "merge_cells", "params": {"range": "AJ5:AL5"}})     # Owner / Priority
+    # ── 8. Row heights ──
+    a.append({"action": "set_row_height", "params": {"start_index": 3, "end_index": 4, "height": 28}})
+    a.append({"action": "set_row_height", "params": {"start_index": 6, "end_index": LAST_TASK, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
+    # Top matrix row carries rotated week-date labels — needs lots of vertical
+    # room or "16-Feb-2026" gets clipped to just "026" at the cell edge.
+    a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_TOP, "end_index": R_MATRIX_TOP, "height": _SCAFFOLD_MATRIX_DATE_ROW_HEIGHT}})
+    # Remaining matrix rows (the X-pattern / image area)
+    a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_TOP + 1, "end_index": R_MATRIX_BOTTOM, "height": _SCAFFOLD_MATRIX_BODY_ROW_HEIGHT}})
 
-    # ── 6. Row heights (task rows 21px) ──
-    a.append({"action": "set_row_height", "params": {"start_index": 6, "end_index": last_task_row, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
-
-    # ── 7. Backgrounds ──
+    # ── 9. Backgrounds ──
     a.append({"action": "set_background", "params": {"range": "A5:AL5", "color": _SCAFFOLD_HEADER_BG}})
+    a.append({"action": "set_background", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}", "color": _SCAFFOLD_HEADER_BG}})
 
-    # ── 8. Borders — apply LARGE FILLS first, then SPECIFIC OVERRIDES on top ──
-    # 8a. Header rows 1-5 → SOLID black grid
+    # ── 10. Borders — large fills first, then specific overrides on top ──
+    # 10a. Header rows 1-5 → black grid
     a.append({"action": "set_border", "params": {"range": "A1:AL5", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
-    # 8b. Task area sub-objectives + task number/title (A..I) → SOLID gray grid
-    a.append({"action": "set_border", "params": {"range": f"A6:I{last_task_row}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
-    # 8c. Task area owners (AJ..AL) → SOLID gray grid
-    a.append({"action": "set_border", "params": {"range": f"AJ6:AL{last_task_row}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
-    # 8d. Bottom matrix → SOLID black grid
-    a.append({"action": "set_border", "params": {"range": f"A{matrix_top}:AL{matrix_bottom}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
-    # 8e. Vertical thick dividers — column F (sub-obj→tasks), I (tasks→timeline), AI (timeline→owners)
-    #     Use style=NONE main + right-only override so we don't disturb other sides we just set.
+    # 10b. Task area sub-objectives + numbers/titles (A:I) → gray grid
+    a.append({"action": "set_border", "params": {"range": f"A6:I{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
+    # 10c. Task area owners (AJ:AL) → gray grid
+    a.append({"action": "set_border", "params": {"range": f"AJ6:AL{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
+    # 10d. # People row → black border
+    a.append({"action": "set_border", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # 10e. Bottom matrix → black grid
+    a.append({"action": "set_border", "params": {"range": f"A{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # 10f. Summary/Forecast/Risk section → black grid
+    a.append({"action": "set_border", "params": {"range": f"G{R_SUMMARY_START}:AL{R_RISK_END}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # 10g. Vertical thick dividers (F, I, AI on the right) — applied through task area only
     for col in ("F", "I", "AI"):
         a.append({
             "action": "set_border",
             "params": {
-                "range": f"{col}1:{col}{last_task_row}",
+                "range": f"{col}1:{col}{LAST_TASK}",
                 "style": "NONE",
-                "right_style": "SOLID_THICK",
-                "right_color": _SCAFFOLD_HEADER_BLACK,
-                "right_width": 3,
+                "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
             },
         })
-    # 8f. Horizontal thick dividers — bottom of row 5 (header→tasks), bottom of last task row (tasks→matrix)
+    # 10h. Horizontal thick dividers
+    a.append({"action": "set_border", "params": {"range": "A5:AL5", "style": "NONE",
+                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+    a.append({"action": "set_border", "params": {"range": f"A{LAST_TASK}:AL{LAST_TASK}", "style": "NONE",
+                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+    a.append({"action": "set_border", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}", "style": "NONE",
+                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+    a.append({"action": "set_border", "params": {"range": f"A{R_MATRIX_BOTTOM}:AL{R_MATRIX_BOTTOM}", "style": "NONE",
+                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+    # 10i. Outer thick frame around the whole form (rows 1..R_FORM_BOTTOM)
     a.append({
         "action": "set_border",
         "params": {
-            "range": "A5:AL5",
-            "style": "NONE",
-            "bottom_style": "SOLID_THICK",
-            "bottom_color": _SCAFFOLD_HEADER_BLACK,
-            "bottom_width": 3,
-        },
-    })
-    a.append({
-        "action": "set_border",
-        "params": {
-            "range": f"A{last_task_row}:AL{last_task_row}",
-            "style": "NONE",
-            "bottom_style": "SOLID_THICK",
-            "bottom_color": _SCAFFOLD_HEADER_BLACK,
-            "bottom_width": 3,
-        },
-    })
-    # 8g. Outer thick frame around the whole form
-    a.append({
-        "action": "set_border",
-        "params": {
-            "range": f"A1:AL{matrix_bottom}",
+            "range": f"A1:AL{R_FORM_BOTTOM}",
             "style": "NONE",
             "top_style": "SOLID_THICK", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 3,
             "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3,
@@ -639,39 +842,63 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         },
     })
 
-    # ── 9. Fonts, bold, alignment, wrap ──
-    # Title row
-    a.append({"action": "set_font_size", "params": {"range": "A1:AL1", "size": 14}})
-    a.append({"action": "set_bold", "params": {"range": "A1:AL1", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": "A1:AL1", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Leader row
+    # ── 11. Fonts, alignment, rotation ──
+    # Row 2 leader/name
     a.append({"action": "set_font_size", "params": {"range": "A2:AL2", "size": 11}})
     a.append({"action": "set_bold", "params": {"range": "A2:AL2", "bold": True}})
-    # Objective + dates
+    a.append({"action": "set_alignment", "params": {"range": "A2:AL2", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Rows 3-4 metadata (multi-line, top-left, wrap)
     a.append({"action": "set_font_size", "params": {"range": "A3:AL4", "size": 10}})
-    # Column headers (row 5)
+    a.append({"action": "set_bold", "params": {"range": "A3:AL4", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": "A3:AL4", "horizontal": "LEFT", "vertical": "TOP"}})
+    a.append({"action": "set_text_wrap", "params": {"range": "A3:AL4", "mode": "WRAP"}})
+    # Row 5 sub-headers
     a.append({"action": "set_font_size", "params": {"range": "A5:AL5", "size": 10}})
     a.append({"action": "set_bold", "params": {"range": "A5:AL5", "bold": True}})
     a.append({"action": "set_alignment", "params": {"range": "A5:AL5", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     # Task numbers (column H)
-    a.append({"action": "set_font_size", "params": {"range": f"H6:H{last_task_row}", "size": 10}})
-    a.append({"action": "set_bold", "params": {"range": f"H6:H{last_task_row}", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": f"H6:H{last_task_row}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Task titles (column I) — left aligned, CLIP wrap to preserve row height
-    a.append({"action": "set_font_size", "params": {"range": f"I6:I{last_task_row}", "size": 10}})
-    a.append({"action": "set_alignment", "params": {"range": f"I6:I{last_task_row}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
-    a.append({"action": "set_text_wrap", "params": {"range": f"I6:I{last_task_row}", "mode": "CLIP"}})
-    # Sub-objective check columns (A-F)
-    a.append({"action": "set_alignment", "params": {"range": f"A6:F{last_task_row}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Owner columns (AJ-AL)
-    a.append({"action": "set_alignment", "params": {"range": f"AJ6:AL{last_task_row}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Bottom matrix header row labels (centered, bold)
-    a.append({"action": "set_bold", "params": {"range": f"A{matrix_top}:AL{matrix_top}", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": f"J{matrix_top}:U{matrix_top}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_alignment", "params": {"range": f"AJ{matrix_top}:AL{matrix_top}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_alignment", "params": {"range": f"A{matrix_top}:I{matrix_bottom}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"H6:H{LAST_TASK}", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": f"H6:H{LAST_TASK}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"H6:H{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Task titles (column I) — left aligned, CLIP to preserve row height
+    a.append({"action": "set_font_size", "params": {"range": f"I6:I{LAST_TASK}", "size": 10}})
+    a.append({"action": "set_alignment", "params": {"range": f"I6:I{LAST_TASK}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_text_wrap", "params": {"range": f"I6:I{LAST_TASK}", "mode": "CLIP"}})
+    # Sub-objective check columns (A-F) and owner columns (AJ-AL)
+    a.append({"action": "set_alignment", "params": {"range": f"A6:F{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_alignment", "params": {"range": f"AJ6:AL{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # # People row
+    a.append({"action": "set_font_size", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"A{R_PEOPLE}:AL{R_PEOPLE}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    # Bottom matrix sub-objective columns (A-F): rotated 90° + center + small font
+    a.append({"action": "set_text_rotation", "params": {"range": f"A{R_MATRIX_TOP}:F{R_MATRIX_BOTTOM}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"A{R_MATRIX_TOP}:F{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"A{R_MATRIX_TOP}:F{R_MATRIX_BOTTOM}", "size": 9}})
+    a.append({"action": "set_bold", "params": {"range": f"A{R_MATRIX_TOP}:F{R_MATRIX_BOTTOM}", "bold": True}})
+    # Bottom matrix date/timeline columns (J-AI): rotated 90° + center + small font
+    a.append({"action": "set_text_rotation", "params": {"range": f"J{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"J{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"J{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", "size": 9}})
+    # Bottom matrix owner columns (AJ-AL): rotated 90° + center
+    a.append({"action": "set_text_rotation", "params": {"range": f"AJ{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"AJ{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"AJ{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "size": 9}})
+    a.append({"action": "set_bold", "params": {"range": f"AJ{R_MATRIX_TOP}:AL{R_MATRIX_BOTTOM}", "bold": True}})
+    # Bottom matrix center area (X-pattern labels): bold + center
+    a.append({"action": "set_bold", "params": {"range": f"H{R_MATRIX_TOP}:AI{R_MATRIX_BOTTOM}", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"H{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Summary section: rotated G-column labels
+    a.append({"action": "set_text_rotation", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_bold", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "bold": True}})
+    a.append({"action": "set_font_size", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "size": 9}})
+    # Summary text rows: smaller font, left-align, wrap
+    a.append({"action": "set_font_size", "params": {"range": f"I{R_SUMMARY_START}:AL{R_RISK_END}", "size": 9}})
+    a.append({"action": "set_alignment", "params": {"range": f"I{R_SUMMARY_START}:AL{R_RISK_END}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_text_wrap", "params": {"range": f"I{R_SUMMARY_START}:AL{R_RISK_END}", "mode": "WRAP"}})
 
-    # ── 10. Freeze header rows ──
+    # ── 12. Freeze header rows ──
     a.append({"action": "freeze_rows", "params": {"row_count": 5}})
 
     return a
@@ -792,6 +1019,22 @@ def _scaffold_action_to_request(action: str, params: dict, sheet_id: int) -> dic
             }
         }
 
+    if action == "set_text_rotation":
+        if params.get("vertical"):
+            rotation = {"vertical": True}
+            fields = "userEnteredFormat.textRotation.vertical"
+        else:
+            angle = max(-90, min(90, int(params.get("angle", 90))))
+            rotation = {"angle": angle}
+            fields = "userEnteredFormat.textRotation.angle"
+        return {
+            "repeatCell": {
+                "range": _range_to_grid_range(str(params["range"]), sheet_id),
+                "cell": {"userEnteredFormat": {"textRotation": rotation}},
+                "fields": fields,
+            }
+        }
+
     return None
 
 
@@ -801,20 +1044,42 @@ def _exec_scaffold_oppm_form(
     params: dict,
     sheet_id: int,
     sheet_title: str,
+    *,
+    sa_info: dict[str, Any] | None = None,
 ) -> dict:
     """Execute the full OPPM form scaffold using batched API calls.
 
     Sequence:
-      1. clear_sheet (already a multi-call routine — runs first so the values
+      1. (optional) Resolve matrix_image_asset → upload to Drive → use as matrix_image_url
+      2. clear_sheet (already a multi-call routine — runs first so the values
          and formatting batches operate on a clean slate)
-      2. ONE values.batchUpdate carrying every set_value sub-action
-      3. ONE spreadsheets.batchUpdate carrying every formatting/structural request
+      3. ONE values.batchUpdate carrying every set_value sub-action
+      4. ONE spreadsheets.batchUpdate carrying every formatting/structural request
          (chunked at 200 requests per call to stay under API limits)
 
-    This collapses ~107 sequential round-trips down to ~3 round-trips so the
+    This collapses ~150 sequential round-trips down to ~3 round-trips so the
     full scaffold completes well within typical gateway timeouts (~60s).
     """
-    sub_actions = _build_scaffold_actions(params)
+    # Pre-step — if the caller supplied a local asset filename for the matrix
+    # center, upload it to the SA's Drive now and translate to a public URL so
+    # _build_scaffold_actions sees it as `matrix_image_url`.
+    matrix_image_asset = params.get("matrix_image_asset")
+    upload_summary: dict[str, Any] | None = None
+    effective_params = dict(params)
+    if matrix_image_asset and not effective_params.get("matrix_image_url"):
+        try:
+            upload_summary = _upload_local_asset_to_drive(sa_info, str(matrix_image_asset))
+            effective_params["matrix_image_url"] = upload_summary["url"]
+            logger.info(
+                "scaffold_oppm_form: embedded matrix_image_asset=%s as %s",
+                matrix_image_asset, upload_summary["url"],
+            )
+        except (ValueError, FileNotFoundError, RuntimeError) as e:
+            # Non-fatal — fall back to text labels and surface the error to caller
+            logger.warning("scaffold_oppm_form: matrix_image_asset upload failed: %s", e)
+            upload_summary = {"error": str(e), "asset_filename": str(matrix_image_asset)}
+
+    sub_actions = _build_scaffold_actions(effective_params)
 
     value_data: list[dict] = []
     format_requests: list[dict] = []
@@ -886,6 +1151,8 @@ def _exec_scaffold_oppm_form(
         "api_calls": executed_groups,
         "errors": errors[:5],
     }
+    if upload_summary is not None:
+        summary["matrix_image_upload"] = upload_summary
     logger.info("scaffold_oppm_form: %s", summary)
     return summary
 
@@ -1153,6 +1420,102 @@ def _exec_set_font_size(service: Any, spreadsheet_id: str, params: dict, sheet_i
                             }
                         },
                         "fields": "userEnteredFormat.textFormat.fontSize",
+                    }
+                }
+            ]
+        },
+    ).execute()
+
+
+def _exec_insert_image(service: Any, spreadsheet_id: str, params: dict, sheet_title: str) -> None:
+    """Insert an image into a cell via Google Sheets' =IMAGE() formula.
+
+    The URL MUST be publicly fetchable from Google's servers — localhost and
+    auth-protected URLs will not work. For private images, upload to Google
+    Drive and share publicly, then use the URL form:
+      https://drive.google.com/uc?export=view&id=FILE_ID
+
+    params:
+      range: A1 cell reference (or merged range top-left)
+      url:   public HTTPS URL of the image
+      mode:  1 (default — fit, keep aspect)
+             2 (stretch to fill cell — distorts)
+             3 (original size — may overflow)
+    """
+    range_str = str(params["range"])
+    url = str(params["url"])
+    mode = int(params.get("mode", 1))
+    # Strip a single pair of double-quotes from URL (defensive — AI sometimes wraps it)
+    url = url.strip().strip('"').strip("'")
+    # Escape any embedded double quotes for the formula
+    safe_url = url.replace('"', '""')
+    formula = f'=IMAGE("{safe_url}",{mode})'
+    # Use USER_ENTERED so the formula evaluates instead of being stored literally
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{sheet_title}'!{range_str}",
+        valueInputOption="USER_ENTERED",
+        body={"values": [[formula]]},
+    ).execute()
+
+
+def _exec_upload_asset_to_drive(
+    service: Any,
+    spreadsheet_id: str,
+    params: dict,
+    sheet_title: str,
+    *,
+    sa_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Upload a local image asset to the SA's Drive (publicly viewable) and
+    optionally embed it at a target range via =IMAGE().
+
+    params:
+      asset_filename: filename inside the project's assets/ folder (e.g. "OPPM NHRS.png")
+      range:          optional A1 cell to write =IMAGE(url) into after upload
+      mode:           optional IMAGE() display mode (1=fit, 2=stretch, 3=original) — default 1
+    """
+    asset_filename = str(params.get("asset_filename", "")).strip()
+    if not asset_filename:
+        raise ValueError("upload_asset_to_drive: asset_filename is required")
+
+    upload = _upload_local_asset_to_drive(sa_info, asset_filename)
+    target_range = params.get("range")
+    if target_range:
+        mode = int(params.get("mode", 1))
+        _exec_insert_image(
+            service,
+            spreadsheet_id,
+            {"range": str(target_range), "url": upload["url"], "mode": mode},
+            sheet_title,
+        )
+        upload["embedded_at"] = str(target_range)
+    return upload
+
+
+def _exec_set_text_rotation(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
+    """Rotate text in a range. Pass `angle` (degrees, -90..90) OR `vertical: true`
+    for stacked text. Used heavily by the OPPM bottom matrix headers.
+    """
+    range_str = str(params["range"])
+    if params.get("vertical"):
+        rotation = {"vertical": True}
+        fields = "userEnteredFormat.textRotation.vertical"
+    else:
+        angle = int(params.get("angle", 90))
+        # Sheets API accepts -90..90
+        angle = max(-90, min(90, angle))
+        rotation = {"angle": angle}
+        fields = "userEnteredFormat.textRotation.angle"
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": _range_to_grid_range(range_str, sheet_id),
+                        "cell": {"userEnteredFormat": {"textRotation": rotation}},
+                        "fields": fields,
                     }
                 }
             ]
@@ -1430,7 +1793,7 @@ SUPPORTED_ACTIONS = frozenset({
     "set_bold", "set_text_color", "set_note",
     "merge_cells", "unmerge_cells",
     "set_formula", "set_number_format", "set_alignment",
-    "set_font_size", "set_font_family",
+    "set_font_size", "set_font_family", "set_text_rotation", "insert_image", "upload_asset_to_drive",
     "set_row_height", "set_column_width",
     "freeze_rows", "freeze_columns",
     "set_conditional_formatting", "set_data_validation",
@@ -1445,11 +1808,17 @@ def execute_actions(
     service: Any,
     spreadsheet_id: str,
     actions: list[dict],
+    *,
+    sa_info: dict[str, Any] | None = None,
 ) -> list[dict]:
     """Execute a list of OPPM AI sheet actions synchronously.
 
     Returns a list of result dicts: {action, success, error}.
     Each action is executed independently; failures do not abort the sequence.
+
+    sa_info is the service account credential dict — passed through to actions
+    that need to build a Drive client on demand (e.g. upload_asset_to_drive,
+    scaffold_oppm_form when matrix_image_asset is supplied).
     """
     sheet_title = _SHEET_NAME_FROM_PARAMS
     try:
@@ -1523,6 +1892,10 @@ def execute_actions(
                 _exec_set_font_size(service, spreadsheet_id, params, sheet_id)
             elif action_name == "set_font_family":
                 _exec_set_font_family(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "set_text_rotation":
+                _exec_set_text_rotation(service, spreadsheet_id, params, sheet_id)
+            elif action_name == "insert_image":
+                _exec_insert_image(service, spreadsheet_id, params, sheet_title)
             elif action_name == "set_row_height":
                 _exec_set_row_height(service, spreadsheet_id, params, sheet_id)
             elif action_name == "set_column_width":
@@ -1544,8 +1917,12 @@ def execute_actions(
             elif action_name == "clear_sheet":
                 _exec_clear_sheet(service, spreadsheet_id, params, sheet_id)
             elif action_name == "scaffold_oppm_form":
-                summary = _exec_scaffold_oppm_form(service, spreadsheet_id, params, sheet_id, sheet_title)
+                summary = _exec_scaffold_oppm_form(service, spreadsheet_id, params, sheet_id, sheet_title, sa_info=sa_info)
                 results.append({"action": action_name, "success": True, "error": None, "summary": summary})
+                continue
+            elif action_name == "upload_asset_to_drive":
+                upload = _exec_upload_asset_to_drive(service, spreadsheet_id, params, sheet_title, sa_info=sa_info)
+                results.append({"action": action_name, "success": True, "error": None, "summary": upload})
                 continue
             results.append({"action": action_name, "success": True, "error": None})
         except Exception as e:

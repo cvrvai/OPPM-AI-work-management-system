@@ -13,6 +13,12 @@ _SPREADSHEET_ID_RE = re.compile(r"^[a-zA-Z0-9-_]{20,}$")
 _GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.readonly",
+    # drive.file lets the service account CREATE files in its own Drive and
+    # manage permissions on those files. Required for uploading user-supplied
+    # images (e.g. OPPM matrix-center diagram) that the sheet then embeds via
+    # =IMAGE(). Narrower than full drive scope — SA can only touch files it
+    # owns, not the user's other Drive content.
+    "https://www.googleapis.com/auth/drive.file",
 ]
 _XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
