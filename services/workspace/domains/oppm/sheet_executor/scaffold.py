@@ -249,6 +249,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_row_height", "params": {"start_index": R_IDENTITY_START, "end_index": R_IDENTITY_END, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
     # Column G wider so identity letters are clearly visible
     a.append({"action": "set_column_width", "params": {"start_index": 7, "end_index": 7, "width": 50}})
+    # Columns A-F compact width (30px) for sub-objective check columns
+    a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 6, "width": 30}})
 
     # ── 9. Backgrounds ──
     a.append({"action": "set_background", "params": {"range": "A5:AI5", "color": _SCAFFOLD_HEADER_BG}})
