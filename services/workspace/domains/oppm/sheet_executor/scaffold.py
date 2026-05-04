@@ -191,8 +191,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # ── 7. Merges ──
     # Rows 1-2 three-way split: logo | project leader | project name
     a.append({"action": "merge_cells", "params": {"range": "A1:F4"}})
-    a.append({"action": "merge_cells", "params": {"range": "G1:N2"}})
-    a.append({"action": "merge_cells", "params": {"range": "O1:AI2"}})
+    a.append({"action": "merge_cells", "params": {"range": "G1:J2"}})
+    a.append({"action": "merge_cells", "params": {"range": "K1:AI2"}})
     # Rows 3-4 metadata block — starts at G so A:F stays empty (logo area)
     a.append({"action": "merge_cells", "params": {"range": "G3:AI4"}})
     # Row 5 sub-headers
@@ -233,8 +233,11 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "merge_cells", "params": {"range": f"I{r}:AI{r}"}})
 
     # ── 8. Row heights ──
-    # Rows 3-4 hold a 4-line metadata block (size 10, normal weight) — needs ~120 px total
-    a.append({"action": "set_row_height", "params": {"start_index": 3, "end_index": 4, "height": 60}})
+    # Rows 1-2 header: compact
+    a.append({"action": "set_row_height", "params": {"start_index": 1, "end_index": 2, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
+    # Rows 3-4 metadata block: row 3 taller, row 4 compact
+    a.append({"action": "set_row_height", "params": {"start_index": 3, "end_index": 3, "height": 80}})
+    a.append({"action": "set_row_height", "params": {"start_index": 4, "end_index": 4, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
     a.append({"action": "set_row_height", "params": {"start_index": 6, "end_index": LAST_TASK, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
     # All matrix rows at body height first
     a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_TOP, "end_index": R_MATRIX_BOTTOM, "height": _SCAFFOLD_MATRIX_BODY_ROW_HEIGHT}})
@@ -266,12 +269,12 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     }})
     # 10a-ii. Thick right border between Project Leader and Project Name
     a.append({"action": "set_border", "params": {
-        "range": "G1:N2",
+        "range": "G1:J2",
         "style": "NONE",
         "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
     }})
     # 10b. Task area sub-objectives + numbers/titles (A:I) → gray grid
-    a.append({"action": "set_border", "params": {"range": f"A6:I{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
+    a.append({"action": "set_border", "params": {"range": f"A6:L{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
     # 10c. Task area owners (AD:AI) → gray grid
     a.append({"action": "set_border", "params": {"range": f"AD6:AI{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
     # 10e. Bottom matrix → black grid (A:F + H:AI, skipping the blank image area G)
@@ -301,6 +304,24 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
                 "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
             },
         })
+    # Left border on column L + right border on column M for task rows
+    # (separates H:L merged title area from timeline area)
+    a.append({
+        "action": "set_border",
+        "params": {
+            "range": f"L6:L{LAST_TASK}",
+            "style": "NONE",
+            "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+        },
+    })
+    a.append({
+        "action": "set_border",
+        "params": {
+            "range": f"M6:M{LAST_TASK}",
+            "style": "NONE",
+            "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+        },
+    })
     # 10g-i. Thick right border on column F in the matrix area (Identity Symbol separator)
     a.append({
         "action": "set_border",
@@ -365,9 +386,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_font_size", "params": {"range": "A1:AI2", "size": 11}})
     a.append({"action": "set_bold", "params": {"range": "A1:AI2", "bold": True}})
     a.append({"action": "set_alignment", "params": {"range": "A1:AI2", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Rows 3-4 metadata (multi-line, top-left, wrap, NOT bold — matches example)
+    # Rows 3-4 metadata (multi-line, center aligned, wrap, NOT bold — matches example)
     a.append({"action": "set_font_size", "params": {"range": "G3:AI4", "size": 10}})
-    a.append({"action": "set_alignment", "params": {"range": "G3:AI4", "horizontal": "LEFT", "vertical": "TOP"}})
+    a.append({"action": "set_alignment", "params": {"range": "G3:AI4", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_text_wrap", "params": {"range": "G3:AI4", "mode": "WRAP"}})
     # Row 5 sub-headers
     a.append({"action": "set_font_size", "params": {"range": "A5:AI5", "size": 10}})
