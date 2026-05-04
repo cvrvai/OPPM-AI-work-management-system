@@ -163,7 +163,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
 
     # 5c. Week-date rotated headers in M:AC (17 weekly placeholders) — on matrix header row
     for w in range(_SCAFFOLD_WEEK_DATE_COLS):
-        col_letter = _col_index_to_letters(C_WEEK_START + 1 + w)  # M=14..AC=30 (1-based)
+        col_letter = _col_index_to_letters(C_WEEK_START + w)  # M=13..AC=29 (1-based)
         if start_dt:
             label = (start_dt + _td(weeks=w)).strftime("%d-%b-%Y")
         else:
@@ -237,8 +237,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_row_height", "params": {"start_index": 6, "end_index": LAST_TASK, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
     # All matrix rows at body height first
     a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_TOP, "end_index": R_MATRIX_BOTTOM, "height": _SCAFFOLD_MATRIX_BODY_ROW_HEIGHT}})
-    # Override week-date header row to be taller (rotated labels need more room)
-    a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_HEADER, "end_index": R_MATRIX_HEADER, "height": _SCAFFOLD_MATRIX_DATE_ROW_HEIGHT}})
+    # Row 42 (matrix header): compact — date/member labels span rows 42-46 via column merges
+    a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_HEADER, "end_index": R_MATRIX_HEADER, "height": 21}})
+    # Rows 43-54 (matrix body A:L): compact height
+    a.append({"action": "set_row_height", "params": {"start_index": X_TOP, "end_index": R_MATRIX_BOTTOM, "height": 21}})
     # Identity rows (A-F, one per row) stay compact
     a.append({"action": "set_row_height", "params": {"start_index": R_IDENTITY_START, "end_index": R_IDENTITY_END, "height": 30}})
     # Column G wider so identity letters are clearly visible
