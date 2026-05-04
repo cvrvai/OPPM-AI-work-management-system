@@ -20,7 +20,8 @@ from shared.models.workspace import WorkspaceMember
 logger = logging.getLogger(__name__)
 
 _FALLBACK_PRIORITY_ORDER = ("A", "B", "C")
-_DEFAULT_OLLAMA_MODEL_ID = "gemma4:31b-cloud"
+_DEFAULT_MODEL_ID = "gemma4:31b-cloud"
+_DEFAULT_PROVIDER = "ollama"
 
 
 def _resolve_member_name(workspace_member: WorkspaceMember | None, user: User | None) -> str | None:
@@ -52,14 +53,14 @@ async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | 
             select(AIModel).where(AIModel.workspace_id == workspace_id, AIModel.is_active == True)
         )
         models = list(result.scalars().all())
-        models.sort(key=lambda current_model: current_model.model_id != _DEFAULT_OLLAMA_MODEL_ID)
+        models.sort(key=lambda current_model: current_model.model_id != _DEFAULT_MODEL_ID)
 
     serialized = [
         {
             "id": str(m.id),
             "provider": m.provider,
             "model_id": m.model_id,
-            "api_key": None,
+            "api_key": m.api_key,
             "base_url": m.endpoint_url,
             "name": m.name,
             "endpoint_url": m.endpoint_url,
@@ -67,22 +68,18 @@ async def _get_models(session: AsyncSession, workspace_id: str, model_id: str | 
         }
         for m in models
     ]
-
-    if not serialized:
-        from config import get_settings as get_ai_settings
-        ollama_url = get_ai_settings().ollama_url
-        serialized = [
-            {
-                "id": "default-ollama",
-                "provider": "ollama",
-                "model_id": _DEFAULT_OLLAMA_MODEL_ID,
-                "api_key": None,
-                "base_url": ollama_url,
-                "endpoint_url": ollama_url,
-                "name": "Ollama (default)",
-                "is_active": True,
-            }
-        ]
+    # Always append Ollama default as final fallback
+    from config import get_settings as get_ai_settings
+    serialized.append({
+        "id": "default-ollama",
+        "provider": _DEFAULT_PROVIDER,
+        "model_id": _DEFAULT_MODEL_ID,
+        "api_key": None,
+        "base_url": get_ai_settings().ollama_url,
+        "endpoint_url": get_ai_settings().ollama_url,
+        "name": "Ollama (fallback)",
+        "is_active": True,
+    })
     return serialized
 
 
