@@ -148,11 +148,11 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Leave the area blank (no text values) — user will insert an image later
     a.append({"action": "set_value", "params": {"range": f"H{X_TOP}", "value": ""}})
 
-    # 4c. Identity Symbol section — A-F vertical, one letter per row (rows 36-41), column A
+    # 4c. Identity Symbol section — A-F vertical, one letter per row (rows 36-41), column G
     identity_letters = ["A", "B", "C", "D", "E", "F"]
     for idx, letter in enumerate(identity_letters):
         row = R_IDENTITY_START + idx
-        a.append({"action": "set_value", "params": {"range": f"A{row}", "value": letter}})
+        a.append({"action": "set_value", "params": {"range": f"G{row}", "value": letter}})
 
     # ── 5. Gap rows (R_GAP_START .. R_GAP_END) — no content, no borders ──
     for r in range(R_GAP_START, R_GAP_END + 1):
@@ -200,6 +200,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Task rows: G:H merged per row so task number occupies both columns
     for i in range(1, task_count + 1):
         a.append({"action": "merge_cells", "params": {"range": f"G{5 + i}:H{5 + i}"}})
+    # Identity rows 36-41: merge H:L on each row to give a description/label area
+    for r in range(R_IDENTITY_START, R_IDENTITY_END + 1):
+        a.append({"action": "merge_cells", "params": {"range": f"H{r}:L{r}"}})
     # X-pattern center area — one large blank rectangle merge
     a.append({"action": "merge_cells", "params": {"range": f"H{X_TOP}:L{X_BOTTOM}"}})
     # Sub-objective body merges: each column A-F merged vertically above the identity rows
@@ -229,6 +232,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_HEADER, "end_index": R_MATRIX_HEADER, "height": _SCAFFOLD_MATRIX_DATE_ROW_HEIGHT}})
     # Identity rows (A-F, one per row) stay compact
     a.append({"action": "set_row_height", "params": {"start_index": R_IDENTITY_START, "end_index": R_IDENTITY_END, "height": 30}})
+    # Column G wider so identity letters are clearly visible
+    a.append({"action": "set_column_width", "params": {"start_index": 7, "end_index": 7, "width": 50}})
 
     # ── 9. Backgrounds ──
     a.append({"action": "set_background", "params": {"range": "A5:AI5", "color": _SCAFFOLD_HEADER_BG}})
@@ -298,6 +303,26 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Thick divider below identity strip (row 41, separates identity strip from matrix below)
     a.append({"action": "set_border", "params": {"range": f"A{R_IDENTITY_END}:AI{R_IDENTITY_END}", "style": "NONE",
                                                   "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+    # Left border on column G (identity letters) and right border on the merged H:L label area
+    a.append({"action": "set_border", "params": {
+        "range": f"G{R_IDENTITY_START}:G{R_IDENTITY_END}",
+        "style": "NONE",
+        "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+    }})
+    # Apply the right border on the full merged range H:L so it targets the right
+    # edge of each merged cell correctly (column-only targeting is unreliable on merges)
+    a.append({"action": "set_border", "params": {
+        "range": f"H{R_IDENTITY_START}:L{R_IDENTITY_END}",
+        "style": "NONE",
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
+        "inner_vertical_style": "NONE",
+    }})
+    # Right border on column AC (end of the week-date area) for identity rows 36-41
+    a.append({"action": "set_border", "params": {
+        "range": f"AC{R_IDENTITY_START}:AC{R_IDENTITY_END}",
+        "style": "NONE",
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
+    }})
     # Thick divider below matrix (separates timeline body from Summary section)
     a.append({"action": "set_border", "params": {"range": f"A{R_MATRIX_BOTTOM}:AI{R_MATRIX_BOTTOM}", "style": "NONE",
                                                   "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
@@ -343,10 +368,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_alignment", "params": {"range": f"A{R_MATRIX_HEADER + 1}:F{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_font_size", "params": {"range": f"A{R_MATRIX_HEADER + 1}:F{R_MATRIX_BOTTOM}", "size": 9}})
     a.append({"action": "set_bold", "params": {"range": f"A{R_MATRIX_HEADER + 1}:F{R_MATRIX_BOTTOM}", "bold": True}})
-    # Identity letters (A-F, one per row, rows 36-41, column A): bold + center
-    a.append({"action": "set_alignment", "params": {"range": f"A{R_IDENTITY_START}:A{R_IDENTITY_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_font_size", "params": {"range": f"A{R_IDENTITY_START}:A{R_IDENTITY_END}", "size": 9}})
-    a.append({"action": "set_bold", "params": {"range": f"A{R_IDENTITY_START}:A{R_IDENTITY_END}", "bold": True}})
+    # Identity letters (A-F, one per row, rows 36-41, column G): bold + center
+    a.append({"action": "set_alignment", "params": {"range": f"G{R_IDENTITY_START}:G{R_IDENTITY_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"G{R_IDENTITY_START}:G{R_IDENTITY_END}", "size": 9}})
+    a.append({"action": "set_bold", "params": {"range": f"G{R_IDENTITY_START}:G{R_IDENTITY_END}", "bold": True}})
     # Bottom matrix date/timeline columns (M-AC): rotated 90° + center + small font
     a.append({"action": "set_text_rotation", "params": {"range": f"M{R_MATRIX_HEADER}:AC{R_MATRIX_HEADER}", "angle": 90}})
     a.append({"action": "set_alignment", "params": {"range": f"M{R_MATRIX_HEADER}:AC{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
