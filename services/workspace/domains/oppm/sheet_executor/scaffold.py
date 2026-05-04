@@ -212,10 +212,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     for col_idx in range(1, 7):
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_MATRIX_BOTTOM}"}})
-    # Timeline date header columns (M:AC): each column merged vertically rows 42-46
-    # so the rotated date labels occupy a taller area; timeline grid cells start at row 47
+    # Timeline date header columns (M:AC) and owner columns (AD:AI): each column merged vertically rows 42-46
+    # so the rotated labels occupy a taller area; grid cells start at row 47
     R_DATE_HEADER_END = R_MATRIX_HEADER + 4  # = 46
-    for col_idx in range(13, 30):  # M=13 to AC=29 (1-based)
+    for col_idx in range(13, 36):  # M=13 to AI=35 (1-based)
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}:{col_letter}{R_DATE_HEADER_END}"}})
     # Summary/Forecast/Risk: rotated labels now span G:H so the label column is
