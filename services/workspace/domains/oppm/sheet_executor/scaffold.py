@@ -399,9 +399,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_font_size", "params": {"range": "A1:AI2", "size": 11}})
     a.append({"action": "set_bold", "params": {"range": "A1:AI2", "bold": True}})
     a.append({"action": "set_alignment", "params": {"range": "A1:AI2", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Rows 3-4 metadata (multi-line, center aligned, wrap, NOT bold — matches example)
+    # Rows 3-4 metadata (multi-line, left aligned, wrap, NOT bold — matches example)
     a.append({"action": "set_font_size", "params": {"range": "G3:AI4", "size": 10}})
-    a.append({"action": "set_alignment", "params": {"range": "G3:AI4", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_alignment", "params": {"range": "G3:AI4", "horizontal": "LEFT", "vertical": "MIDDLE"}})
     a.append({"action": "set_text_wrap", "params": {"range": "G3:AI4", "mode": "WRAP"}})
     # Row 5 sub-headers
     a.append({"action": "set_font_size", "params": {"range": "A5:AI5", "size": 10}})
