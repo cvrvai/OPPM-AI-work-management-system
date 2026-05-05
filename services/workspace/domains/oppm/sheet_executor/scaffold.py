@@ -250,7 +250,6 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 6, "width": 30}})
 
     # ── 9. Backgrounds ──
-    a.append({"action": "set_background", "params": {"range": "A5:AI5", "color": _SCAFFOLD_HEADER_BG}})
     # Big white image area (G42:L54) — white blank background for image insertion
     a.append({"action": "set_background", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "color": "#FFFFFF"}})
 
@@ -264,13 +263,13 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
-        "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
     # 10a-ii. Thick right border between Project Leader and Project Name
     a.append({"action": "set_border", "params": {
         "range": "G1:J2",
         "style": "NONE",
-        "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
     # 10b. Task area sub-objectives + numbers/titles (A:I) → gray grid
     a.append({"action": "set_border", "params": {"range": f"A6:L{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
@@ -315,7 +314,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
             "params": {
                 "range": f"{col}1:{col}{LAST_TASK}",
                 "style": "NONE",
-                "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
+                "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
             },
         })
     # Left border on column L + right border on column M for task rows
@@ -342,23 +341,23 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "params": {
             "range": f"F{R_MATRIX_TOP}:F{R_MATRIX_BOTTOM}",
             "style": "NONE",
-            "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
+            "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
         },
     })
     # 10h. Horizontal thick dividers
     a.append({"action": "set_border", "params": {"range": "A5:AI5", "style": "NONE",
-                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+                                                  "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     a.append({"action": "set_border", "params": {"range": f"A{LAST_TASK}:AI{LAST_TASK}", "style": "NONE",
-                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+                                                  "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Thick divider below matrix header row
     a.append({"action": "set_border", "params": {"range": f"A{R_MATRIX_HEADER}:AI{R_MATRIX_HEADER}", "style": "NONE",
-                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+                                                  "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Thick divider above identity strip (separates gap/tasks from identity rows 36-41)
     a.append({"action": "set_border", "params": {"range": f"A{R_IDENTITY_START - 1}:AI{R_IDENTITY_START - 1}", "style": "NONE",
-                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+                                                  "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Thick divider below identity strip (row 41, separates identity strip from matrix below)
     a.append({"action": "set_border", "params": {"range": f"A{R_IDENTITY_END}:AI{R_IDENTITY_END}", "style": "NONE",
-                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
+                                                  "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Left border on column G (identity letters) and right border on the merged H:L label area
     a.append({"action": "set_border", "params": {
         "range": f"G{R_IDENTITY_START}:G{R_IDENTITY_END}",
@@ -381,17 +380,17 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     }})
     # Thick divider below matrix (separates timeline body from Summary section)
     a.append({"action": "set_border", "params": {"range": f"A{R_MATRIX_BOTTOM}:AI{R_MATRIX_BOTTOM}", "style": "NONE",
-                                                  "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3}})
-    # 10i. Outer thick frame around the whole form (rows 1..R_FORM_BOTTOM)
+                                                  "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
+    # 10i. Outer frame around the whole form (rows 1..R_FORM_BOTTOM)
     a.append({
         "action": "set_border",
         "params": {
             "range": f"A1:AI{R_FORM_BOTTOM}",
             "style": "NONE",
-            "top_style": "SOLID_THICK", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 3,
-            "bottom_style": "SOLID_THICK", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 3,
-            "left_style": "SOLID_THICK", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 3,
-            "right_style": "SOLID_THICK", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 3,
+            "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
+            "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
+            "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+            "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
         },
     })
 
