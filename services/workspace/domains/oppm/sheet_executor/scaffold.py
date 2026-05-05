@@ -176,17 +176,17 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": label}})
 
     # ── 6. Summary / Forecast / Risk section ──
-    # Rotated section labels in column G
+    # Rotated section labels in column G (merged vertically per 4-row section)
     a.append({"action": "set_value", "params": {"range": f"G{R_SUMMARY_START}", "value": "Summary Deliverable"}})
     a.append({"action": "set_value", "params": {"range": f"G{R_FORECAST_START}", "value": "Forecast"}})
     a.append({"action": "set_value", "params": {"range": f"G{R_RISK_START}", "value": "Risk"}})
-    # Placeholder text rows
+    # Placeholder text — one line per row in H:AI (single cell per row, not merged vertically)
     for i in range(4):
-        a.append({"action": "set_value", "params": {"range": f"I{R_SUMMARY_START + i}", "value": f"Deliverable item {i + 1}: ..."}})
+        a.append({"action": "set_value", "params": {"range": f"H{R_SUMMARY_START + i}", "value": f"Deliverable item {i + 1}: ..."}})
     for i in range(4):
-        a.append({"action": "set_value", "params": {"range": f"I{R_FORECAST_START + i}", "value": f"Forecast: ..."}})
+        a.append({"action": "set_value", "params": {"range": f"H{R_FORECAST_START + i}", "value": f"Forecast: ..."}})
     for i in range(4):
-        a.append({"action": "set_value", "params": {"range": f"I{R_RISK_START + i}", "value": f"Risk: ..."}})
+        a.append({"action": "set_value", "params": {"range": f"H{R_RISK_START + i}", "value": f"Risk: ..."}})
 
     # ── 7. Merges ──
     # Rows 1-2 three-way split: logo | project leader | project name
@@ -219,18 +219,13 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     for col_idx in range(13, 36):  # M=13 to AI=35 (1-based)
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}:{col_letter}{R_DATE_HEADER_END}"}})
-    # Summary/Forecast/Risk: rotated labels now span G:H so the label column is
-    # visually the same width as the task-number column above it.
-    a.append({"action": "merge_cells", "params": {"range": f"G{R_SUMMARY_START}:H{R_SUMMARY_DELIV_END}"}})
-    a.append({"action": "merge_cells", "params": {"range": f"G{R_FORECAST_START}:H{R_FORECAST_END}"}})
-    a.append({"action": "merge_cells", "params": {"range": f"G{R_RISK_START}:H{R_RISK_END}"}})
-    # Each summary/forecast/risk text row spans I:AI
-    for r in range(R_SUMMARY_START, R_SUMMARY_DELIV_END + 1):
-        a.append({"action": "merge_cells", "params": {"range": f"I{r}:AI{r}"}})
-    for r in range(R_FORECAST_START, R_FORECAST_END + 1):
-        a.append({"action": "merge_cells", "params": {"range": f"I{r}:AI{r}"}})
-    for r in range(R_RISK_START, R_RISK_END + 1):
-        a.append({"action": "merge_cells", "params": {"range": f"I{r}:AI{r}"}})
+    # Summary/Forecast/Risk: G column labels merged vertically per section
+    # H:AI text rows merged per row (each row spans full width)
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_SUMMARY_START}:G{R_SUMMARY_DELIV_END}"}})
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_FORECAST_START}:G{R_FORECAST_END}"}})
+    a.append({"action": "merge_cells", "params": {"range": f"G{R_RISK_START}:G{R_RISK_END}"}})
+    for r in range(R_SUMMARY_START, R_RISK_END + 1):
+        a.append({"action": "merge_cells", "params": {"range": f"H{r}:AI{r}"}})
 
     # ── 8. Row heights ──
     # Rows 1-2 header: compact
@@ -294,8 +289,16 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_border", "params": {"range": f"H{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
     # Timeline grid body (H:AI rows 43-54) — aligned with X-pattern Legend height
     a.append({"action": "set_border", "params": {"range": f"H{X_TOP}:AI{X_BOTTOM}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
-    # 10f. Summary/Forecast/Risk section → black grid
-    a.append({"action": "set_border", "params": {"range": f"G{R_SUMMARY_START}:AI{R_RISK_END}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # 10f. Summary/Forecast/Risk section → outer borders only (avoid conflicts with merged H:AI)
+    for (s, e) in ((R_SUMMARY_START, R_SUMMARY_DELIV_END), (R_FORECAST_START, R_FORECAST_END), (R_RISK_START, R_RISK_END)):
+        a.append({"action": "set_border", "params": {
+            "range": f"G{s}:AI{e}",
+            "style": "NONE",
+            "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
+            "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
+            "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+            "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
+        }})
     # 10g. Vertical thick dividers (F, L, AC on the right) — applied through task area only
     for col in ("F", "L", "AC"):
         a.append({
@@ -433,15 +436,15 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_alignment", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_font_size", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "size": 10}})
     a.append({"action": "set_bold", "params": {"range": f"G{R_MATRIX_HEADER}:L{R_MATRIX_BOTTOM}", "bold": True}})
-    # Summary section: rotated labels span G:H (matches task-number column width above)
-    a.append({"action": "set_text_rotation", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "angle": 90}})
-    a.append({"action": "set_alignment", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_bold", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "bold": True}})
-    a.append({"action": "set_font_size", "params": {"range": f"G{R_SUMMARY_START}:H{R_RISK_END}", "size": 9}})
+    # Summary section labels: rotated in column G only (single cell per row)
+    a.append({"action": "set_text_rotation", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_bold", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "bold": True}})
+    a.append({"action": "set_font_size", "params": {"range": f"G{R_SUMMARY_START}:G{R_RISK_END}", "size": 9}})
     # Summary text rows: smaller font, left-align, wrap
-    a.append({"action": "set_font_size", "params": {"range": f"I{R_SUMMARY_START}:AI{R_RISK_END}", "size": 9}})
-    a.append({"action": "set_alignment", "params": {"range": f"I{R_SUMMARY_START}:AI{R_RISK_END}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
-    a.append({"action": "set_text_wrap", "params": {"range": f"I{R_SUMMARY_START}:AI{R_RISK_END}", "mode": "WRAP"}})
+    a.append({"action": "set_font_size", "params": {"range": f"H{R_SUMMARY_START}:AI{R_RISK_END}", "size": 9}})
+    a.append({"action": "set_alignment", "params": {"range": f"H{R_SUMMARY_START}:AI{R_RISK_END}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_text_wrap", "params": {"range": f"H{R_SUMMARY_START}:AI{R_RISK_END}", "mode": "WRAP"}})
 
     # ── 12. Freeze header rows ──
     a.append({"action": "freeze_rows", "params": {"row_count": 5}})
