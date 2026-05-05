@@ -71,6 +71,9 @@ ROUTES: list[tuple[re.Pattern, str, int]] = [
     (re.compile(r"^/api/v1/workspaces/[^/]+/ai/"),                 "intelligence",  120),
     (re.compile(r"^/internal/analyze-commits$"),                   "intelligence",  120),
     (re.compile(r"^/api/v1/workspaces/[^/]+/mcp/"),                "automation",   120),
+    # Long-running workspace endpoints (Google Sheets scaffold/push can take 60-120s)
+    (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/oppm/google-sheet/actions"), "workspace", 300),
+    (re.compile(r"^/api/v1/workspaces/[^/]+/projects/[^/]+/oppm/google-sheet/push"),    "workspace", 300),
     (re.compile(r"^/api/v1/workspaces/[^/]+/github-accounts"),     "integrations",  30),
     (re.compile(r"^/api/v1/workspaces/[^/]+/commits"),             "integrations",  30),
     (re.compile(r"^/api/v1/workspaces/[^/]+/git/"),                "integrations",  30),

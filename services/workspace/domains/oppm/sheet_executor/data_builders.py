@@ -100,19 +100,19 @@ def _exec_clear_content(service: Any, spreadsheet_id: str, params: dict, sheet_t
         body={},
     ).execute()
 
-def _exec_clear_sheet(service: Any, spreadsheet_id: str, params: dict, sheet_id: int) -> None:
-    """Clear the entire OPPM sheet: values, formatting, merges, then reset dimensions."""
+def _exec_clear_sheet(service: Any, spreadsheet_id: str, params: dict, sheet_id: int, sheet_title: str = "OPPM") -> None:
+    """Clear the entire sheet: values, formatting, merges, then reset dimensions."""
     # 1. Clear all values
     service.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
-        range=f"'OPPM'!A1:AL1000",
+        range=f"'{sheet_title}'!A1:AL1000",
         body={},
     ).execute()
 
     # 2. Unmerge all cells
     merges = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
-        ranges=["'OPPM'"],
+        ranges=[f"'{sheet_title}'"],
         fields="sheets.merges",
     ).execute()
     merge_requests = []

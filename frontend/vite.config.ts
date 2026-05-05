@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
   const proxyBase = env.API_PROXY_BASE || env.VITE_API_PROXY_BASE
 
   const gatewayProxy: ProxyMap = {
-    '/api': { target: proxyBase || 'http://127.0.0.1:80', changeOrigin: true },
+    '/api': { target: proxyBase || 'http://127.0.0.1:80', changeOrigin: true, timeout: 300000, proxyTimeout: 300000 },
     '/v1': { target: proxyBase || 'http://127.0.0.1:80', changeOrigin: true },
     '/mcp': { target: proxyBase || 'http://127.0.0.1:80', changeOrigin: true },
   }
@@ -30,9 +30,9 @@ export default defineConfig(({ mode }) => {
     '^/api/git':                                  { target: 'http://127.0.0.1:8002', changeOrigin: true },
 
     // AI service routes (port 8001) — before generic /api rule
-    '^/api/v1/workspaces/[^/]+/projects/[^/]+/ai': { target: 'http://127.0.0.1:8001', changeOrigin: true },
-    '^/api/v1/workspaces/[^/]+/ai':               { target: 'http://127.0.0.1:8001', changeOrigin: true },
-    '^/api/v1/workspaces/[^/]+/rag':              { target: 'http://127.0.0.1:8001', changeOrigin: true },
+    '^/api/v1/workspaces/[^/]+/projects/[^/]+/ai': { target: 'http://127.0.0.1:8001', changeOrigin: true, timeout: 300000, proxyTimeout: 300000 },
+    '^/api/v1/workspaces/[^/]+/ai':               { target: 'http://127.0.0.1:8001', changeOrigin: true, timeout: 300000, proxyTimeout: 300000 },
+    '^/api/v1/workspaces/[^/]+/rag':              { target: 'http://127.0.0.1:8001', changeOrigin: true, timeout: 300000, proxyTimeout: 300000 },
 
     // MCP service routes (port 8003) — before generic /api rule
     '^/api/v1/workspaces/[^/]+/mcp':              { target: 'http://127.0.0.1:8003', changeOrigin: true },
@@ -47,7 +47,19 @@ export default defineConfig(({ mode }) => {
   const proxy: ProxyMap = proxyBase ? gatewayProxy : directProxy
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        // Increase HTTP server socket timeout so long AI/LLM requests
+        // (scaffold + LLM inference can take 60-180s) don't get killed
+        // by the default Node.js ~30s socket timeout → 504 Gateway Timeout.
+        name: 'server-timeout',
+        configureServer(server) {
+          server.httpServer?.setTimeout(300_000)
+        },
+      },
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

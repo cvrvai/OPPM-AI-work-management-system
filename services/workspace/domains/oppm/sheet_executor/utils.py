@@ -160,3 +160,41 @@ def _find_sheet_id(service: Any, spreadsheet_id: str, sheet_title: str) -> int:
     raise ValueError(f"Sheet '{sheet_title}' not found in spreadsheet")
 
 
+def _ensure_sheet_exists(service: Any, spreadsheet_id: str, sheet_title: str) -> int:
+    """Return the sheetId for a named tab, creating it if it does not exist."""
+    resp = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets.properties.sheetId,sheets.properties.title",
+    ).execute()
+    for sheet in resp.get("sheets", []):
+        props = sheet.get("properties", {})
+        if props.get("title") == sheet_title:
+            return int(props["sheetId"])
+    # Sheet not found — create it
+    add_resp = service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{"addSheet": {"properties": {"title": sheet_title}}}]},
+    ).execute()
+    new_props = add_resp["replies"][0]["addSheet"]["properties"]
+    return int(new_props["sheetId"])
+
+
+def _get_or_first_sheet(service: Any, spreadsheet_id: str, preferred_title: str = "OPPM") -> tuple[int, str]:
+    """Return (sheet_id, sheet_title) for the preferred tab if it exists,
+    otherwise for the first tab in the spreadsheet."""
+    resp = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets.properties.sheetId,sheets.properties.title",
+    ).execute()
+    sheets = resp.get("sheets", [])
+    if not sheets:
+        raise ValueError("Spreadsheet has no sheets")
+    for sheet in sheets:
+        props = sheet.get("properties", {})
+        if props.get("title") == preferred_title:
+            return int(props["sheetId"]), preferred_title
+    # Preferred tab not found — use the first available tab
+    first = sheets[0]["properties"]
+    return int(first["sheetId"]), str(first["title"])
+
+

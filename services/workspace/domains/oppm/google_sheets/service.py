@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import HTTPException
+from googleapiclient.errors import HttpError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.notification.repository import AuditRepository
@@ -41,10 +42,33 @@ async def get_google_sheet_link(session: AsyncSession, project_id: str, workspac
     project = await _get_project_or_404(session, project_id, workspace_id)
     link = _extract_link(project.metadata_)
     setup_status = await get_google_sheets_setup_status(session, workspace_id)
+
+    oppm_sheet_gid: int | None = None
+    spreadsheet_id = link.get("spreadsheet_id") if link else None
+    if spreadsheet_id and setup_status["backend_configured"]:
+        try:
+            credential_info, _, _ = await _resolve_workspace_service_account_info(session, workspace_id, strict=False)
+            if credential_info:
+                service = await asyncio.to_thread(_build_sheets_service, credential_info)
+                resp = await asyncio.to_thread(
+                    service.spreadsheets().get(
+                        spreadsheetId=spreadsheet_id,
+                        fields="sheets.properties.sheetId,sheets.properties.title",
+                    ).execute
+                )
+                for sheet in resp.get("sheets", []):
+                    props = sheet.get("properties", {})
+                    if props.get("title") == "OPPM":
+                        oppm_sheet_gid = int(props["sheetId"])
+                        break
+        except Exception as e:
+            logger.warning("get_google_sheet_link: could not look up OPPM gid: %s", e)
+
     return {
         "connected": bool(link),
-        "spreadsheet_id": link.get("spreadsheet_id") if link else None,
+        "spreadsheet_id": spreadsheet_id,
         "spreadsheet_url": link.get("spreadsheet_url") if link else None,
+        "oppm_sheet_gid": oppm_sheet_gid,
         "backend_configured": setup_status["backend_configured"],
         "service_account_email": setup_status["service_account_email"],
         "backend_configuration_error": setup_status["backend_configuration_error"],
@@ -269,31 +293,38 @@ async def get_google_sheet_snapshot(
     service = await asyncio.to_thread(_build_sheets_service, credential_info)
 
     # Read the full OPPM sheet with grid data (values + formatting)
-    response = await asyncio.to_thread(
-        service.spreadsheets().get(
-            spreadsheetId=spreadsheet_id,
-            ranges=["'OPPM'!A1:AL120"],
-            includeGridData=True,
-            fields=(
-                "sheets.properties.sheetId,"
-                "sheets.properties.title,"
-                "sheets.properties.gridProperties.rowCount,"
-                "sheets.properties.gridProperties.columnCount,"
-                "sheets.merges,"
-                "sheets.data.rowData.values.formattedValue,"
-                "sheets.data.rowData.values.effectiveFormat.backgroundColor,"
-                "sheets.data.rowData.values.effectiveFormat.borders,"
-                "sheets.data.rowData.values.effectiveFormat.textFormat.bold,"
-                "sheets.data.rowData.values.effectiveFormat.textFormat.fontSize,"
-                "sheets.data.rowData.values.effectiveFormat.textFormat.foregroundColor,"
-                "sheets.data.rowData.values.note"
-            ),
-        ).execute
-    )
+    try:
+        response = await asyncio.to_thread(
+            service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id,
+                ranges=["'OPPM'!A1:AL120"],
+                includeGridData=True,
+                fields=(
+                    "sheets.properties.sheetId,"
+                    "sheets.properties.title,"
+                    "sheets.properties.gridProperties.rowCount,"
+                    "sheets.properties.gridProperties.columnCount,"
+                    "sheets.merges,"
+                    "sheets.data.rowData.values.formattedValue,"
+                    "sheets.data.rowData.values.effectiveFormat.backgroundColor,"
+                    "sheets.data.rowData.values.effectiveFormat.borders,"
+                    "sheets.data.rowData.values.effectiveFormat.textFormat.bold,"
+                    "sheets.data.rowData.values.effectiveFormat.textFormat.fontSize,"
+                    "sheets.data.rowData.values.effectiveFormat.textFormat.foregroundColor,"
+                    "sheets.data.rowData.values.note"
+                ),
+            ).execute
+        )
+    except HttpError as e:
+        if e.resp.status == 400:
+            # Sheet tab 'OPPM' does not exist yet — return empty snapshot instead of 500
+            logger.warning("get_google_sheet_snapshot: OPPM tab not found in %s: %s", spreadsheet_id, e)
+            return {"cells": [], "merges": [], "row_count": 0, "col_count": 0, "sheet_exists": False}
+        raise
 
     sheets = response.get("sheets", [])
     if not sheets:
-        return {"error": "Sheet 'OPPM' not found"}
+        return {"cells": [], "merges": [], "row_count": 0, "col_count": 0, "sheet_exists": False}
 
     sheet = sheets[0]
     properties = sheet.get("properties", {})

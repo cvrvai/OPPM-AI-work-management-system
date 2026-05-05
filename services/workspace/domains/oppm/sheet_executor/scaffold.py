@@ -603,114 +603,345 @@ def _exec_scaffold_oppm_form(
     *,
     sa_info: dict[str, Any] | None = None,
 ) -> dict:
-    """Execute the full OPPM form scaffold using batched API calls.
+    """Write the full OPPM form layout directly to the sheet via batched API calls.
 
-    Sequence:
-      1. (optional) Resolve matrix_image_asset → upload to Drive → use as matrix_image_url
-      2. clear_sheet (already a multi-call routine — runs first so the values
-         and formatting batches operate on a clean slate)
-      3. ONE values.batchUpdate carrying every set_value sub-action
-      4. ONE spreadsheets.batchUpdate carrying every formatting/structural request
-         (chunked at 200 requests per call to stay under API limits)
-
-    This collapses ~150 sequential round-trips down to ~3 round-trips so the
-    full scaffold completes well within typical gateway timeouts (~60s).
+    Layout (Clark Campbell OPPM):
+      Rows 1-2    : Logo (A:F) | Project Leader (G:J) | Project Name (K:AI)
+      Rows 3-4    : Metadata block G:AI (Objective, Deliverable, Start, Deadline)
+      Row 5       : Sub-headers  A:F | G:L | M:AC | AD:AI
+      Rows 6-35   : Task rows — task# in G, title in H:L, timeline in M:AC, owner in AD:AI
+      Rows 36-41  : Identity rows — letter A-F in G, description in H:L
+      Row 42      : Matrix header — sub-obj# in A:F, image area G:L, date headers M:AC, owner headers AD:AI
+      Rows 43-54  : Matrix body — sub-obj cols A:F merged, image area, timeline/owner dots
+      Rows 55-66  : Summary / Forecast / Risk — G label (rotated), H:AI text
     """
-    # Pre-step — if the caller supplied a local asset filename for the matrix
-    # center, upload it to the SA's Drive now and translate to a public URL so
-    # _build_scaffold_actions sees it as `matrix_image_url`.
-    matrix_image_asset = params.get("matrix_image_asset")
-    upload_summary: dict[str, Any] | None = None
-    effective_params = dict(params)
-    if matrix_image_asset and not effective_params.get("matrix_image_url"):
+    title = str(params.get("title") or "[Project Name]")
+    leader = str(params.get("leader") or "[Leader Name]")
+    objective = str(params.get("objective") or "[Project Objective]")
+    deliverable = str(params.get("deliverable") or "[Deliverable Output]")
+    start_date = str(params.get("start_date") or "[Start Date]")
+    deadline = str(params.get("deadline") or "[Deadline]")
+    task_count = max(1, min(30, int(params.get("task_count") or 24)))
+
+    sq = sheet_title.replace("'", "''")  # escape single quotes for A1 range notation
+    LAST_TASK = 5 + task_count           # last row of task area
+
+    # ── Step 0: Expand grid (default sheet has 26 cols; OPPM needs 35 = AI) ─
+    try:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {"rowCount": 100, "columnCount": 36},
+                },
+                "fields": "gridProperties.rowCount,gridProperties.columnCount",
+            }}]},
+        ).execute()
+    except Exception as e:
+        raise RuntimeError(f"scaffold: grid expand failed — cannot proceed: {e}") from e
+
+    # ── Step 1: Clear ────────────────────────────────────────────────────────
+    try:
+        service.spreadsheets().values().clear(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sq}'!A1:AI100",
+            body={},
+        ).execute()
+    except Exception as e:
+        logger.warning("scaffold clear failed (non-fatal): %s", e)
+
+    # ── Step 2: Write all cell values in one batchUpdate ────────────────────
+    metadata_block = (
+        f"Project Objective: {objective}\n"
+        f"Deliverable Output: {deliverable}\n"
+        f"Start Date: {start_date}\n"
+        f"Deadline: {deadline}"
+    )
+
+    # _col_index_to_letters is 1-based: 1=A, 13=M, 29=AC, 30=AD, 35=AI
+    week_headers  = [f"W{i}" for i in range(1, 18)]          # W1..W17  → M42:AC42
+    owner_headers = ["Project Leader", "Owner 1", "Owner 2",  # AD42:AI42
+                     "Owner 3", "Owner 4", "Owner 5"]
+    sub_obj_labels = ["Sub Obj 1", "Sub Obj 2", "Sub Obj 3",  # body A43:F43
+                      "Sub Obj 4", "Sub Obj 5", "Sub Obj 6"]
+
+    value_data: list[dict] = [
+        # ── Header rows 1-2 ──────────────────────────────────────────────────
+        {"range": f"'{sq}'!G1",  "values": [[f"Project Leader: {leader}"]]},
+        # K1 is the top-left of the K1:AI2 merged range — value MUST go here
+        {"range": f"'{sq}'!K1",  "values": [[f"Project Name: {title}"]]},
+        # ── Metadata rows 3-4 ────────────────────────────────────────────────
+        {"range": f"'{sq}'!G3",  "values": [[metadata_block]]},
+        # ── Sub-header row 5 ─────────────────────────────────────────────────
+        {"range": f"'{sq}'!A5",  "values": [["Sub objective"]]},
+        {"range": f"'{sq}'!G5",  "values": [["Major Tasks (Deadline)"]]},
+        {"range": f"'{sq}'!M5",  "values": [["Project Completed By:"]]},
+        {"range": f"'{sq}'!AD5", "values": [["Owner / Priority"]]},
+    ]
+
+    # Task numbers 1..N in column G (rows 6..LAST_TASK)
+    for i in range(1, task_count + 1):
+        value_data.append({"range": f"'{sq}'!G{5 + i}", "values": [[str(i)]]})
+
+    # Identity letters A-F in column G (rows 36-41) — NOT column A
+    for idx, letter in enumerate(["A", "B", "C", "D", "E", "F"]):
+        value_data.append({"range": f"'{sq}'!G{36 + idx}", "values": [[letter]]})
+
+    # Matrix header row 42: sub-obj numbers in A:F
+    for col_i in range(6):
+        col = chr(ord("A") + col_i)
+        value_data.append({"range": f"'{sq}'!{col}42", "values": [[str(col_i + 1)]]})
+
+    # Sub-obj labels at top of each merged body column (A43, B43, ..., F43)
+    for col_i, label in enumerate(sub_obj_labels):
+        col = chr(ord("A") + col_i)
+        value_data.append({"range": f"'{sq}'!{col}43", "values": [[label]]})
+
+    # Week headers W1-W17 in M42:AC42 (cols 13-29, 1-based)
+    for w_i, label in enumerate(week_headers):
+        col = _col_index_to_letters(13 + w_i)   # M=13, N=14, ..., AC=29
+        value_data.append({"range": f"'{sq}'!{col}42", "values": [[label]]})
+
+    # Owner headers in AD42:AI42 (cols 30-35, 1-based)
+    for o_i, label in enumerate(owner_headers):
+        col = _col_index_to_letters(30 + o_i)   # AD=30, AE=31, ..., AI=35
+        value_data.append({"range": f"'{sq}'!{col}42", "values": [[label]]})
+
+    # Summary section labels (top of each merged G column)
+    value_data += [
+        {"range": f"'{sq}'!G55", "values": [["Summary Deliverable"]]},
+        {"range": f"'{sq}'!G59", "values": [["Forecast"]]},
+        {"range": f"'{sq}'!G63", "values": [["Risk"]]},
+    ]
+
+    service.spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"valueInputOption": "USER_ENTERED", "data": value_data},
+    ).execute()
+
+    # ── Step 3: Build all format/structure requests ──────────────────────────
+    def rng(r: str) -> dict:
+        return _range_to_grid_range(r, sheet_id)
+
+    def sb(color: str = "#000000") -> dict:
+        """Solid border dict."""
+        return {"style": "SOLID", "width": 1, "colorStyle": {"rgbColor": _hex_to_rgb(color)}}
+
+    def rc(range_str: str, fmt: dict, fields: str) -> dict:
+        """repeatCell request."""
+        return {"repeatCell": {"range": rng(range_str), "cell": {"userEnteredFormat": fmt}, "fields": fields}}
+
+    def full_grid(range_str: str, color: str = "#000000") -> dict:
+        """Full grid border on all inner + outer edges."""
+        return {"updateBorders": {
+            "range": rng(range_str),
+            "top": sb(color), "bottom": sb(color), "left": sb(color), "right": sb(color),
+            "innerHorizontal": sb(color), "innerVertical": sb(color),
+        }}
+
+    def outer_border(range_str: str, color: str = "#000000") -> dict:
+        """Outer border only (no inner grid)."""
+        return {"updateBorders": {
+            "range": rng(range_str),
+            "top": sb(color), "bottom": sb(color), "left": sb(color), "right": sb(color),
+        }}
+
+    def row_height(start: int, end: int, px: int) -> dict:
+        return {"updateDimensionProperties": {
+            "range": {"sheetId": sheet_id, "dimension": "ROWS",
+                      "startIndex": start - 1, "endIndex": end},
+            "properties": {"pixelSize": px}, "fields": "pixelSize",
+        }}
+
+    def col_width(start: int, end: int, px: int) -> dict:
+        return {"updateDimensionProperties": {
+            "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
+                      "startIndex": start - 1, "endIndex": end},
+            "properties": {"pixelSize": px}, "fields": "pixelSize",
+        }}
+
+    requests: list[dict] = []
+
+    # ── Merges ───────────────────────────────────────────────────────────────
+    merge_list: list[str] = [
+        # Header rows 1-4
+        "A1:F4",      # Logo area
+        "G1:J2",      # Project Leader  (value at G1)
+        "K1:AI2",     # Project Name    (value at K1 ← must be top-left)
+        "G3:AI4",     # Metadata block  (value at G3)
+        # Sub-header row 5
+        "A5:F5", "G5:L5", "M5:AC5", "AD5:AI5",
+        # Matrix image area (G:L rows 42-54)
+        "G42:L54",
+        # Summary G-column labels
+        "G55:G58", "G59:G62", "G63:G66",
+    ]
+    # Task title cells H:L per task row
+    for i in range(1, task_count + 1):
+        merge_list.append(f"H{5 + i}:L{5 + i}")
+    # Identity rows H:L per row (36-41)
+    for r in range(36, 42):
+        merge_list.append(f"H{r}:L{r}")
+    # Sub-obj columns A-F merged vertically through matrix + summary (rows 43-66)
+    for col_i in range(6):
+        col = chr(ord("A") + col_i)
+        merge_list.append(f"{col}43:{col}66")
+    # Timeline/owner header columns M-AI merged vertically rows 42-48 (rotated labels)
+    # _col_index_to_letters is 1-based: M=13, AC=29, AD=30, AI=35
+    for col_1based in range(13, 36):    # 13=M … 35=AI  (no +1 — index IS the 1-based col#)
+        col = _col_index_to_letters(col_1based)
+        merge_list.append(f"{col}42:{col}48")
+    # Summary text rows H:AI merged per row (55-66)
+    for r in range(55, 67):
+        merge_list.append(f"H{r}:AI{r}")
+
+    for mr in merge_list:
         try:
-            upload_summary = _upload_local_asset_to_drive(sa_info, str(matrix_image_asset))
-            effective_params["matrix_image_url"] = upload_summary["url"]
-            logger.info(
-                "scaffold_oppm_form: embedded matrix_image_asset=%s as %s",
-                matrix_image_asset, upload_summary["url"],
-            )
-        except (ValueError, FileNotFoundError, RuntimeError) as e:
-            # Non-fatal — fall back to text labels and surface the error to caller
-            logger.warning("scaffold_oppm_form: matrix_image_asset upload failed: %s", e)
-            upload_summary = {"error": str(e), "asset_filename": str(matrix_image_asset)}
-
-    sub_actions = _build_scaffold_actions(effective_params)
-
-    value_data: list[dict] = []
-    format_requests: list[dict] = []
-    has_clear = False
-
-    for sub in sub_actions:
-        sub_name = sub.get("action", "")
-        sub_params = sub.get("params", {}) or {}
-        if sub_name == "clear_sheet":
-            has_clear = True
-            continue
-        if sub_name == "set_value":
-            value_data.append({
-                "range": f"'{sheet_title}'!{sub_params['range']}",
-                "values": [[sub_params.get("value", "")]],
-            })
-            continue
-        try:
-            req = _scaffold_action_to_request(sub_name, sub_params, sheet_id)
+            requests.append({"mergeCells": {"range": rng(mr), "mergeType": "MERGE_ALL"}})
         except Exception as e:
-            logger.warning("scaffold: failed to build request for '%s': %s", sub_name, e)
-            continue
-        if req is not None:
-            format_requests.append(req)
+            logger.warning("scaffold: bad merge %s: %s", mr, e)
 
+    # ── Dimension properties ──────────────────────────────────────────────────
+    requests += [
+        row_height(1, 2, 21),               # header rows compact
+        row_height(3, 3, 80),               # metadata row taller
+        row_height(4, 4, 21),
+        row_height(5, 5, 25),               # sub-header row slightly taller
+        row_height(6, LAST_TASK, 21),       # task rows
+        row_height(36, 41, 21),             # identity rows
+        row_height(42, 42, 21),             # matrix header row
+        row_height(43, 54, 21),             # matrix body rows
+        row_height(55, 66, 40),             # summary rows (taller for text)
+        col_width(1, 6, 22),               # A-F: narrow sub-obj check columns
+        col_width(7, 7, 30),               # G:  identity/task-number column
+        col_width(8, 12, 90),              # H-L: task title area
+        col_width(13, 29, 25),             # M-AC: 17 weekly timeline columns
+        col_width(30, 35, 35),             # AD-AI: 6 owner columns
+    ]
+
+    # ── Freeze rows 1-5 ──────────────────────────────────────────────────────
+    requests.append({"updateSheetProperties": {
+        "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 5}},
+        "fields": "gridProperties.frozenRowCount",
+    }})
+
+    # ── Backgrounds ──────────────────────────────────────────────────────────
+    BG_HEADER = _hex_to_rgb("#E8E8E8")
+    BG_WHITE  = _hex_to_rgb("#FFFFFF")
+    requests += [
+        # Rows 1-4 white (clean header — no fill)
+        rc("A1:AI4",   {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
+        # Row 5 sub-header row gets light gray so it reads as a column header
+        rc("A5:AI5",   {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
+        # Matrix header row 42
+        rc("A42:F42",  {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
+        rc("M42:AI42", {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
+        # Image area in matrix stays white
+        rc("G42:L54",  {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
+    ]
+
+    # ── Borders ───────────────────────────────────────────────────────────────
+    # Header rows 1-5: full black grid
+    requests.append(full_grid("A1:AI5"))
+    # Task area: gray grid for A:L and AD:AI
+    requests.append(full_grid(f"A6:L{LAST_TASK}",  "#CCCCCC"))
+    requests.append(full_grid(f"AD6:AI{LAST_TASK}", "#CCCCCC"))
+    # Identity rows A:L: black grid
+    requests.append(full_grid("A36:L41"))
+    # Matrix header row: black grid
+    requests.append(full_grid("A42:AI42"))
+    # Matrix body A:F (sub-obj area): black grid
+    requests.append(full_grid("A43:F54"))
+    # Matrix body H:AI: black grid  (G:L is the image area — outer border only)
+    requests.append(full_grid("M43:AI54"))
+    requests.append(outer_border("G42:L54"))
+    # Summary section: black grid
+    requests.append(full_grid("A55:AI66"))
+    # Outer frame for the entire form
+    requests.append(outer_border("A1:AI66"))
+
+    # ── Text alignment + formatting ───────────────────────────────────────────
+    CENTER_MIDDLE = {
+        "horizontalAlignment": "CENTER",
+        "verticalAlignment": "MIDDLE",
+    }
+    LEFT_MIDDLE = {
+        "horizontalAlignment": "LEFT",
+        "verticalAlignment": "MIDDLE",
+    }
+    BOLD = {"textFormat": {"bold": True}}
+    CENTER_FIELDS = ("userEnteredFormat.horizontalAlignment,"
+                     "userEnteredFormat.verticalAlignment")
+    BOLD_FIELDS   = "userEnteredFormat.textFormat.bold"
+    CM_BOLD_FIELDS = CENTER_FIELDS + ",userEnteredFormat.textFormat.bold"
+
+    # Rows 1-2: center + bold
+    requests.append(rc("A1:AI2", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    # Row 5: center + bold
+    requests.append(rc("A5:AI5", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    # Metadata block rows 3-4: left-align + wrap
+    requests.append(rc("G3:AI4", {
+        **LEFT_MIDDLE,
+        "wrapStrategy": "WRAP",
+    }, CENTER_FIELDS + ",userEnteredFormat.wrapStrategy"))
+    # Task numbers column G: center + bold
+    requests.append(rc(f"G6:G{LAST_TASK}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    # Identity letters column G: center + bold
+    requests.append(rc("G36:G41", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    # Matrix header row 42: center + bold
+    requests.append(rc("A42:AI42", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    # Sub-obj matrix body A:F — rotated 90° + center + bold + small font
+    requests.append(rc("A43:F54", {
+        "textRotation": {"angle": 90},
+        "horizontalAlignment": "CENTER",
+        "verticalAlignment": "MIDDLE",
+        "textFormat": {"bold": True, "fontSize": 9},
+    }, "userEnteredFormat.textRotation,userEnteredFormat.horizontalAlignment,"
+       "userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat"))
+    # Summary G labels (G55:G66) — rotated 90° + center + bold
+    requests.append(rc("G55:G66", {
+        "textRotation": {"angle": 90},
+        "horizontalAlignment": "CENTER",
+        "verticalAlignment": "MIDDLE",
+        "textFormat": {"bold": True},
+    }, "userEnteredFormat.textRotation,userEnteredFormat.horizontalAlignment,"
+       "userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat.bold"))
+    # Timeline/owner header labels M:AI row 42 area (merged per column, rotated text)
+    requests.append(rc("M42:AI48", {
+        "textRotation": {"angle": 90},
+        "horizontalAlignment": "CENTER",
+        "verticalAlignment": "BOTTOM",
+        "textFormat": {"bold": True, "fontSize": 8},
+    }, "userEnteredFormat.textRotation,userEnteredFormat.horizontalAlignment,"
+       "userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat"))
+
+    # ── Fire in 200-request chunks ────────────────────────────────────────────
+    CHUNK = 200
     errors: list[str] = []
-    executed_groups = 0
-
-    # Step 1 — clear_sheet (its own multi-call routine; safe to fail silently
-    # since an existing-form scaffold will overwrite anything left behind).
-    if has_clear:
-        try:
-            _exec_clear_sheet(service, spreadsheet_id, {}, sheet_id)
-            executed_groups += 1
-        except Exception as e:
-            logger.warning("scaffold: clear_sheet failed: %s", e)
-            errors.append(f"clear_sheet: {e}")
-
-    # Step 2 — all values in one call
-    if value_data:
-        try:
-            service.spreadsheets().values().batchUpdate(
-                spreadsheetId=spreadsheet_id,
-                body={"valueInputOption": "USER_ENTERED", "data": value_data},
-            ).execute()
-            executed_groups += 1
-        except Exception as e:
-            logger.warning("scaffold: values.batchUpdate failed: %s", e)
-            errors.append(f"values_batch: {e}")
-
-    # Step 3 — all formatting requests, chunked to stay under per-call limits
-    chunk_size = 200
-    for i in range(0, len(format_requests), chunk_size):
-        chunk = format_requests[i:i + chunk_size]
+    for i in range(0, len(requests), CHUNK):
         try:
             service.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id,
-                body={"requests": chunk},
+                body={"requests": requests[i:i + CHUNK]},
             ).execute()
-            executed_groups += 1
         except Exception as e:
-            logger.warning("scaffold: format batch [%d:%d] failed: %s", i, i + len(chunk), e)
-            errors.append(f"format_batch[{i}:{i + len(chunk)}]: {e}")
+            logger.warning("scaffold batchUpdate [%d:%d] failed: %s", i, i + CHUNK, e)
+            errors.append(str(e))
 
-    summary = {
-        "sub_actions_total": len(sub_actions),
+    if errors:
+        raise RuntimeError(f"scaffold_oppm_form had {len(errors)} error(s): {errors[0]}")
+
+    logger.info(
+        "scaffold_oppm_form done — %d values, %d format requests, sheet=%s",
+        len(value_data), len(requests), sheet_title,
+    )
+    return {
         "value_writes": len(value_data),
-        "format_requests": len(format_requests),
-        "api_calls": executed_groups,
-        "errors": errors[:5],
+        "format_requests": len(requests),
+        "sheet_title": sheet_title,
+        "errors": [],
     }
-    if upload_summary is not None:
-        summary["matrix_image_upload"] = upload_summary
-    logger.info("scaffold_oppm_form: %s", summary)
-    return summary
 
 
 def _exec_fill_timeline(

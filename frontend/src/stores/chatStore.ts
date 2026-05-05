@@ -222,12 +222,15 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'oppm-chat-history',
-      // Only persist conversation histories + panel geometry — not transient UI state
+      // Persist conversation histories, panel geometry, and active context identity
       partialize: (s) => ({
         contextHistories: s.contextHistories,
         pastSessions: s.pastSessions,
         panelPosition: s.panelPosition,
         panelSize: s.panelSize,
+        contextType: s.contextType,
+        projectId: s.projectId,
+        projectTitle: s.projectTitle,
       }),
       // Restore messages for the active context after hydration from localStorage
       onRehydrateStorage: () => (state) => {

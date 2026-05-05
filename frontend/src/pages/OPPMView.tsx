@@ -24,6 +24,7 @@ interface GoogleSheetLinkState {
   connected: boolean
   spreadsheet_id: string | null
   spreadsheet_url: string | null
+  oppm_sheet_gid: number | null
   backend_configured: boolean
   service_account_email: string | null
   backend_configuration_error?: string | null
@@ -194,9 +195,10 @@ function extractSpreadsheetId(value: string | null | undefined): string | null {
   return null
 }
 
-function getGoogleSheetEmbedUrl(spreadsheetId: string | null): string | null {
+function getGoogleSheetEmbedUrl(spreadsheetId: string | null, gid?: number | null): string | null {
   if (!spreadsheetId) return null
-  return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?rm=minimal&single=true&widget=true&headers=false`
+  const base = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?rm=minimal&widget=true&headers=false`
+  return gid != null ? `${base}#gid=${gid}` : base
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -317,7 +319,15 @@ export function OPPMView() {
 
   // Keep workspace-switch guard active while the page is simplified.
   useWorkspaceNavGuard()
-  useChatContext('project', id)
+
+  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
+  const projectQuery = useQuery({
+    queryKey: ['project', id, ws?.id],
+    queryFn: () => api.get<{ title: string }>(`${wsPath}/projects/${id}`),
+    enabled: !!ws && !!id,
+  })
+
+  useChatContext('project', id, projectQuery.data?.title)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [sheetData, setSheetData] = useState<any[]>([])
@@ -347,8 +357,6 @@ export function OPPMView() {
   const [showOcrRawText, setShowOcrRawText] = useState(false)
   const [isFetchingLinkedSheet, setIsFetchingLinkedSheet] = useState(false)
   const ocrInputRef = React.useRef<HTMLInputElement>(null)
-
-  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
 
   const googleSheetQuery = useQuery({
     queryKey: ['oppm-google-sheet', id, ws?.id],
@@ -643,7 +651,7 @@ export function OPPMView() {
   const googleSheet = googleSheetQuery.data
   const linkedSheetUrl = googleSheet?.spreadsheet_url ?? ''
   const linkedSpreadsheetId = googleSheet?.spreadsheet_id ?? extractSpreadsheetId(sheetInput)
-  const embedPreviewUrl = getGoogleSheetEmbedUrl(linkedSpreadsheetId)
+  const embedPreviewUrl = getGoogleSheetEmbedUrl(linkedSpreadsheetId, googleSheet?.oppm_sheet_gid)
   const previewSrc = embedPreviewUrl ? `${embedPreviewUrl}${embedPreviewUrl.includes('?') ? '&' : '?'}refresh=${sheetRefreshToken}` : null
   const buttonsDisabled = !ws || !id
   const hasLinkedSheet = !!googleSheet?.connected
@@ -693,6 +701,15 @@ export function OPPMView() {
           setShowControlPanel(true)
         }
       }, [hasLinkedSheet])
+
+  useEffect(() => {
+    const handler = () => {
+      setSheetRefreshToken((v) => v + 1)
+      queryClient.invalidateQueries({ queryKey: ['oppm-google-sheet', id, ws?.id] })
+    }
+    window.addEventListener('oppm-sheet-actions-ran', handler)
+    return () => window.removeEventListener('oppm-sheet-actions-ran', handler)
+  }, [id, ws?.id, queryClient])
 
   useEffect(() => {
     if (hasLinkedSheet && inAppEditMode) {

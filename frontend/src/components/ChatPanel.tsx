@@ -1257,6 +1257,8 @@ function SheetActionPreview({
     try {
       const response = await executeSheetActions(workspaceId, projectId, actions)
       setResults(response.results)
+      // Signal OPPMView (or any listener) to reload the embedded sheet
+      window.dispatchEvent(new CustomEvent('oppm-sheet-actions-ran'))
     } catch (err) {
       setApplyError(err instanceof Error ? err.message : String(err))
     } finally {

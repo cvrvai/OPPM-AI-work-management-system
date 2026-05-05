@@ -1,6 +1,6 @@
 from typing import Any
 import logging
-from .utils import _find_sheet_id
+from .utils import _find_sheet_id, _ensure_sheet_exists, _get_or_first_sheet
 from .data_builders import (
     _exec_insert_rows, _exec_delete_rows, _exec_copy_format,
     _exec_set_value, _exec_clear_content, _exec_clear_sheet,
@@ -57,10 +57,16 @@ def execute_actions(
     scaffold_oppm_form when matrix_image_asset is supplied).
     """
     sheet_title = _SHEET_NAME_FROM_PARAMS
+    # For scaffold_oppm_form, use the OPPM tab if it exists, otherwise fall back
+    # to the first available sheet so the form always writes somewhere visible.
+    has_scaffold = any(a.get("action") == "scaffold_oppm_form" for a in actions)
     try:
-        sheet_id = _find_sheet_id(service, spreadsheet_id, sheet_title)
+        if has_scaffold:
+            sheet_id, sheet_title = _get_or_first_sheet(service, spreadsheet_id, _SHEET_NAME_FROM_PARAMS)
+        else:
+            sheet_id = _find_sheet_id(service, spreadsheet_id, sheet_title)
     except Exception as e:
-        logger.warning("execute_actions: cannot find sheet '%s': %s", sheet_title, e)
+        logger.warning("execute_actions: cannot resolve sheet '%s': %s", sheet_title, e)
         return [
             {"action": a.get("action", "unknown"), "success": False, "error": str(e)}
             for a in actions
@@ -151,7 +157,7 @@ def execute_actions(
             elif action_name == "unprotect_range":
                 _exec_unprotect_range(service, spreadsheet_id, params, sheet_id)
             elif action_name == "clear_sheet":
-                _exec_clear_sheet(service, spreadsheet_id, params, sheet_id)
+                _exec_clear_sheet(service, spreadsheet_id, params, sheet_id, sheet_title)
             elif action_name == "scaffold_oppm_form":
                 summary = _exec_scaffold_oppm_form(service, spreadsheet_id, params, sheet_id, sheet_title, sa_info=sa_info)
                 results.append({"action": action_name, "success": True, "error": None, "summary": summary})
