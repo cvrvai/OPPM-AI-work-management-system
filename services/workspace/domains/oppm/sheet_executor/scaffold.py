@@ -242,6 +242,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_row_height", "params": {"start_index": X_TOP, "end_index": R_MATRIX_BOTTOM, "height": 21}})
     # Identity rows (A-F, one per row) — same height as task rows
     a.append({"action": "set_row_height", "params": {"start_index": R_IDENTITY_START, "end_index": R_IDENTITY_END, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
+    # Summary/Forecast/Risk rows: taller so text fills the merged area
+    a.append({"action": "set_row_height", "params": {"start_index": R_SUMMARY_START, "end_index": R_RISK_END, "height": 40}})
     # Column G wider so identity letters are clearly visible
     a.append({"action": "set_column_width", "params": {"start_index": 7, "end_index": 7, "width": 50}})
     # Columns A-F compact width (30px) for sub-objective check columns
@@ -287,8 +289,15 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     }})
     # Timeline grid header row (H:AI row 42) — vertical grid for dates/members
     a.append({"action": "set_border", "params": {"range": f"H{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
-    # Timeline grid body (H:AI rows 43-54) — aligned with X-pattern Legend height
-    a.append({"action": "set_border", "params": {"range": f"H{X_TOP}:AI{X_BOTTOM}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # Timeline grid body (H:AI rows 43-54) — outer border only, no inner grid
+    a.append({"action": "set_border", "params": {
+        "range": f"H{X_TOP}:AI{X_BOTTOM}",
+        "style": "NONE",
+        "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
+        "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
+        "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
+    }})
     # 10f. Summary/Forecast/Risk section → outer borders only (avoid conflicts with merged H:AI)
     for (s, e) in ((R_SUMMARY_START, R_SUMMARY_DELIV_END), (R_FORECAST_START, R_FORECAST_END), (R_RISK_START, R_RISK_END)):
         a.append({"action": "set_border", "params": {
