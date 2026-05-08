@@ -1,0 +1,47 @@
+{
+  "name": "Update timeline status using sheet actions reference",
+  "description": "User says 'mark task 5 as in progress for week 3' — AI uses sheet-actions.yaml update_timeline sequence",
+  "user_input": "mark task 5 as in progress for week 3",
+  "context": {
+    "task_number": 5,
+    "task_row": 10,
+    "week": 3,
+    "timeline_column": "L",
+    "status": "in_progress",
+    "status_marker": "●",
+    "status_color": "#1D9E75"
+  },
+  "expected_actions": [
+    {
+      "action": "set_value",
+      "params": {
+        "range": "L10",
+        "value": "●"
+      },
+      "reason": "Step 1: Write status marker (dot) in timeline cell (from sheet-actions.yaml sequences.update_timeline)"
+    },
+    {
+      "action": "set_alignment",
+      "params": {
+        "range": "L10",
+        "horizontal": "CENTER",
+        "vertical": "MIDDLE"
+      },
+      "reason": "Step 2: Center-align the marker for visual consistency"
+    },
+    {
+      "action": "set_text_color",
+      "params": {
+        "range": "L10",
+        "color": "#1D9E75"
+      },
+      "reason": "Step 3: Set color to green for 'in_progress' status (from template.yaml backgrounds.timeline_on_track)"
+    }
+  ],
+  "notes": [
+    "AI followed the 'update_timeline' sequence from sheet-actions.yaml",
+    "AI used template.yaml for status colors: in_progress = green (#1D9E75)",
+    "AI did NOT add borders to timeline cell (error_prevention: timeline must NEVER have borders)",
+    "Total actions: 3 — minimal and correct"
+  ]
+}

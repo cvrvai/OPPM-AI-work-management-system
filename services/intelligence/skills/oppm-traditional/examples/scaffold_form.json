@@ -1,0 +1,39 @@
+{
+  "name": "Recreate form using scaffold action",
+  "description": "User says 'delete and recreate the form' — AI uses scaffold_oppm_form for deterministic full-form expansion",
+  "user_input": "delete and recreate the form",
+  "context": {
+    "project_name": "National Health Record Sharing System",
+    "leader_name": "John Doe",
+    "objective_text": "Establish a secure framework for health record sharing",
+    "deliverable_output": "Production-ready API with OAuth2 and audit logging",
+    "start_date": "2026-01-01",
+    "deadline": "2026-08-02",
+    "weeks": 31,
+    "task_count": 24
+  },
+  "expected_actions": [
+    {
+      "action": "scaffold_oppm_form",
+      "params": {
+        "title": "National Health Record Sharing System",
+        "leader": "John Doe",
+        "objective": "Establish a secure framework for health record sharing",
+        "deliverable": "Production-ready API with OAuth2 and audit logging",
+        "start_date": "2026-01-01",
+        "deadline": "2026-08-02",
+        "completed_by_weeks": 31,
+        "task_count": 24
+      },
+      "reason": "Use ONE scaffold_oppm_form action instead of ~80 individual actions. This deterministic action emits the complete authentic OPPM layout: header, task rows, bottom matrix, borders, fonts, alignment, row heights, column widths, and frozen rows. (from sheet-actions.yaml: scaffold is the recommended approach for full-form creation)"
+    }
+  ],
+  "notes": [
+    "AI used scaffold_oppm_form instead of individual actions for reliability",
+    "Scaffold produces a faithful Clark Campbell OPPM form every time",
+    "Scaffold handles: header (rows 1-5), task rows (6-29), identity strip (36-41), matrix (42-54), summary (55-66)",
+    "Scaffold applies all borders, fonts, alignment, row heights, column widths automatically",
+    "Total actions: 1 (scaffold) vs ~80 individual actions — much more reliable",
+    "After scaffold, AI can fill individual task titles, timeline dots, and owner names with set_value"
+  ]
+}

@@ -18,13 +18,10 @@ For runtime diagrams, use [FLOWCHARTS.md](flowcharts.md):
 
 ## Active Service Map
 
-The backend is split into four active runtime services plus one shared package:
+The backend is split into two active runtime services plus one shared package:
 
 - `services/workspace/`
 - `services/intelligence/`
-- `services/integrations/`
-- `services/automation/`
-- `services/gateway/`
 - `shared/`
 
 There is also a Docker nginx gateway in `gateway/`.
@@ -36,11 +33,8 @@ Typical native development ports:
 | Component | Port | Purpose |
 |---|---|---|
 | frontend | `5173` | React dev server |
-| python gateway | `8080` | Native reverse proxy and load balancer |
-| workspace | `8000` | Auth and core business APIs |
-| intelligence | `8001` | LLM, RAG, chat, summaries |
-| integrations | `8002` | GitHub and commit analysis ingestion |
-| automation | `8003` | MCP tool listing and execution |
+| workspace | `8000` | Auth, workspaces, projects, tasks, OPPM, GitHub, notifications |
+| intelligence | `8001` | LLM, RAG, chat, summaries, MCP tools |
 
 ## Request Routing
 
@@ -48,16 +42,14 @@ Public requests go to the gateway first.
 
 Current routing summary:
 
-- Intelligence routes -> `services/intelligence/`
-- Integration routes -> `services/integrations/`
-- Automation routes -> `services/automation/`
-- `/internal/analyze-commits` -> `services/intelligence/` (internal service-to-service path)
+- AI routes (`/api/v1/workspaces/{ws}/ai/`, `/api/v1/workspaces/{ws}/rag/`, `/internal/analyze-commits`) -> `services/intelligence/`
+- MCP routes (`/api/v1/workspaces/{ws}/mcp/`, `/mcp`) -> `services/intelligence/`
 - all remaining `/api/*` routes -> `services/workspace/`
 
 The same routing intent must exist in both:
 
-- `services/gateway/main.py`
 - `gateway/nginx.conf`
+- `deploy/nginx/nginx.conf`
 
 ## Shared Package Boundary
 
@@ -98,6 +90,38 @@ Important folders:
   - `domains/task/` — task CRUD, reports, dependencies
   - `domains/oppm/` — objectives, timeline, costs, deliverables
   - `domains/notification/` — notifications, audit log
+  - `domains/dashboard/` — dashboard data aggregation
+  - `domains/agile/` — sprints, stories, kanban
+  - `domains/waterfall/` — phases, milestones, gantt
+  - `domains/github/` — GitHub accounts, repos, commits, webhooks
+- `infrastructure/`
+  External adapters (email, embeddings).
+- `middleware/`
+  Request logging, rate limiting.
+- `exports/`
+  OPPM Excel export logic.
+
+### `services/intelligence/`
+
+AI and automation service.
+
+Important folders:
+
+- `main.py`
+  FastAPI app factory, route mounting.
+- `domains/`
+  - `domains/chat/` — chat sessions, messages
+  - `domains/rag/` — document indexing, retrieval
+- `infrastructure/`
+  - `infrastructure/llm/` — LLM adapters (Ollama, Kimi, Anthropic, OpenAI)
+  - `infrastructure/rag/` — vector DB, embeddings
+  - `infrastructure/planner/` — agent loop, plan generation
+  - `infrastructure/learning/` — feedback memory, skill improvement
+  - `infrastructure/mcp_tools/` — MCP tool execution (merged from automation)
+- `skills/`
+  AI skill definitions and examples.
+- `routers/`
+  - `routers/mcp.py` — MCP tool routes (merged from automation)
   - `domains/dashboard/` — aggregated workspace stats
   - `domains/agile/` — epics, user stories, sprints
   - `domains/waterfall/` — phases, phase documents

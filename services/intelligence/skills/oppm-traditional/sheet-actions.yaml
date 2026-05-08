@@ -1,0 +1,807 @@
+# OPPM Sheet Actions Reference — Complete API for AI
+
+# This file teaches the AI every sheet action available, with parameters,
+# examples, and when to use each action. It is the authoritative reference
+# for the execute_sheet_actions tool.
+
+metadata:
+  name: oppm-sheet-actions
+  version: "1.0"
+  description: Complete reference for all Google Sheets actions the AI can execute
+  author: OPPM AI Team
+  last_updated: "2026-05-07"
+
+# ── Action Categories ──────────────────────────────────────────────────────────
+
+categories:
+  - name: sheet_lifecycle
+    description: "Create, clear, or delete sheets"
+    actions: [clear_sheet, delete_sheet]
+    
+  - name: content
+    description: "Write or modify cell values"
+    actions: [set_value, set_formula, set_note, set_hyperlink]
+    
+  - name: formatting
+    description: "Visual styling — borders, backgrounds, fonts, alignment"
+    actions: [set_border, set_background, clear_background, set_font_size, set_bold, set_text_color, set_font_family, set_alignment, set_text_wrap, set_text_rotation]
+    
+  - name: structure
+    description: "Sheet structure — merges, row heights, column widths, freezes"
+    actions: [merge_cells, unmerge_cells, set_row_height, set_column_width, freeze_rows, freeze_columns]
+    
+  - name: data
+    description: "Data validation and conditional formatting"
+    actions: [set_conditional_formatting, set_data_validation]
+    
+  - name: protection
+    description: "Sheet protection and permissions"
+    actions: [protect_range, unprotect_range]
+    
+  - name: media
+    description: "Images and assets"
+    actions: [insert_image, upload_asset_to_drive]
+
+# ── Action Definitions ─────────────────────────────────────────────────────────
+
+actions:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SHEET LIFECYCLE
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  clear_sheet:
+    description: "Clear all content, formatting, and structure from the sheet"
+    when_to_use: |
+      - When user says "delete the form", "clear everything", "start over"
+      - When recreating the form from scratch
+      - ALWAYS use this as the FIRST action when rebuilding
+    params: {}
+    example:
+      action: clear_sheet
+      params: {}
+    notes: |
+      - This removes ALL content, borders, merges, and formatting
+      - Does NOT delete the sheet tab itself
+      - Row heights and column widths reset to defaults
+
+  delete_sheet:
+    description: "Delete the entire sheet tab"
+    when_to_use: |
+      - When user explicitly says "delete the sheet" or "remove the tab"
+    params:
+      sheet_id:
+        type: integer
+        required: true
+        description: "The sheet ID to delete"
+    warning: "This is DESTRUCTIVE and cannot be undone. Prefer clear_sheet in most cases."
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CONTENT
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  set_value:
+    description: "Write a text value to a cell or range"
+    when_to_use: |
+      - Writing project name, leader, objective, dates
+      - Writing task titles, sub-objective labels
+      - Writing timeline status markers (dots, checkmarks)
+      - Writing owner names, priority letters
+    params:
+      range:
+        type: string
+        required: true
+        description: "Cell or range in A1 notation (e.g., 'A1', 'G3:AI4')"
+      value:
+        type: string
+        required: true
+        description: "The text to write. Use \\n for newlines in multi-line cells"
+    example:
+      action: set_value
+      params:
+        range: "G1"
+        value: "Project Leader: John Doe"
+    notes: |
+      - For multi-line metadata blocks, use \\n between lines
+      - Example: "Project Objective: X\\nDeliverable: Y\\nStart: 2026-01-01"
+      - To clear a cell, set value to empty string ""
+
+  set_formula:
+    description: "Write a formula to a cell"
+    when_to_use: |
+      - Calculating sums, counts, or derived values
+      - Auto-counting tasks, people, or completed items
+    params:
+      range:
+        type: string
+        required: true
+      formula:
+        type: string
+        required: true
+        description: "Formula starting with = (e.g., '=COUNTA(H6:H30)')"
+    example:
+      action: set_formula
+      params:
+        range: "G36"
+        formula: "=COUNTA(H6:H30)"
+
+  set_note:
+    description: "Add a note (comment) to a cell"
+    when_to_use: |
+      - Adding explanations or reminders to specific cells
+      - Documenting assumptions or decisions
+    params:
+      range:
+        type: string
+        required: true
+      note:
+        type: string
+        required: true
+    example:
+      action: set_note
+      params:
+        range: "I10"
+        note: "This task was deprioritized per stakeholder meeting on 2026-04-15"
+
+  set_hyperlink:
+    description: "Add a clickable hyperlink to a cell"
+    when_to_use: |
+      - Linking to external documents, Jira tickets, or GitHub PRs
+      - Linking to other sheets or ranges
+    params:
+      range:
+        type: string
+        required: true
+      url:
+        type: string
+        required: true
+      display_text:
+        type: string
+        required: false
+        description: "Text shown in cell (defaults to URL)"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # FORMATTING — BORDERS
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  set_border:
+    description: "Apply borders to a range"
+    when_to_use: |
+      - Creating grid lines for headers, task rows, matrix areas
+      - Adding thick dividers between sections
+      - Removing borders from timeline area
+    params:
+      range:
+        type: string
+        required: true
+        description: "Range in A1 notation"
+      style:
+        type: string
+        required: false
+        default: "SOLID"
+        enum: ["SOLID", "NONE", "DOTTED", "DASHED"]
+        description: |
+          SOLID = continuous line (standard grid)
+          NONE = remove borders (use for timeline area)
+          DOTTED/DASHED = rarely used in OPPM
+      color:
+        type: string
+        required: false
+        default: "#CCCCCC"
+        description: "Hex color code (e.g., #000000 for black, #CCCCCC for gray)"
+      width:
+        type: integer
+        required: false
+        default: 1
+        description: "Border width in pixels (1 = thin, 2 = medium, 3 = thick)"
+      # Per-side overrides (optional — use when you need different borders on different sides)
+      top_style:
+        type: string
+        required: false
+        description: "Override top border style"
+      top_color:
+        type: string
+        required: false
+        description: "Override top border color"
+      top_width:
+        type: integer
+        required: false
+        description: "Override top border width"
+      bottom_style:
+        type: string
+        required: false
+      bottom_color:
+        type: string
+        required: false
+      bottom_width:
+        type: integer
+        required: false
+      left_style:
+        type: string
+        required: false
+      left_color:
+        type: string
+        required: false
+      left_width:
+        type: integer
+        required: false
+      right_style:
+        type: string
+        required: false
+      right_color:
+        type: string
+        required: false
+      right_width:
+        type: integer
+        required: false
+      inner_horizontal_style:
+        type: string
+        required: false
+        description: "Override horizontal grid lines between rows"
+      inner_horizontal_color:
+        type: string
+        required: false
+      inner_horizontal_width:
+        type: integer
+        required: false
+      inner_vertical_style:
+        type: string
+        required: false
+        description: "Override vertical grid lines between columns"
+      inner_vertical_color:
+        type: string
+        required: false
+      inner_vertical_width:
+        type: integer
+        required: false
+    examples:
+      - name: "Full grid on header"
+        params:
+          range: "A1:AI5"
+          style: "SOLID"
+          color: "#000000"
+          width: 1
+      - name: "Gray grid on task rows"
+        params:
+          range: "A6:AI30"
+          style: "SOLID"
+          color: "#CCCCCC"
+          width: 1
+      - name: "Remove borders from timeline"
+        params:
+          range: "J6:AI30"
+          style: "NONE"
+      - name: "Thick bottom divider on row 5"
+        params:
+          range: "A5:AI5"
+          style: "NONE"
+          bottom_style: "SOLID"
+          bottom_color: "#000000"
+          bottom_width: 2
+      - name: "Outer frame only (no inner grid)"
+        params:
+          range: "A1:AI66"
+          style: "NONE"
+          top_style: "SOLID"
+          top_color: "#000000"
+          top_width: 1
+          bottom_style: "SOLID"
+          bottom_color: "#000000"
+          bottom_width: 1
+          left_style: "SOLID"
+          left_color: "#000000"
+          left_width: 1
+          right_style: "SOLID"
+          right_color: "#000000"
+          right_width: 1
+    notes: |
+      - The per-side overrides take precedence over the general style/color/width
+      - To create an outer frame with no inner grid: set style=NONE, then set top/bottom/left/right individually
+      - To create a thick divider on one side only: set style=NONE, then set that side's style/color/width
+      - Timeline area (J-AI in task rows) should ALWAYS have style=NONE
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # FORMATTING — BACKGROUNDS
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  set_background:
+    description: "Set background color for a range"
+    when_to_use: |
+      - Header row background (#E8E8E8)
+      - Matrix area backgrounds
+      - Status color coding (green/yellow/red)
+    params:
+      range:
+        type: string
+        required: true
+      color:
+        type: string
+        required: true
+        description: "Hex color code (e.g., #E8E8E8 for light gray)"
+    example:
+      action: set_background
+      params:
+        range: "A5:AI5"
+        color: "#E8E8E8"
+
+  clear_background:
+    description: "Remove background color (reset to white)"
+    when_to_use: |
+      - When rebuilding a section and want clean white background
+    params:
+      range:
+        type: string
+        required: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # FORMATTING — FONTS
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  set_font_size:
+    description: "Set font size for a range"
+    when_to_use: |
+      - Header title (14px)
+      - Leader name (11px)
+      - Task text (10px)
+      - Matrix labels (9px)
+    params:
+      range:
+        type: string
+        required: true
+      size:
+        type: integer
+        required: true
+        description: "Font size in points (e.g., 10, 11, 14)"
+    example:
+      action: set_font_size
+      params:
+        range: "A1:AI1"
+        size: 14
+
+  set_bold:
+    description: "Toggle bold formatting"
+    when_to_use: |
+      - Header rows (bold=true)
+      - Task numbers (bold=true)
+      - Matrix headers (bold=true)
+    params:
+      range:
+        type: string
+        required: true
+      bold:
+        type: boolean
+        required: true
+    example:
+      action: set_bold
+      params:
+        range: "A1:AI2"
+        bold: true
+
+  set_text_color:
+    description: "Set text color"
+    when_to_use: |
+      - Status indicators (green for on-track, red for late)
+      - Priority markers
+    params:
+      range:
+        type: string
+        required: true
+      color:
+        type: string
+        required: true
+        description: "Hex color code"
+
+  set_font_family:
+    description: "Set font family"
+    when_to_use: |
+      - Rarely needed; default font is usually fine
+    params:
+      range:
+        type: string
+        required: true
+      family:
+        type: string
+        required: true
+        enum: ["Arial", "Calibri", "Roboto", "Times New Roman"]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # FORMATTING — ALIGNMENT & TEXT
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  set_alignment:
+    description: "Set horizontal and vertical alignment"
+    when_to_use: |
+      - Center-align headers and task numbers
+      - Left-align task titles and metadata
+      - Center-align matrix labels
+    params:
+      range:
+        type: string
+        required: true
+      horizontal:
+        type: string
+        required: false
+        default: "LEFT"
+        enum: ["LEFT", "CENTER", "RIGHT"]
+      vertical:
+        type: string
+        required: false
+        default: "MIDDLE"
+        enum: ["TOP", "MIDDLE", "BOTTOM"]
+    examples:
+      - name: "Center-align header"
+        params:
+          range: "A1:AI1"
+          horizontal: "CENTER"
+          vertical: "MIDDLE"
+      - name: "Left-align task titles"
+        params:
+          range: "I6:I30"
+          horizontal: "LEFT"
+          vertical: "MIDDLE"
+
+  set_text_wrap:
+    description: "Set text wrapping mode"
+    when_to_use: |
+      - Metadata block (WRAP) — allows multi-line text
+      - Task titles (CLIP) — preserves row height, truncates overflow
+      - Matrix labels (WRAP or OVERFLOW)
+    params:
+      range:
+        type: string
+        required: true
+      mode:
+        type: string
+        required: true
+        enum: ["CLIP", "WRAP", "OVERFLOW_CELL"]
+        description: |
+          CLIP = truncate overflow (best for task titles to preserve row height)
+          WRAP = wrap text to multiple lines (best for metadata)
+          OVERFLOW_CELL = let text spill into adjacent empty cells
+    examples:
+      - name: "Clip task titles"
+        params:
+          range: "I6:I30"
+          mode: "CLIP"
+      - name: "Wrap metadata block"
+        params:
+          range: "G3:AI4"
+          mode: "WRAP"
+
+  set_text_rotation:
+    description: "Rotate text (for matrix labels)"
+    when_to_use: |
+      - Matrix column headers (90° rotation for week dates, owner names)
+      - Summary section labels (90° rotation)
+    params:
+      range:
+        type: string
+        required: true
+      angle:
+        type: integer
+        required: true
+        description: "Rotation angle in degrees (0 = horizontal, 90 = vertical)"
+    example:
+      action: set_text_rotation
+      params:
+        range: "M42:AC42"
+        angle: 90
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # STRUCTURE — MERGES
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  merge_cells:
+    description: "Merge a range into a single cell"
+    when_to_use: |
+      - Header rows (merge A1:F1 for logo, G1:J1 for leader, etc.)
+      - Task title cells (merge H:I per task row for main tasks)
+      - Matrix areas (merge large blocks for image areas)
+      - Summary sections (merge G55:G58 for label)
+    params:
+      range:
+        type: string
+        required: true
+        description: "Range to merge in A1 notation"
+    example:
+      action: merge_cells
+      params:
+        range: "G3:AI4"
+    notes: |
+      - Merged cells can only have ONE value (set it on the top-left cell)
+      - To unmerge, use unmerge_cells
+      - Merging over existing data keeps only the top-left value
+
+  unmerge_cells:
+    description: "Unmerge a previously merged range"
+    when_to_use: |
+      - When rebuilding a section that was previously merged
+      - When splitting a merged cell into individual cells
+    params:
+      range:
+        type: string
+        required: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # STRUCTURE — DIMENSIONS
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  set_row_height:
+    description: "Set row height in pixels"
+    when_to_use: |
+      - Task rows: 21px
+      - Matrix header row: 21px
+      - Matrix body rows: 21px
+      - Summary rows: 40px (taller for text)
+      - Identity rows: 21px
+    params:
+      start_index:
+        type: integer
+        required: true
+        description: "Row number (1-based)"
+      end_index:
+        type: integer
+        required: true
+        description: "End row number (inclusive)"
+      height:
+        type: integer
+        required: true
+        description: "Height in pixels"
+    example:
+      action: set_row_height
+      params:
+        start_index: 6
+        end_index: 30
+        height: 21
+
+  set_column_width:
+    description: "Set column width in pixels"
+    when_to_use: |
+      - Sub-objective columns (A-F): 40px
+      - Separator (G): 10px
+      - Task number (H): 50px
+      - Task title (I): 280px
+      - Timeline columns (J-AI): 25px each
+      - Owner columns (AJ-AL): 80px each
+    params:
+      start_index:
+        type: integer
+        required: true
+        description: "Column index (1-based: 1=A, 2=B, ...)"
+      end_index:
+        type: integer
+        required: true
+        description: "End column index (inclusive)"
+      width:
+        type: integer
+        required: true
+        description: "Width in pixels"
+    example:
+      action: set_column_width
+      params:
+        start_index: 1
+        end_index: 6
+        width: 40
+
+  freeze_rows:
+    description: "Freeze rows so they stay visible while scrolling"
+    when_to_use: |
+      - ALWAYS freeze header rows 1-5
+    params:
+      row_count:
+        type: integer
+        required: true
+        description: "Number of rows to freeze from the top"
+    example:
+      action: freeze_rows
+      params:
+        row_count: 5
+
+  freeze_columns:
+    description: "Freeze columns so they stay visible while scrolling"
+    when_to_use: |
+      - Rarely needed for OPPM (frozen_columns: 0)
+    params:
+      column_count:
+        type: integer
+        required: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # DATA
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  set_conditional_formatting:
+    description: "Apply color rules based on cell values"
+    when_to_use: |
+      - Auto-color timeline dots based on status
+      - Highlight overdue tasks
+    params:
+      range:
+        type: string
+        required: true
+      rules:
+        type: array
+        required: true
+        description: "List of conditional format rules"
+
+  set_data_validation:
+    description: "Restrict what values can be entered"
+    when_to_use: |
+      - Dropdown lists for status values
+      - Date validation for timeline entries
+    params:
+      range:
+        type: string
+        required: true
+      criteria:
+        type: string
+        required: true
+        enum: ["ONE_OF_LIST", "DATE", "NUMBER", "TEXT"]
+      values:
+        type: array
+        required: false
+        description: "Allowed values for ONE_OF_LIST"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PROTECTION
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  protect_range:
+    description: "Prevent editing of a range"
+    when_to_use: |
+      - Protect header rows from accidental edits
+      - Lock formula cells
+    params:
+      range:
+        type: string
+        required: true
+      description:
+        type: string
+        required: false
+        description: "Reason for protection"
+
+  unprotect_range:
+    description: "Remove protection from a range"
+    when_to_use: |
+      - When rebuilding a protected section
+    params:
+      range:
+        type: string
+        required: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MEDIA
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  insert_image:
+    description: "Insert an image into the sheet"
+    when_to_use: |
+      - Adding a logo to the header
+      - Adding the OPPM X-pattern image to the matrix
+    params:
+      range:
+        type: string
+        required: true
+        description: "Cell where image top-left corner should be placed"
+      url:
+        type: string
+        required: true
+        description: "Publicly accessible image URL"
+      width:
+        type: integer
+        required: false
+        description: "Image width in pixels"
+      height:
+        type: integer
+        required: false
+        description: "Image height in pixels"
+
+  upload_asset_to_drive:
+    description: "Upload a local image to Google Drive and get a public URL"
+    when_to_use: |
+      - When you have a local image file that needs to be inserted
+    params:
+      file_path:
+        type: string
+        required: true
+      mime_type:
+        type: string
+        required: true
+        enum: ["image/png", "image/jpeg", "image/svg+xml"]
+
+# ── Common Action Sequences ──────────────────────────────────────────────────
+
+sequences:
+  make_standard:
+    description: "Apply standard OPPM formatting to existing content"
+    steps:
+      - "clear_background on A1:AI66"
+      - "set_border style=NONE on A6:AI{N}"
+      - "set_border style=SOLID #CCCCCC on A6:AI{N}"
+      - "set_border style=NONE on J6:AI{N}"
+      - "set_border style=SOLID #000000 on A1:AI5"
+      - "set_background #E8E8E8 on A5:AI5"
+      - "set_row_height 21 on rows 6-{N}"
+      - "set_column_width 40 on A-F"
+      - "set_column_width 10 on G"
+      - "set_column_width 50 on H"
+      - "set_column_width 280 on I"
+      - "set_column_width 25 on J-AI"
+      - "set_column_width 80 on AJ-AL"
+      - "set_font_size 14 on A1:AI1"
+      - "set_bold true on A1:AI2"
+      - "set_alignment CENTER on A1:AI1"
+      - "freeze_rows 5"
+
+  recreate_form:
+    description: "Delete and rebuild the entire form"
+    steps:
+      - "clear_sheet"
+      - "set_value on A1: 'Project: {project_name}'"
+      - "set_value on A2: 'Project Leader: {leader_name} | Project Name: {project_name}'"
+      - "set_value on A3: 'Project Objective: {objective_text}'"
+      - "set_value on A4: 'Start Date: {start_date} | Deadline: {deadline}'"
+      - "set_value on A5: 'Sub objective | Major Tasks (Deadline) | Project Completed By: {weeks} weeks | Owner / Priority'"
+      - "merge_cells on A1:F1, G1:J1, K1:AI1, etc."
+      - "set_border SOLID #000000 on A1:AI5"
+      - "set_background #E8E8E8 on A5:AI5"
+      - "set_font_size 14 on A1:AI1"
+      - "set_bold true on A1:AI2"
+      - "set_alignment CENTER on A1:AI1"
+      - "set_row_height 21 on task rows"
+      - "set_column_width standard values"
+      - "freeze_rows 5"
+
+  add_task:
+    description: "Add a new task row"
+    steps:
+      - "set_value on H{row}: '{task_number}'"
+      - "set_value on I{row}: '{task_title}'"
+      - "set_border SOLID #CCCCCC on A{row}:AI{row}"
+      - "set_font_size 10 on H{row}:I{row}"
+      - "set_bold true on H{row}"
+      - "set_alignment CENTER on H{row}"
+      - "set_alignment LEFT on I{row}"
+      - "set_row_height 21 on row {row}"
+
+  update_timeline:
+    description: "Set timeline status for a task"
+    steps:
+      - "set_value on {cell}: '{status_marker}'"
+      - "set_alignment CENTER on {cell}"
+      - "NO border changes (timeline has no borders)"
+
+# ── Error Prevention Rules ────────────────────────────────────────────────────
+
+error_prevention:
+  - rule: "Timeline area (J-AI in task rows) must NEVER have borders"
+    why: "Timeline dots need clean white background for visibility"
+    fix: "Always set_border style=NONE on J6:AI{N} after applying task borders"
+
+  - rule: "Header rows (1-5) must have black borders (#000000)"
+    why: "Visual separation between header and task area"
+    fix: "Use set_border SOLID #000000 on A1:AI5"
+
+  - rule: "Task rows must have gray borders (#CCCCCC), not black"
+    why: "Gray is less visually heavy for large task grids"
+    fix: "Use set_border SOLID #CCCCCC on A6:AI{N}"
+
+  - rule: "Column G (separator) must remain empty"
+    why: "It's a visual separator, not a content column"
+    fix: "Never set values in column G"
+
+  - rule: "Row heights must be 21px for task rows"
+    why: "Consistent spacing across the form"
+    fix: "Use set_row_height height=21 on task rows"
+
+  - rule: "Always freeze rows 1-5"
+    why: "Header must stay visible while scrolling"
+    fix: "Use freeze_rows row_count=5"
+
+  - rule: "Set values BEFORE borders on the same range"
+    why: "Some border styles can interfere with value setting"
+    fix: "Order: set_value → set_alignment → set_border"
+
+  - rule: "Use CLIP wrap for task titles (I column)"
+    why: "WRAP mode expands row height, breaking consistent spacing"
+    fix: "Use set_text_wrap mode=CLIP on I6:I{N}"

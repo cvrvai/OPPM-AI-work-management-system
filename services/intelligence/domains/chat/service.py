@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.llm import call_with_fallback, NATIVE_TOOL_PROVIDERS
 from infrastructure.llm.base import ProviderUnavailableError
 from infrastructure.tools.registry import get_registry
-from infrastructure.rag.agent_loop import run_agent_loop
+from infrastructure.planner.agent_loop import run_agent_loop
 from infrastructure.rag.guardrails import check_input, sanitize_output
 from infrastructure.skills import pick_skill, SkillContext, SkillResult, GENERAL_SKILL
 from shared.models.ai_model import AIModel

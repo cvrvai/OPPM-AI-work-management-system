@@ -107,27 +107,27 @@ export function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-white/80 px-4 backdrop-blur-sm sm:px-6">
+    <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-white/90 px-4 backdrop-blur-sm sm:px-6">
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-alt hover:text-text"
+          className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-surface-alt hover:text-text"
           title="Toggle sidebar"
         >
           <Menu className="h-5 w-5" />
         </button>
       </div>
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-3">
         {/* Notification Bell */}
         <div className="relative" ref={panelRef}>
           <button
             onClick={() => setShowNotifs(!showNotifs)}
-            className="relative rounded-lg p-2 text-text-secondary hover:bg-surface-alt transition-colors"
+            className="relative rounded-md p-1.5 text-text-secondary hover:bg-surface-alt transition-colors"
           >
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
-              <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[10px] font-bold text-white">
+              <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-white">
                 {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             )}
@@ -135,13 +135,13 @@ export function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
           {/* Notification Panel */}
           {showNotifs && (
-            <div className="absolute right-0 top-full mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-white shadow-lg">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <div className="absolute right-0 top-full mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-white shadow-md">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
                 <h3 className="text-sm font-semibold text-text">Notifications</h3>
                 {unreadCount > 0 && (
                   <button
                     onClick={() => markAllRead.mutate()}
-                    className="flex items-center gap-1 text-xs text-primary hover:text-primary-dark"
+                    className="flex items-center gap-1 text-xs text-text-secondary hover:text-text"
                   >
                     <CheckCheck className="h-3 w-3" /> Mark all read
                   </button>
@@ -201,8 +201,8 @@ export function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
         </div>
 
         {/* User */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-white text-xs font-semibold">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-alt text-text text-xs font-semibold border border-border">
             {getInitials(name)}
           </div>
           <span className="hidden text-sm font-medium text-text sm:block">{name}</span>

@@ -8,11 +8,11 @@ query rewriter, guardrails, semantic cache, and agentic tool loop.
 from infrastructure.rag.embedder import generate_embedding, generate_embeddings
 from infrastructure.rag.reranker import rerank
 from infrastructure.rag.memory import load_memory
-from infrastructure.rag.agent import classify_query
+from infrastructure.planner.agent import classify_query
 from infrastructure.rag.query_rewriter import rewrite_query
 from infrastructure.rag.guardrails import check_input, sanitize_output
 from infrastructure.rag.semantic_cache import get_semantic_cache
-from infrastructure.rag.agent_loop import run_agent_loop
+from infrastructure.planner.agent_loop import run_agent_loop
 from infrastructure.rag.retrievers.base_retriever import RetrievedChunk
 
 __all__ = [

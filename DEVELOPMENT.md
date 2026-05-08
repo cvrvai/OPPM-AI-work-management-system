@@ -13,7 +13,7 @@
 When you change code in **one service**, only rebuild that service:
 
 ```bash
-# Replace <service> with: core | ai | git | mcp | gateway
+# Replace <service> with: workspace | intelligence | gateway
 docker compose -f docker-compose.microservices.yml up -d --build <service>
 ```
 
@@ -32,7 +32,7 @@ docker compose -f docker-compose.microservices.yml up -d --build gateway
 ### Rebuild multiple services at once
 
 ```bash
-docker compose -f docker-compose.microservices.yml up -d --build core ai
+docker compose -f docker-compose.microservices.yml up -d --build workspace intelligence
 ```
 
 ### Rebuild everything
@@ -67,8 +67,6 @@ docker compose -f docker-compose.microservices.yml logs -f core
 |---|---|
 | `services/workspace/**` | `--build workspace` |
 | `services/intelligence/**` | `--build intelligence` |
-| `services/integrations/**` | `--build integrations` |
-| `services/automation/**` | `--build automation` |
 | `gateway/nginx.conf` | `--build gateway` |
 | `shared/**` | `--build` (all services) |
 | `services/.env` | `restart <service>` (no rebuild needed) |
@@ -85,25 +83,19 @@ Each service has a `start.ps1` script. Run it from anywhere — it handles every
 Install all dependencies into your global Python environment:
 
 ```powershell
-pip install -r services/gateway/requirements.txt
 pip install -r services/workspace/requirements.txt
 pip install -r services/intelligence/requirements.txt
-pip install -r services/integrations/requirements.txt
-pip install -r services/automation/requirements.txt
 ```
 
 ---
 
 ### Running a service
 
-Open one terminal per service (6 total). Run each from the workspace root:
+Open one terminal per service (3 total). Run each from the workspace root:
 
 ```powershell
-./services/gateway/start.ps1  # port 8080 — API gateway + load balancer  ← start this first
-./services/workspace/start.ps1     # port 8000 — workspaces, projects, tasks, OPPM
-./services/intelligence/start.ps1  # port 8001 — chat, RAG, commit analysis
-./services/integrations/start.ps1  # port 8002 — GitHub webhooks, commits
-./services/automation/start.ps1    # port 8003 — MCP tool endpoints
+./services/workspace/start.ps1     # port 8000 — workspaces, projects, tasks, OPPM, GitHub
+./services/intelligence/start.ps1  # port 8001 — chat, RAG, commit analysis, MCP tools
 ```
 
 ```powershell
@@ -111,14 +103,7 @@ Open one terminal per service (6 total). Run each from the workspace root:
 cd frontend ; npm run dev
 ```
 
-`npm run dev` now proxies `/api` through the native Python gateway on `http://127.0.0.1:8080`, which matches the service startup scripts above.
-
-If you need a different frontend proxy mode:
-
-```powershell
-cd frontend ; npm run dev:docker  # proxy through the Docker gateway on port 80
-cd frontend ; npm run dev:direct  # bypass the gateway and proxy to ports 8000-8003
-```
+`npm run dev` now proxies `/api` through the nginx gateway on `http://localhost:80`.
 
 If you're already inside a service folder (e.g. `services/workspace/`), just run:
 
@@ -164,7 +149,6 @@ docker compose -f docker-compose.microservices.yml stop workspace
 | `ModuleNotFoundError: No module named 'fastapi'` (or similar) | Run `pip install -r services/<name>/requirements.txt` first. |
 | `cannot be loaded because running scripts is disabled` | Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once in PowerShell. |
 | Gateway returns 502 | The target service isn't running. Start it with its `start.ps1`. |
-| Service-to-service call fails | Make sure `./services/gateway/start.ps1` is running on port 8080. |
 
 ---
 
@@ -173,11 +157,8 @@ docker compose -f docker-compose.microservices.yml stop workspace
 | Service | Port | What it does |
 |---|---|---|
 | gateway (Docker) | 80 | nginx reverse proxy + load balancer |
-| gateway (native) | 8080 | Python reverse proxy + load balancer |
-| workspace | 8000 | workspaces, projects, tasks, OPPM |
-| intelligence | 8001 | chat, RAG, AI analysis |
-| integrations | 8002 | GitHub, webhooks, commits |
-| automation | 8003 | MCP tool endpoints |
+| workspace | 8000 | workspaces, projects, tasks, OPPM, GitHub, notifications |
+| intelligence | 8001 | chat, RAG, AI analysis, MCP tools |
 | frontend | 5173 | Vite dev server |
 
 ---

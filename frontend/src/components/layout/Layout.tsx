@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
-import { ChatFAB } from '@/components/ChatFAB'
-import { ChatPanel } from '@/components/ChatPanel'
+import { ChatFAB } from '@/components/features/ChatFAB'
+import { ChatPanel } from '@/components/features/ChatPanel'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { UpdateToast } from '@/components/features/UpdateToast'
 
 export function Layout() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
@@ -27,7 +29,7 @@ export function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-surface-alt">
+    <div className="min-h-screen bg-white">
       <Sidebar
         isMobileOpen={isMobileSidebarOpen}
         isDesktopOpen={isDesktopSidebarOpen}
@@ -36,12 +38,15 @@ export function Layout() {
       />
       <div className={isDesktopSidebarOpen ? 'min-h-screen transition-[padding] duration-200 lg:pl-60' : 'min-h-screen transition-[padding] duration-200 lg:pl-0'}>
         <Header onToggleSidebar={handleToggleSidebar} />
-        <main className="p-4 sm:p-6">
+        <main className="p-6 sm:p-8 max-w-6xl mx-auto">
           <Outlet />
         </main>
       </div>
       <ChatFAB />
-      <ChatPanel />
+      <ErrorBoundary context="chat-panel">
+        <ChatPanel />
+      </ErrorBoundary>
+      <UpdateToast />
     </div>
   )
 }

@@ -28,22 +28,6 @@ services:
     ports:
       - "8001:8001"
 
-  integrations:
-    volumes:
-      - ./shared:/shared
-      - ./services/integrations:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8002 --reload
-    ports:
-      - "8002:8002"
-
-  automation:
-    volumes:
-      - ./shared:/shared
-      - ./services/automation:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8003 --reload
-    ports:
-      - "8003:8003"
-
   frontend:
     volumes:
       - ./frontend:/app

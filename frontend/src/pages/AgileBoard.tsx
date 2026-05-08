@@ -155,7 +155,7 @@ export function AgileBoard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link to={`/projects/${projectId}`} className="rounded-lg border border-border p-2 hover:bg-muted transition-colors">
+          <Link to={`/projects/${projectId}`} className="rounded-md border border-border p-2 hover:bg-surface-alt transition-colors">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div>
@@ -166,7 +166,7 @@ export function AgileBoard() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 rounded-lg bg-muted p-1">
+      <div className="flex gap-1 rounded-md bg-surface-alt p-1">
         {([
           { key: 'backlog' as Tab, label: 'Product Backlog', icon: BookOpen },
           { key: 'sprints' as Tab, label: 'Sprints', icon: IterationCw },
@@ -192,10 +192,10 @@ export function AgileBoard() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Product Backlog ({backlogStories.length} stories)</h2>
             <div className="flex gap-2">
-              <button onClick={() => setShowCreateEpic(true)} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors">
+              <button onClick={() => setShowCreateEpic(true)} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-alt transition-colors">
                 <Plus className="h-3.5 w-3.5" /> Epic
               </button>
-              <button onClick={() => setShowCreateStory(true)} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark transition-colors">
+              <button onClick={() => setShowCreateStory(true)} className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-dark transition-colors">
                 <Plus className="h-3.5 w-3.5" /> User Story
               </button>
             </div>
@@ -206,7 +206,7 @@ export function AgileBoard() {
             <div className="flex flex-wrap gap-2">
               {epics.map((epic) => (
                 <span key={epic.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1 text-xs font-medium">
-                  <Target className="h-3 w-3 text-primary" />
+                  <Target className="h-3 w-3 text-text-secondary" />
                   {epic.title}
                   <span className="text-text-secondary">
                     ({stories.filter((s) => s.epic_id === epic.id).length})
@@ -221,7 +221,7 @@ export function AgileBoard() {
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : backlogStories.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-12 text-center">
+            <div className="rounded-lg border border-dashed border-border p-12 text-center">
               <BookOpen className="mx-auto h-12 w-12 text-text-secondary/40" />
               <h3 className="mt-4 text-lg font-semibold text-text">No stories yet</h3>
               <p className="mt-1 text-sm text-text-secondary">Create user stories to build your product backlog</p>
@@ -229,7 +229,7 @@ export function AgileBoard() {
           ) : (
             <div className="space-y-2">
               {backlogStories.map((story) => (
-                <div key={story.id} className="flex items-center gap-3 rounded-lg border border-border bg-white p-3 shadow-sm hover:shadow-md transition-shadow">
+                <div key={story.id} className="flex items-center gap-3 rounded-md border border-border bg-white p-3 hover:bg-surface-alt transition-colors">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium text-text truncate">{story.title}</h3>
@@ -242,7 +242,7 @@ export function AgileBoard() {
                     )}
                   </div>
                   {story.story_points !== null && (
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-alt border border-border text-xs font-bold text-text-secondary">
                       {story.story_points}
                     </span>
                   )}
@@ -275,13 +275,13 @@ export function AgileBoard() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Sprints ({sprints.length})</h2>
-            <button onClick={() => setShowCreateSprint(true)} className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark transition-colors">
+            <button onClick={() => setShowCreateSprint(true)} className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-dark transition-colors">
               <Plus className="h-3.5 w-3.5" /> New Sprint
             </button>
           </div>
 
           {sprints.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-12 text-center">
+            <div className="rounded-lg border border-dashed border-border p-12 text-center">
               <IterationCw className="mx-auto h-12 w-12 text-text-secondary/40" />
               <h3 className="mt-4 text-lg font-semibold text-text">No sprints yet</h3>
               <p className="mt-1 text-sm text-text-secondary">Create your first sprint to start iterating</p>
@@ -293,10 +293,10 @@ export function AgileBoard() {
                 const doneCount = sprintStories.filter((s) => s.status === 'done').length
                 const totalPoints = sprintStories.reduce((sum, s) => sum + (s.story_points ?? 0), 0)
                 return (
-                  <div key={sprint.id} className="rounded-xl border border-border bg-white p-4 shadow-sm">
+                  <div key={sprint.id} className="rounded-lg border border-border bg-white p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-surface-alt border border-border text-sm font-bold text-text-secondary">
                           {sprint.sprint_number}
                         </span>
                         <div>
@@ -311,7 +311,7 @@ export function AgileBoard() {
                         {sprint.status === 'planning' && (
                           <button
                             onClick={() => startSprintMut.mutate(sprint.id)}
-                            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
+                            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-dark transition-colors"
                           >
                             Start Sprint
                           </button>
@@ -319,7 +319,7 @@ export function AgileBoard() {
                         {sprint.status === 'active' && (
                           <button
                             onClick={() => completeSprintMut.mutate(sprint.id)}
-                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
+                            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-dark transition-colors"
                           >
                             Complete Sprint
                           </button>
@@ -346,7 +346,7 @@ export function AgileBoard() {
         const activeSprint = sprints.find((s) => s.status === 'active')
         if (!activeSprint) {
           return (
-            <div className="rounded-xl border border-dashed border-border p-12 text-center">
+            <div className="rounded-lg border border-dashed border-border p-12 text-center">
               <Layers className="mx-auto h-12 w-12 text-text-secondary/40" />
               <h3 className="mt-4 text-lg font-semibold text-text">No active sprint</h3>
               <p className="mt-1 text-sm text-text-secondary">Start a sprint to see the board view</p>
@@ -367,17 +367,17 @@ export function AgileBoard() {
               {columns.map(({ key, label, icon: Icon }) => {
                 const col = sprintStories.filter((s) => s.status === key)
                 return (
-                  <div key={key} className="rounded-xl border border-border bg-muted/50 p-3">
+                  <div key={key} className="rounded-lg border border-border bg-surface-alt/50 p-3">
                     <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-text-secondary">
                       <Icon className="h-4 w-4" />
                       {label} ({col.length})
                     </div>
                     <div className="space-y-2">
                       {col.map((story) => (
-                        <div key={story.id} className="rounded-lg border border-border bg-white p-3 shadow-sm">
+                        <div key={story.id} className="rounded-md border border-border bg-white p-3">
                           <h4 className="text-sm font-medium text-text">{story.title}</h4>
                           {story.story_points !== null && (
-                            <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                            <span className="mt-1 inline-block rounded-full bg-surface-alt border border-border px-2 py-0.5 text-[10px] font-bold text-text-secondary">
                               {story.story_points} pts
                             </span>
                           )}
@@ -395,7 +395,7 @@ export function AgileBoard() {
       {/* Create Story Modal */}
       {showCreateStory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <form onSubmit={handleCreateStory} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+          <form onSubmit={handleCreateStory} className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">New User Story</h2>
               <button type="button" onClick={() => setShowCreateStory(false)}><X className="h-5 w-5" /></button>
@@ -403,20 +403,20 @@ export function AgileBoard() {
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Title *</label>
-                <input name="title" required maxLength={300} placeholder="As a [user], I want [action] so that [benefit]" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                <input name="title" required maxLength={300} placeholder="As a [user], I want [action] so that [benefit]" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Description</label>
-                <textarea name="description" rows={3} placeholder="Detailed description…" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                <textarea name="description" rows={3} placeholder="Detailed description…" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-sm font-medium">Story Points</label>
-                  <input name="story_points" type="number" min={0} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                  <input name="story_points" type="number" min={0} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">Priority</label>
-                  <select name="priority" defaultValue="medium" className="w-full rounded-lg border border-border px-3 py-2 text-sm">
+                  <select name="priority" defaultValue="medium" className="w-full rounded-md border border-border px-3 py-2 text-sm">
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
                     <option value="high">High</option>
@@ -426,8 +426,8 @@ export function AgileBoard() {
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setShowCreateStory(false)} className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted">Cancel</button>
-              <button type="submit" disabled={createStoryMut.isPending} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
+              <button type="button" onClick={() => setShowCreateStory(false)} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-surface-alt">Cancel</button>
+              <button type="submit" disabled={createStoryMut.isPending} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50">
                 {createStoryMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
               </button>
             </div>
@@ -438,7 +438,7 @@ export function AgileBoard() {
       {/* Create Sprint Modal */}
       {showCreateSprint && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <form onSubmit={handleCreateSprint} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+          <form onSubmit={handleCreateSprint} className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">New Sprint</h2>
               <button type="button" onClick={() => setShowCreateSprint(false)}><X className="h-5 w-5" /></button>
@@ -446,26 +446,26 @@ export function AgileBoard() {
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Sprint Name *</label>
-                <input name="name" required maxLength={100} placeholder={`Sprint ${sprints.length + 1}`} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                <input name="name" required maxLength={100} placeholder={`Sprint ${sprints.length + 1}`} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Goal</label>
-                <textarea name="goal" rows={2} placeholder="What should this sprint achieve?" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                <textarea name="goal" rows={2} placeholder="What should this sprint achieve?" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-sm font-medium">Start Date</label>
-                  <input name="start_date" type="date" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                  <input name="start_date" type="date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">End Date</label>
-                  <input name="end_date" type="date" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                  <input name="end_date" type="date" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
                 </div>
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setShowCreateSprint(false)} className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted">Cancel</button>
-              <button type="submit" disabled={createSprintMut.isPending} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
+              <button type="button" onClick={() => setShowCreateSprint(false)} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-surface-alt">Cancel</button>
+              <button type="submit" disabled={createSprintMut.isPending} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50">
                 {createSprintMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
               </button>
             </div>
@@ -476,7 +476,7 @@ export function AgileBoard() {
       {/* Create Epic Modal */}
       {showCreateEpic && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <form onSubmit={handleCreateEpic} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+          <form onSubmit={handleCreateEpic} className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">New Epic</h2>
               <button type="button" onClick={() => setShowCreateEpic(false)}><X className="h-5 w-5" /></button>
@@ -484,15 +484,15 @@ export function AgileBoard() {
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Title *</label>
-                <input name="title" required maxLength={200} placeholder="Epic name" className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                <input name="title" required maxLength={200} placeholder="Epic name" className="w-full rounded-md border border-border px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Description</label>
-                <textarea name="description" rows={3} className="w-full rounded-lg border border-border px-3 py-2 text-sm" />
+                <textarea name="description" rows={3} className="w-full rounded-md border border-border px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Priority</label>
-                <select name="priority" defaultValue="medium" className="w-full rounded-lg border border-border px-3 py-2 text-sm">
+                <select name="priority" defaultValue="medium" className="w-full rounded-md border border-border px-3 py-2 text-sm">
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
@@ -501,8 +501,8 @@ export function AgileBoard() {
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setShowCreateEpic(false)} className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted">Cancel</button>
-              <button type="submit" disabled={createEpicMut.isPending} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
+              <button type="button" onClick={() => setShowCreateEpic(false)} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-surface-alt">Cancel</button>
+              <button type="submit" disabled={createEpicMut.isPending} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50">
                 {createEpicMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}
               </button>
             </div>

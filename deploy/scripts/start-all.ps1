@@ -46,7 +46,7 @@ if (`$LASTEXITCODE -and `$LASTEXITCODE -ne 0) {
 
 function Start-FrontendWindow {
     $frontendPath = Join-Path $Root "frontend"
-    $command = "Set-Location '$frontendPath'; npm run dev:native"
+    $command = "Set-Location '$frontendPath'; npm run dev"
     $ps = Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $command `
         -WorkingDirectory $frontendPath `
         -PassThru
@@ -164,12 +164,10 @@ if ($Docker) {
 
     Write-Host ""
     Write-Host "All services running (Docker):" -ForegroundColor Green
-    Write-Host "  Gateway      -> http://localhost:80"
-    Write-Host "  Workspace    -> http://localhost:8000"
-    Write-Host "  Intelligence -> http://localhost:8001"
-    Write-Host "  Integrations -> http://localhost:8002"
-    Write-Host "  Automation   -> http://localhost:8003"
-    Write-Host "  Frontend     -> http://localhost:5173"
+    Write-Host "  Gateway (nginx) -> http://localhost:80"
+    Write-Host "  Workspace       -> http://localhost:8000"
+    Write-Host "  Intelligence    -> http://localhost:8001"
+    Write-Host "  Frontend        -> http://localhost:5173"
     if ($Tunnel -and $publicUrl) {
         Write-Host "  Webhook   -> $publicUrl/api/v1/git/webhook" -ForegroundColor Green
     }
@@ -180,16 +178,13 @@ if ($Docker) {
     Write-Host "Starting OPPM services..." -ForegroundColor Cyan
 
     $procs = @()
-    $procs += Start-ServiceWindow "gateway (8080)" (Join-Path $Root "services\gateway\start.ps1")
     $procs += Start-ServiceWindow "workspace    (8000)" (Join-Path $Root "services\workspace\start.ps1")
     $procs += Start-ServiceWindow "intelligence (8001)" (Join-Path $Root "services\intelligence\start.ps1")
-    $procs += Start-ServiceWindow "integrations (8002)" (Join-Path $Root "services\integrations\start.ps1")
-    $procs += Start-ServiceWindow "automation   (8003)" (Join-Path $Root "services\automation\start.ps1")
 
     Write-Host ""
-    Write-Host "Waiting for gateway and workspace to become reachable..." -ForegroundColor Cyan
-    $null = Wait-ForHttpEndpoint "gateway" "http://127.0.0.1:8080/health"
+    Write-Host "Waiting for workspace and intelligence to become reachable..." -ForegroundColor Cyan
     $null = Wait-ForHttpEndpoint "workspace" "http://127.0.0.1:8000/health"
+    $null = Wait-ForHttpEndpoint "intelligence" "http://127.0.0.1:8001/health"
 
     Write-Host ""
     Write-Host "Starting frontend (5173) with native gateway proxy..." -ForegroundColor Cyan
@@ -197,8 +192,8 @@ if ($Docker) {
 
     if ($Tunnel) {
         Write-Host ""
-        Write-Host "Starting Cloudflare Tunnel on port 8080 (gateway)..." -ForegroundColor Cyan
-        $publicUrl = Start-CloudflaredTunnel -Port 8080
+        Write-Host "Starting Cloudflare Tunnel on port 8000 (workspace)..." -ForegroundColor Cyan
+        $publicUrl = Start-CloudflaredTunnel -Port 8000
         if ($publicUrl) {
             Write-WebhookUrl -PublicUrl $publicUrl
             Write-Host "  NOTE: restart the Vite dev server to pick up the new URL." -ForegroundColor Yellow
@@ -209,11 +204,8 @@ if ($Docker) {
 
     Write-Host ""
     Write-Host "All services running (native):" -ForegroundColor Green
-    Write-Host "  Gateway      -> http://localhost:8080"
     Write-Host "  Workspace    -> http://localhost:8000"
     Write-Host "  Intelligence -> http://localhost:8001"
-    Write-Host "  Integrations -> http://localhost:8002"
-    Write-Host "  Automation   -> http://localhost:8003"
     Write-Host "  Frontend     -> http://localhost:5173"
     if ($Tunnel -and $publicUrl) {
         Write-Host "  Webhook   -> $publicUrl/api/v1/git/webhook" -ForegroundColor Green

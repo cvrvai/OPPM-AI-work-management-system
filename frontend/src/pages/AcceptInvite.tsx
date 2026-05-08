@@ -173,11 +173,11 @@ export function AcceptInvite() {
   const RoleIcon = roleInfo.icon
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-alt p-4">
+    <div className="flex min-h-screen items-center justify-center bg-white p-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white text-xl font-bold shadow-sm">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-primary text-white text-xl font-bold">
             {getInitials(preview!.workspace_name)}
           </div>
           <h1 className="text-2xl font-bold text-text">You're Invited!</h1>
@@ -187,10 +187,10 @@ export function AcceptInvite() {
         </div>
 
         {/* Workspace card */}
-        <div className="rounded-xl border border-border bg-white p-6 shadow-sm space-y-4">
+        <div className="rounded-lg border border-border bg-white p-6 space-y-4">
           {/* Workspace info */}
           <div className="flex items-center gap-4 pb-4 border-b border-border">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary text-lg font-bold">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-surface-alt border border-border text-lg font-bold">
               {getInitials(preview!.workspace_name)}
             </div>
             <div>
@@ -229,14 +229,14 @@ export function AcceptInvite() {
 
           {/* Auth required notice */}
           {!authLoading && !session && (
-            <div className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-3 text-sm text-primary">
+            <div className="rounded-md bg-surface-alt border border-border px-4 py-3 text-sm text-text-secondary">
               <LogIn className="inline h-4 w-4 mr-1.5 -mt-0.5" />
               You need to <strong>sign in or create an account</strong> to accept this invitation.
             </div>
           )}
 
           {acceptError && (
-            <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{acceptError}</p>
+            <p className="rounded-md bg-surface-alt px-3 py-2 text-sm text-danger">{acceptError}</p>
           )}
 
           {/* Action buttons */}
@@ -244,7 +244,7 @@ export function AcceptInvite() {
             {!authLoading && !session ? (
               <button
                 onClick={() => navigate(`/login?invite=${token}`, { replace: true })}
-                className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-white hover:bg-primary-dark transition-colors"
+                className="flex-1 rounded-md bg-primary py-2.5 text-sm font-medium text-white hover:bg-primary-dark transition-colors"
               >
                 Sign In to Join
               </button>
@@ -252,14 +252,14 @@ export function AcceptInvite() {
               <button
                 onClick={handleAccept}
                 disabled={accepting || authLoading}
-                className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors"
+                className="flex-1 rounded-md bg-primary py-2.5 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50 transition-colors"
               >
                 {accepting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Join Workspace'}
               </button>
             )}
             <button
               onClick={handleDecline}
-              className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-text hover:bg-surface-alt transition-colors"
+              className="flex-1 rounded-md border border-border py-2.5 text-sm font-medium text-text hover:bg-surface-alt transition-colors"
             >
               Decline
             </button>

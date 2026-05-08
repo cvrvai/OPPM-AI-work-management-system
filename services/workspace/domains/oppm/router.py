@@ -70,6 +70,7 @@ from domains.oppm.service import (
     get_oppm_sheet_prompt,
     upsert_oppm_sheet_prompt,
     reset_oppm_sheet_prompt,
+    get_oppm_scaffold,
 )
 from domains.workspace.export_service import export_oppm_xlsx, import_oppm_xlsx, import_oppm_json, parse_oppm_xlsx_to_preview
 from domains.oppm.google_sheets import (
@@ -369,6 +370,22 @@ async def import_oppm_json_route(
 
 
 # ── Spreadsheet Template (FortuneSheet) ──
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/scaffold")
+async def get_oppm_scaffold_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return a FortuneSheet-compatible OPPM scaffold for the App Editor.
+
+    This endpoint generates the exact same visual layout that the Google Sheet
+    scaffold produces, but formatted as FortuneSheet JSON so the frontend
+    can render it directly without client-side parsing delays.
+    """
+    sheet_data = await get_oppm_scaffold(session, project_id, ws.workspace_id)
+    return {"sheet_data": sheet_data, "source": "backend_scaffold"}
+
 
 @router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/spreadsheet")
 async def get_spreadsheet_route(

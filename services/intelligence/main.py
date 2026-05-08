@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from shared.database import init_db, close_db
 from middleware.logging import RequestLoggingMiddleware
 from routers.health import router as health_router
+from routers.mcp import router as mcp_router
 from domains import router as v1_router
 from domains.analysis.internal_router import router as internal_router
 
@@ -27,6 +28,9 @@ def create_app() -> FastAPI:
 
     # Public API routes (proxied by gateway, CORS handled by nginx)
     app.include_router(v1_router, prefix="/api")
+
+    # MCP tool routes (merged from automation service)
+    app.include_router(mcp_router, prefix="/api")
 
     # Internal routes (service-to-service, not proxied)
     app.include_router(internal_router)

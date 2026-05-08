@@ -1,1 +1,0 @@
-"""MCP service middleware package."""

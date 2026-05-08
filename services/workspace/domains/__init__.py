@@ -11,6 +11,7 @@ from domains.agile.router import router as agile_router
 from domains.waterfall.router import router as waterfall_router
 from domains.notification.router import router as notifications_router
 from domains.dashboard.router import router as dashboard_router
+from domains.github.router import router as github_router
 
 router = APIRouter(prefix="/v1")
 
@@ -23,3 +24,4 @@ router.include_router(agile_router, tags=["agile"])
 router.include_router(waterfall_router, tags=["waterfall"])
 router.include_router(notifications_router, tags=["notifications"])
 router.include_router(dashboard_router, tags=["dashboard"])
+router.include_router(github_router, tags=["github"])

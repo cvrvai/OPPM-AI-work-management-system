@@ -103,26 +103,66 @@ system_prompt: |
 
   - Task rows: 21 pixels
 
-  ## WHEN ASKED TO "MAKE IT STANDARD"
-
-  Follow this EXACT sequence:
-  1. Remove all existing borders from task rows: set_border style=NONE on A6:AL{N}
-  2. Re-apply standard thin borders: set_border style=SOLID #CCCCCC on A6:AL{N}
-  3. Ensure timeline has NO borders: set_border style=NONE on J6:AI{N}
-  4. Ensure header has black borders: set_border style=SOLID #000000 on A1:AL5
-  5. Set task row heights to 21px
-  6. Set column widths to standard values
-  7. Set header row 5 background to #E8E8E8
-  8. Set all fonts/sizes/alignments to standard values
-
   ## WHEN ASKED TO "DELETE AND RECREATE"
 
+  PREFERRED APPROACH: Use ONE scaffold_oppm_form action.
+  
+  The scaffold_oppm_form action is a deterministic full-form expansion that emits
+  the complete authentic OPPM layout in ONE call:
+  - 5-row header with project metadata
+  - N task rows (default 24, configurable)
+  - Identity strip (rows 36-41)
+  - Bottom matrix with sub-objectives, timeline, owners (rows 42-54)
+  - Summary / Forecast / Risk section (rows 55-66)
+  - Full border hierarchy (header black grid, task gray grid, timeline cleared)
+  - Standard fonts, alignment, widths, heights
+  - Frozen header rows
+  
+  Parameters for scaffold_oppm_form:
+    title: Project name
+    leader: Project leader name
+    objective: Project objective text
+    deliverable: Deliverable output description
+    start_date: Project start date
+    deadline: Project deadline
+    completed_by_weeks: Number of weeks
+    task_count: Number of task rows (1-30, default 24)
+  
+  ALTERNATIVE (only if scaffold is unavailable):
   1. Use ONE clear_sheet action
   2. Rebuild ENTIRE form from scratch using set_value for content
   3. Apply set_border for structure
   4. Apply set_background for colors
   5. Apply set_font_size for fonts
   6. Set row heights and column widths
+
+  ## WHEN ASKED TO "MAKE IT STANDARD"
+
+  Follow this EXACT sequence (from sheet-actions.yaml make_standard sequence):
+  1. Remove all existing borders from task rows: set_border style=NONE on A6:AI{N}
+  2. Re-apply standard thin borders: set_border style=SOLID #CCCCCC on A6:AI{N}
+  3. Ensure timeline has NO borders: set_border style=NONE on J6:AI{N}
+  4. Ensure header has black borders: set_border style=SOLID #000000 on A1:AI5
+  5. Set task row heights to 21px
+  6. Set column widths to standard values
+  7. Set header row 5 background to #E8E8E8
+  8. Set all fonts/sizes/alignments to standard values
+  9. Freeze rows 1-5
+
+  ## SHEET ACTIONS REFERENCE
+
+  You have access to a COMPLETE SHEET ACTIONS REFERENCE (sheet-actions.yaml) that defines:
+  - Every available action (set_value, set_border, set_font_size, merge_cells, etc.)
+  - Exact parameters for each action with types, defaults, and enums
+  - When to use each action with real-world examples
+  - Common action sequences (make_standard, recreate_form, add_task, update_timeline)
+  - Error prevention rules (timeline must NEVER have borders, header must be black, etc.)
+
+  ALWAYS consult this reference before generating actions. It prevents mistakes like:
+  - Wrong border colors or styles
+  - Missing timeline border removal
+  - Incorrect column widths or row heights
+  - Wrong font sizes or alignments
 
   ## TOOL CALLING DISCIPLINE
 
@@ -137,6 +177,10 @@ system_prompt: |
 template:
   file: "template.yaml"           # Relative to skill directory
   description: "Standard OPPM template layout rules"
+
+sheet_actions:
+  file: "sheet-actions.yaml"      # Complete action API reference
+  description: "Every sheet action with parameters, examples, and error prevention"
 
 # ── Pre-flight Configuration ────────────────────────────────────────────────────
 

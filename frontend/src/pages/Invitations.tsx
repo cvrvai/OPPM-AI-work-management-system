@@ -6,7 +6,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { MyInvite } from '@/types'
 import { Building2, UserCheck, Clock, CheckCircle2, X, Inbox } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Skeleton } from '@/components/Skeleton'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 function roleBadgeClass(role: string) {
   switch (role) {
@@ -76,7 +76,7 @@ export function Invitations() {
           </p>
         </div>
         {!isLoading && visible.length > 0 && (
-          <span className="mt-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+          <span className="mt-1 rounded-full bg-surface-alt px-3 py-1 text-xs font-medium text-text-secondary">
             {visible.length} pending
           </span>
         )}
@@ -85,7 +85,7 @@ export function Invitations() {
       {isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="rounded-xl border border-border bg-white p-5 shadow-sm">
+            <div key={i} className="rounded-lg border border-border bg-white p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-5 w-48" />
@@ -93,15 +93,15 @@ export function Invitations() {
                   <Skeleton className="h-4 w-32" />
                 </div>
                 <div className="flex gap-2">
-                  <Skeleton className="h-9 w-20 rounded-lg" />
-                  <Skeleton className="h-9 w-20 rounded-lg" />
+                  <Skeleton className="h-9 w-20 rounded-md" />
+                  <Skeleton className="h-9 w-20 rounded-md" />
                 </div>
               </div>
             </div>
           ))}
         </div>
       ) : visible.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-white py-24 text-center shadow-sm">
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-white py-24 text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 mb-4">
             <Inbox className="h-8 w-8 text-slate-400" />
           </div>
@@ -121,7 +121,7 @@ export function Invitations() {
               <div
                 key={invite.id}
                 className={cn(
-                  'rounded-xl border bg-white p-5 shadow-sm transition-opacity',
+                  'rounded-lg border bg-white p-4 transition-opacity',
                   expired ? 'opacity-60 border-border' : 'border-border hover:border-primary/30'
                 )}
               >
@@ -129,8 +129,8 @@ export function Invitations() {
                   <div className="min-w-0 flex-1 space-y-2">
                     {/* Workspace */}
                     <div className="flex items-center gap-2">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
-                        <Building2 className="h-4 w-4 text-primary" />
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-surface-alt border border-border flex-shrink-0">
+                        <Building2 className="h-4 w-4 text-text-secondary" />
                       </div>
                       <div>
                         <p className="font-semibold text-text">{invite.workspace_name}</p>
@@ -165,7 +165,7 @@ export function Invitations() {
                       <button
                         onClick={() => declineMutation.mutate(invite.id)}
                         disabled={isDeclining || isAccepting}
-                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary hover:border-red-300 hover:text-red-600 transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-text-secondary hover:border-danger hover:text-danger transition-colors disabled:opacity-50"
                       >
                         <X className="h-3.5 w-3.5" />
                         Decline
@@ -173,7 +173,7 @@ export function Invitations() {
                       <button
                         onClick={() => acceptMutation.mutate(invite)}
                         disabled={isAccepting || isDeclining}
-                        className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-dark transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-dark transition-colors disabled:opacity-50"
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" />
                         {isAccepting ? 'Joining…' : 'Accept'}

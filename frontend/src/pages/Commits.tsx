@@ -96,12 +96,12 @@ export function Commits() {
         {list.map((commit) => (
           <div
             key={commit.id}
-            className="rounded-xl border border-border bg-white p-5 shadow-sm"
+            className="rounded-lg border border-border bg-white p-4"
           >
             {/* Commit Header */}
             <div className="flex items-start gap-3 mb-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 mt-0.5">
-                <GitCommitHorizontal className="h-4.5 w-4.5 text-violet-600" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-surface-alt border border-border mt-0.5">
+                <GitCommitHorizontal className="h-4 w-4 text-text-secondary" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-semibold text-text">{commit.commit_message}</h3>
@@ -114,7 +114,7 @@ export function Commits() {
                     <GitBranch className="h-3 w-3" />
                     {commit.branch}
                   </span>
-                  <span className="font-mono text-[10px] bg-surface-alt px-1.5 py-0.5 rounded">
+                  <span className="font-mono text-[10px] bg-surface-alt px-1.5 py-0.5 rounded-md">
                     {commit.commit_hash}
                   </span>
                   <span>{formatRelativeTime(commit.pushed_at)}</span>
@@ -143,7 +143,7 @@ export function Commits() {
 
             {/* AI Analysis */}
             {commit.analysis && (
-              <div className="rounded-lg border border-border bg-surface-alt/50 p-4 space-y-3">
+              <div className="rounded-md border border-border bg-surface-alt/50 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-medium text-text-secondary uppercase tracking-wider">
                     AI Analysis — {commit.analysis.ai_model}

@@ -80,12 +80,12 @@ export function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-alt">
-      <div className="w-full max-w-sm">
+    <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="w-full max-w-sm px-4">
         {/* Logo */}
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <Target className="h-6 w-6 text-white" />
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-md bg-primary">
+            <Target className="h-5 w-5 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-text">OPPM AI</h1>
           <p className="text-sm text-text-secondary mt-1">Work Management System</p>
@@ -93,19 +93,19 @@ export function Login() {
 
         {/* Invite context banner */}
         {inviteToken && (
-          <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary text-center">
+          <div className="mb-4 rounded-lg border border-border bg-surface-alt px-4 py-3 text-sm text-text-secondary text-center">
             Sign in or create an account to join the workspace you were invited to.
           </div>
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="rounded-xl border border-border bg-white p-6 shadow-sm space-y-4">
+        <form onSubmit={handleSubmit} className="rounded-lg border border-border bg-white p-6 shadow-sm space-y-4">
           <h2 className="text-lg font-semibold text-center">
             {isSignUp ? 'Create Account' : 'Sign In'}
           </h2>
 
           {error && (
-            <div className={`rounded-lg px-3 py-2 text-sm ${error.includes('Check your email') ? 'bg-emerald-50 text-emerald-700' : 'bg-danger/10 text-danger'}`}>
+            <div className={`rounded-md px-3 py-2 text-sm ${error.includes('Check your email') ? 'bg-surface-alt text-text-secondary' : 'bg-surface-alt text-danger'}`}>
               {error}
             </div>
           )}
@@ -117,7 +117,7 @@ export function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+              className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm outline-none focus:border-text-secondary focus:ring-1 focus:ring-text-secondary/20 transition-all"
               placeholder="you@example.com"
             />
           </div>
@@ -130,7 +130,7 @@ export function Login() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+              className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm outline-none focus:border-text-secondary focus:ring-1 focus:ring-text-secondary/20 transition-all"
               placeholder="••••••••"
             />
           </div>
@@ -138,7 +138,7 @@ export function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors"
+            className="w-full rounded-md bg-primary py-2.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50 transition-colors"
           >
             {loading ? 'Please wait...' : isSignUp ? 'Sign Up' : 'Sign In'}
           </button>
@@ -148,7 +148,7 @@ export function Login() {
             <button
               type="button"
               onClick={() => { setIsSignUp(!isSignUp); setError('') }}
-              className="font-medium text-primary hover:underline"
+              className="font-medium text-text hover:underline"
             >
               {isSignUp ? 'Sign In' : 'Sign Up'}
             </button>

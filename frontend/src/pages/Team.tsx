@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/authStore'
 import type { WorkspaceMember, MemberSkill, SkillLevel } from '@/types'
 import { cn } from '@/lib/utils'
 import { Users, Plus, X, Loader2, Star } from 'lucide-react'
-import { WorkspaceMembersPanel } from './Settings'
+import { WorkspaceMembersPanel } from './settings/WorkspaceMembersPanel'
 
 const LEVEL_STYLES: Record<SkillLevel, string> = {
   beginner: 'bg-slate-100 text-slate-600 border-slate-200',
@@ -75,10 +75,10 @@ function MemberCard({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-white p-5 shadow-sm flex flex-col gap-4">
+    <div className="rounded-lg border border-border bg-white p-4 flex flex-col gap-4">
       {/* Member header */}
       <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-lg">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-surface-alt border border-border text-text font-semibold text-lg">
           {initial}
         </div>
         <div className="flex-1 min-w-0">
@@ -154,13 +154,13 @@ function MemberCard({
               onChange={(e) => setSkillName(e.target.value)}
               placeholder="e.g. React, Python, Design..."
               maxLength={100}
-              className="w-full rounded-lg border border-border px-3 py-1.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className="w-full rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-text-secondary focus:ring-1 focus:ring-text-secondary/20"
             />
             <div className="flex items-center gap-2">
               <select
                 value={skillLevel}
                 onChange={(e) => setSkillLevel(e.target.value as SkillLevel)}
-                className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm outline-none focus:border-primary"
+                className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-text-secondary"
               >
                 <option value="beginner">Beginner</option>
                 <option value="intermediate">Intermediate</option>
@@ -213,7 +213,7 @@ export function Team() {
             Manage workspace members, invitations, and skills in one place
           </p>
         </div>
-        <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-white py-20 shadow-sm text-center">
+        <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-white py-20 text-center">
           <Users className="h-12 w-12 text-text-secondary/30 mb-3" />
           <p className="text-base font-medium text-text">No workspace selected</p>
           <p className="text-sm text-text-secondary mt-1">

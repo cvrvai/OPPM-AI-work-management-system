@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from infrastructure.embedding import generate_embedding
-from infrastructure.rag.agent import classify_query
+from infrastructure.planner.agent import classify_query
 from infrastructure.rag.memory import load_memory
 from infrastructure.rag.reranker import rerank
 from infrastructure.rag.query_rewriter import rewrite_query

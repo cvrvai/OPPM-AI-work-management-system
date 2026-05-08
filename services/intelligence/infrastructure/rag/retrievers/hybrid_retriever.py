@@ -18,7 +18,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infrastructure.rag.agent import classify_query
+from infrastructure.planner.agent import classify_query
 from infrastructure.rag.retrievers.base_retriever import BaseRetriever, RetrievedChunk
 from infrastructure.rag.retrievers.graph_retriever import GraphRetriever, _needs_graph
 from infrastructure.rag.retrievers.keyword_retriever import KeywordRetriever

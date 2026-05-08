@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getAccessToken, getRefreshToken } from '@/lib/tokens'
+import { getAccessToken, getRefreshToken } from '@/lib/api/tokens'
 import {
   clearSession,
   fetchWithSessionRetry,
@@ -7,7 +7,7 @@ import {
   persistSession,
   refreshSessionTokens,
   subscribeToSessionEvents,
-} from '@/lib/sessionClient'
+} from '@/lib/api/sessionClient'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 

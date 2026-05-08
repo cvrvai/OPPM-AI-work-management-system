@@ -31,10 +31,6 @@ services:
         condition: service_healthy
       intelligence:
         condition: service_healthy
-      integrations:
-        condition: service_healthy
-      automation:
-        condition: service_healthy
 
   workspace:
     build:
@@ -98,26 +94,6 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-
-  automation:
-    build:
-      context: .
-      dockerfile: services/automation/Dockerfile
-    expose:
-      - "8003"
-    env_file:
-      - services/.env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
       interval: 10s
       timeout: 5s
       retries: 5

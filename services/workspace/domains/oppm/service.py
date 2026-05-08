@@ -456,6 +456,51 @@ async def _verify_project_workspace(session: AsyncSession, project_id: str, work
         raise HTTPException(status_code=404, detail="Project not found in this workspace")
 
 
+# ── FortuneSheet Scaffold ──
+
+async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id: str) -> list[dict]:
+    """Return a FortuneSheet-compatible OPPM scaffold for the App Editor.
+
+    Pulls project metadata (title, lead, dates) and builds the exact same
+    visual layout that scaffold.py produces for Google Sheets, but formatted
+    as FortuneSheet JSON so the frontend can render it directly.
+    """
+    from domains.oppm.fortunesheet_builder import build_fortunesheet_from_scaffold
+
+    project_repo = ProjectRepository(session)
+    project = await project_repo.find_by_id(project_id)
+    if not project or str(project.workspace_id) != workspace_id:
+        raise HTTPException(status_code=404, detail="Project not found in this workspace")
+
+    # Resolve lead name
+    ws_member_repo = WorkspaceMemberRepository(session)
+    ws_members = await ws_member_repo.find_members(workspace_id)
+    lead_name = "[Leader Name]"
+    if project.lead_id:
+        for m in ws_members:
+            if str(m.get("id")) == str(project.lead_id):
+                lead_name = m.get("display_name") or m.get("email", "[Leader Name]").split("@")[0]
+                break
+
+    # Compute weeks
+    start_date = _parse_date(project.start_date)
+    deadline = _parse_date(project.deadline)
+    weeks = _compute_weeks(start_date, deadline)
+
+    params = {
+        "title": project.title or "[Project Name]",
+        "leader": lead_name,
+        "objective": getattr(project, "objective_summary", None) or "[Project Objective]",
+        "deliverable": getattr(project, "deliverable_output", None) or "[Deliverable Output]",
+        "start_date": str(project.start_date) if project.start_date else "[Start Date]",
+        "deadline": str(project.deadline) if project.deadline else "[Deadline]",
+        "completed_by_weeks": len(weeks) if weeks else None,
+        "task_count": 24,
+    }
+
+    return build_fortunesheet_from_scaffold(params)
+
+
 # ── AI Config (workspace-level OPPM sheet prompt) ──
 
 _OPPM_SHEET_PROMPT_KEY = "oppm_sheet_prompt"

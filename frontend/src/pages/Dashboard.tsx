@@ -26,7 +26,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts'
-import { Skeleton } from '@/components/Skeleton'
+import { Skeleton } from '@/components/ui/Skeleton'
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
 
@@ -34,27 +34,23 @@ function StatCard({
   label,
   value,
   icon: Icon,
-  borderColor,
-  iconBg,
   subtitle,
 }: {
   label: string
   value: string | number
   icon: React.ElementType
-  borderColor: string
-  iconBg: string
   subtitle?: string
 }) {
   return (
-    <div className={cn('rounded-xl border border-border bg-white p-5 shadow-sm border-l-4', borderColor)}>
+    <div className="rounded-lg border border-border bg-white p-4 hover:bg-surface-alt/50 transition-colors">
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">{label}</p>
-          <p className="mt-1.5 text-3xl font-bold text-text leading-none">{value}</p>
+          <p className="text-xs font-medium text-text-secondary">{label}</p>
+          <p className="mt-1 text-2xl font-semibold text-text leading-none">{value}</p>
           {subtitle && <p className="mt-1 text-xs text-text-secondary">{subtitle}</p>}
         </div>
-        <div className={cn('ml-3 flex-shrink-0 rounded-xl p-2.5', iconBg)}>
-          <Icon className="h-5 w-5 text-white" />
+        <div className="ml-3 flex-shrink-0 rounded-md p-2 bg-surface-alt border border-border">
+          <Icon className="h-4 w-4 text-text-secondary" />
         </div>
       </div>
     </div>
@@ -63,14 +59,14 @@ function StatCard({
 
 function StatCardSkeleton() {
   return (
-    <div className="rounded-xl border border-border bg-white p-5 shadow-sm border-l-4 border-l-slate-200">
+    <div className="rounded-lg border border-border bg-white p-4">
       <div className="flex items-start justify-between">
         <div className="flex-1 space-y-2">
           <Skeleton className="h-3 w-24" />
-          <Skeleton className="h-8 w-16" />
+          <Skeleton className="h-7 w-16" />
           <Skeleton className="h-3 w-20" />
         </div>
-        <Skeleton className="ml-3 h-10 w-10 rounded-xl" />
+        <Skeleton className="ml-3 h-8 w-8 rounded-md" />
       </div>
     </div>
   )
@@ -205,31 +201,23 @@ export function Dashboard() {
               value={s.active_projects}
               subtitle={`${s.total_projects} total`}
               icon={FolderKanban}
-              borderColor="border-l-primary"
-              iconBg="bg-primary"
             />
             <StatCard
               label="Tasks Completed"
               value={`${taskPct}%`}
               subtitle={`${s.completed_tasks} of ${s.total_tasks} tasks`}
               icon={CheckCircle2}
-              borderColor="border-l-emerald-500"
-              iconBg="bg-accent"
             />
             <StatCard
               label="Commits Today"
               value={s.total_commits_today}
               icon={GitCommitHorizontal}
-              borderColor="border-l-violet-500"
-              iconBg="bg-violet-500"
             />
             <StatCard
               label="Avg Quality"
               value={`${s.avg_quality_score}%`}
               subtitle={`Alignment: ${s.avg_alignment_score}%`}
               icon={Shield}
-              borderColor="border-l-amber-500"
-              iconBg="bg-amber-500"
             />
           </>
         )}
@@ -239,9 +227,9 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
         {/* Project Progress Bar Chart */}
-        <div className="lg:col-span-2 rounded-xl border border-border bg-white p-5 shadow-sm">
+        <div className="lg:col-span-2 rounded-lg border border-border bg-white p-5">
           <div className="mb-4 flex items-center gap-2">
-            <BarChart2 className="h-4 w-4 text-primary" />
+            <BarChart2 className="h-4 w-4 text-text-secondary" />
             <h2 className="text-base font-semibold text-text">Project Progress</h2>
             {!statsLoading && s.project_progress.length > 0 && (
               <span className="ml-auto text-xs text-text-secondary">{s.project_progress.length} projects</span>

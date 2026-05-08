@@ -1,22 +1,26 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { ApiError } from '@/lib/api'
+import { lazyNamed } from '@/lib/utils/lazyNamed'
 import { Layout } from '@/components/layout/Layout'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { SuspenseFallback } from '@/components/ui/SuspenseFallback'
 import { Login } from '@/pages/Login'
-import { Dashboard } from '@/pages/Dashboard'
-import { Projects } from '@/pages/Projects'
-import { ProjectDetail } from '@/pages/ProjectDetail'
-import { OPPMView } from '@/pages/OPPMView'
-import { AgileBoard } from '@/pages/AgileBoard'
-import { WaterfallView } from '@/pages/WaterfallView'
-import { Commits } from '@/pages/Commits'
-import { Settings } from '@/pages/Settings'
-import { AcceptInvite } from '@/pages/AcceptInvite'
-import { Team } from '@/pages/Team'
-import { Invitations } from '@/pages/Invitations'
+
+const Dashboard = lazyNamed(() => import('@/pages/Dashboard'), 'Dashboard')
+const Projects = lazyNamed(() => import('@/pages/Projects'), 'Projects')
+const ProjectDetail = lazyNamed(() => import('@/pages/ProjectDetail'), 'ProjectDetail')
+const OPPMView = lazyNamed(() => import('@/pages/OPPMView'), 'OPPMView')
+const AgileBoard = lazyNamed(() => import('@/pages/AgileBoard'), 'AgileBoard')
+const WaterfallView = lazyNamed(() => import('@/pages/WaterfallView'), 'WaterfallView')
+const Commits = lazyNamed(() => import('@/pages/Commits'), 'Commits')
+const Settings = lazyNamed(() => import('@/pages/Settings'), 'Settings')
+const AcceptInvite = lazyNamed(() => import('@/pages/AcceptInvite'), 'AcceptInvite')
+const Team = lazyNamed(() => import('@/pages/Team'), 'Team')
+const Invitations = lazyNamed(() => import('@/pages/Invitations'), 'Invitations')
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,26 +73,28 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/invites/:token" element={<AcceptInvite />} />
-          <Route path="/invite/accept/:token" element={<AcceptInvite />} />
+          <Route path="/invites/:token" element={<Suspense fallback={<SuspenseFallback />}><AcceptInvite /></Suspense>} />
+          <Route path="/invite/accept/:token" element={<Suspense fallback={<SuspenseFallback />}><AcceptInvite /></Suspense>} />
           <Route
             path="/*"
             element={
               <ProtectedRoute>
-                <Layout />
+                <ErrorBoundary context="app-shell">
+                  <Layout />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           >
-            <Route index element={<Dashboard />} />
-            <Route path="projects" element={<Projects />} />
-            <Route path="projects/:id" element={<ProjectDetail />} />
-            <Route path="projects/:id/oppm" element={<OPPMView />} />
-            <Route path="projects/:id/agile" element={<AgileBoard />} />
-            <Route path="projects/:id/waterfall" element={<WaterfallView />} />
-            <Route path="team" element={<Team />} />
-            <Route path="invitations" element={<Invitations />} />
-            <Route path="commits" element={<Commits />} />
-            <Route path="settings" element={<Settings />} />
+            <Route index element={<Suspense fallback={<SuspenseFallback />}><Dashboard /></Suspense>} />
+            <Route path="projects" element={<Suspense fallback={<SuspenseFallback />}><Projects /></Suspense>} />
+            <Route path="projects/:id" element={<Suspense fallback={<SuspenseFallback />}><ProjectDetail /></Suspense>} />
+            <Route path="projects/:id/oppm" element={<Suspense fallback={<SuspenseFallback />}><OPPMView /></Suspense>} />
+            <Route path="projects/:id/agile" element={<Suspense fallback={<SuspenseFallback />}><AgileBoard /></Suspense>} />
+            <Route path="projects/:id/waterfall" element={<Suspense fallback={<SuspenseFallback />}><WaterfallView /></Suspense>} />
+            <Route path="team" element={<Suspense fallback={<SuspenseFallback />}><Team /></Suspense>} />
+            <Route path="invitations" element={<Suspense fallback={<SuspenseFallback />}><Invitations /></Suspense>} />
+            <Route path="commits" element={<Suspense fallback={<SuspenseFallback />}><Commits /></Suspense>} />
+            <Route path="settings" element={<Suspense fallback={<SuspenseFallback />}><Settings /></Suspense>} />
           </Route>
         </Routes>
       </BrowserRouter>

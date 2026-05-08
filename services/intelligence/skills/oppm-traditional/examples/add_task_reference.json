@@ -1,0 +1,104 @@
+{
+  "name": "Add task using sheet actions reference",
+  "description": "User says 'add task 25: Implement OAuth2 authentication' — AI uses sheet-actions.yaml add_task sequence",
+  "user_input": "add task 25: Implement OAuth2 authentication",
+  "context": {
+    "task_number": 25,
+    "task_row": 30,
+    "task_title": "Implement OAuth2 authentication",
+    "last_task_row_before": 29
+  },
+  "expected_actions": [
+    {
+      "action": "set_value",
+      "params": {
+        "range": "H30",
+        "value": "25"
+      },
+      "reason": "Step 1: Write task number in column H (from sheet-actions.yaml sequences.add_task)"
+    },
+    {
+      "action": "set_value",
+      "params": {
+        "range": "I30",
+        "value": "Implement OAuth2 authentication"
+      },
+      "reason": "Step 2: Write task title in column I"
+    },
+    {
+      "action": "set_border",
+      "params": {
+        "range": "A30:AI30",
+        "style": "SOLID",
+        "color": "#CCCCCC",
+        "width": 1
+      },
+      "reason": "Step 3: Apply gray borders to new task row (error_prevention: task rows must have gray #CCCCCC borders)"
+    },
+    {
+      "action": "set_border",
+      "params": {
+        "range": "J30:AI30",
+        "style": "NONE"
+      },
+      "reason": "Step 4: Remove borders from timeline area of new row (error_prevention: timeline J-AI must NEVER have borders)"
+    },
+    {
+      "action": "set_font_size",
+      "params": {
+        "range": "H30:I30",
+        "size": 10
+      },
+      "reason": "Step 5: Set font size to 10px (from template.yaml fonts.task_number and task_title)"
+    },
+    {
+      "action": "set_bold",
+      "params": {
+        "range": "H30",
+        "bold": true
+      },
+      "reason": "Step 6: Make task number bold (from template.yaml fonts.task_number.bold=true)"
+    },
+    {
+      "action": "set_alignment",
+      "params": {
+        "range": "H30",
+        "horizontal": "CENTER",
+        "vertical": "MIDDLE"
+      },
+      "reason": "Step 7a: Center-align task number (from template.yaml fonts.task_number.alignment=center)"
+    },
+    {
+      "action": "set_alignment",
+      "params": {
+        "range": "I30",
+        "horizontal": "LEFT",
+        "vertical": "MIDDLE"
+      },
+      "reason": "Step 7b: Left-align task title (from template.yaml fonts.task_title.alignment=left)"
+    },
+    {
+      "action": "set_text_wrap",
+      "params": {
+        "range": "I30",
+        "mode": "CLIP"
+      },
+      "reason": "Step 8: Use CLIP wrap for task title (error_prevention: CLIP preserves row height, WRAP expands it)"
+    },
+    {
+      "action": "set_row_height",
+      "params": {
+        "start_index": 30,
+        "end_index": 30,
+        "height": 21
+      },
+      "reason": "Step 9: Set row height to 21px (from template.yaml row_heights.task_rows and error_prevention rule)"
+    }
+  ],
+  "notes": [
+    "AI followed the 'add_task' sequence from sheet-actions.yaml",
+    "AI applied error_prevention rules: timeline=NONE, tasks=gray, row_height=21",
+    "AI used template.yaml for exact values: font sizes, alignments, wrap mode",
+    "Total actions: 10 — all generated from structured references"
+  ]
+}
