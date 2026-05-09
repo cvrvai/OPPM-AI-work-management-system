@@ -66,7 +66,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     deadline = str(params.get("deadline") or "[Deadline]")
     weeks = params.get("completed_by_weeks")
     weeks_label = f"{int(weeks)} weeks" if weeks else "N weeks"
-    task_count = max(1, min(30, int(params.get("task_count") or _SCAFFOLD_DEFAULT_TASK_COUNT)))
+    task_count = max(1, int(params.get("task_count") or _SCAFFOLD_DEFAULT_TASK_COUNT))
+    tasks = params.get("tasks") or []
     # Optional public image URL for the X-pattern matrix center (replaces the
     # five text labels Major Tasks / Target Dates / Sub Objectives / Costs /
     # Summary & Forecast with an embedded image). Must be publicly fetchable
@@ -130,9 +131,14 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_value", "params": {"range": "N6", "value": f"Project Completed By: {weeks_label}"}})
     a.append({"action": "set_value", "params": {"range": "AE6", "value": "Owner / Priority"}})
 
-    # ── 3. Task numbers 1..N in column G (G:H merged per row) ──
+    # ── 3. Task numbers 1..N in column G (G:H merged per row) + task names in I:M ──
     for i in range(1, task_count + 1):
         a.append({"action": "set_value", "params": {"range": f"H{6 + i}", "value": str(i)}})
+        task_name = ""
+        if i <= len(tasks):
+            t = tasks[i - 1]
+            task_name = str(t.get("name") or t.get("title") or "")
+        a.append({"action": "set_value", "params": {"range": f"I{6 + i}", "value": task_name}})
 
     # ── 4. Bottom matrix content ──
     # 4a. Sub-objective numbers 1..6 in the matrix header row A:F (row 42)
@@ -721,7 +727,7 @@ def _exec_scaffold_oppm_form(
     deliverable = str(params.get("deliverable") or "[Deliverable Output]")
     start_date = str(params.get("start_date") or "[Start Date]")
     deadline = str(params.get("deadline") or "[Deadline]")
-    task_count = max(1, min(30, int(params.get("task_count") or 24)))
+    task_count = max(1, int(params.get("task_count") or 24))
 
     sq = sheet_title.replace("'", "''")  # escape single quotes for A1 range notation
     LAST_TASK = 5 + task_count           # last row of task area

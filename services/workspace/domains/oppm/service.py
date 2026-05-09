@@ -489,8 +489,16 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     weeks = _compute_weeks(start_date, deadline)
 
     task_repo = TaskRepository(session)
-    project_tasks = await task_repo.find_project_tasks(project_id, limit=31)
-    task_count = max(1, min(30, len(project_tasks)))
+    project_tasks = await task_repo.find_project_tasks(project_id, limit=1000)
+    task_count = len(project_tasks)
+
+    # Build task list for scaffold
+    tasks = []
+    for t in project_tasks:
+        tasks.append({
+            "name": t.title or "",
+            "title": t.title or "",
+        })
 
     params = {
         "title": project.title or "[Project Name]",
@@ -501,6 +509,7 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
         "deadline": str(project.deadline) if project.deadline else "[Deadline]",
         "completed_by_weeks": len(weeks) if weeks else None,
         "task_count": task_count,
+        "tasks": tasks,
     }
 
     return build_fortunesheet_from_scaffold(params)

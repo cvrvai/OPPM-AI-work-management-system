@@ -223,6 +223,9 @@ class _FortuneSheetBuilder:
                     existing = cell
                     break
             if existing:
+                # Update value on existing cell
+                existing["v"]["v"] = text
+                existing["v"]["m"] = text
                 # Merge format into existing cell
                 for k, v in fmt.items():
                     if k == "wrap" and v:
@@ -234,7 +237,6 @@ class _FortuneSheetBuilder:
                 # If the existing cell has inlineStr with newlines, ensure
                 # the display text (m) stays in sync with the raw value (v)
                 if "\n" in text or "\r" in text:
-                    existing["v"]["m"] = text
                     existing["v"]["ct"] = {
                         "fa": "General",
                         "t": "inlineStr",
