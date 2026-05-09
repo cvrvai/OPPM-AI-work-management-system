@@ -354,8 +354,16 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     }})
     if LAST_TASK >= 8:
         a.append({"action": "set_border", "params": {"range": f"AF8:AJ{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
-    # 10e. Bottom matrix → black grid (A:F + H:AI, skipping the blank image area G)
-    a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_TOP}:G{R_MATRIX_BOTTOM}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # 10e. Bottom matrix → outer border only on B:G (sub-obj check columns + identity column)
+    # (inner vertical borders removed so columns C-F don't show lines)
+    a.append({"action": "set_border", "params": {
+        "range": f"B{R_MATRIX_TOP}:G{R_MATRIX_BOTTOM}",
+        "style": "NONE",
+        "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
+        "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
+        "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
+    }})
     # Border around the full G42:L54 merged area (outer edges only)
     a.append({"action": "set_border", "params": {
         "range": f"H{R_MATRIX_HEADER}:M{R_MATRIX_BOTTOM}",
@@ -483,6 +491,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "style": "NONE",
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
+    # Bottom border at the end of the form (row 67 for 10 tasks)
+    a.append({"action": "set_border", "params": {"range": f"B{R_FORM_BOTTOM}:G{R_FORM_BOTTOM}", "style": "NONE",
+                                                  "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
 
     # ── 11. Fonts, alignment, rotation ──
     # Rows 1-2 leader/name
