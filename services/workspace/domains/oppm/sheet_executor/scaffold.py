@@ -97,13 +97,26 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     R_RISK_END = R_RISK_START + 3               # 4 risk rows
     R_FORM_BOTTOM = R_RISK_END                   # last form row
 
+    # ── Dynamic week column count ──
+    # Scale up/down based on actual weeks data; minimum 4 columns as fallback
+    week_col_count = max(4, len(weeks_data)) if weeks_data and isinstance(weeks_data, list) else 4
+    owner_col_count = _SCAFFOLD_OWNER_COLS
+
     # Column indices (0-based) for dynamic ranges
     COL_OFFSET = 1                              # leave 1 empty column on left
     C_WEEK_START = 13 + COL_OFFSET              # N = column 14 (0-based)
-    C_WEEK_END = C_WEEK_START + _SCAFFOLD_WEEK_DATE_COLS - 1   # AD = column 30
-    C_OWNER_START = C_WEEK_END + 1              # AE = column 31
-    C_OWNER_END = C_OWNER_START + _SCAFFOLD_OWNER_COLS - 1       # AJ = column 36
-    LAST_COL_LETTER = _SCAFFOLD_LAST_COL
+    C_WEEK_END = C_WEEK_START + week_col_count - 1
+    C_OWNER_START = C_WEEK_END + 1
+    C_OWNER_END = C_OWNER_START + owner_col_count - 1
+    LAST_COL_LETTER = _col_index_to_letters(C_OWNER_END + 1)
+
+    # Pre-computed column letters for cleaner range strings
+    L_WEEK_START = _col_index_to_letters(C_WEEK_START)     # 14 → N
+    L_WEEK_END   = _col_index_to_letters(C_WEEK_END)
+    L_OWNER_START = _col_index_to_letters(C_OWNER_START)
+    L_OWNER_END  = _col_index_to_letters(C_OWNER_END)
+    L_OWNER_2ND  = _col_index_to_letters(C_OWNER_START + 1)  # second owner column
+    L_TASK_END   = "M"  # task title area ends at M (fixed)
 
     # Try to compute real week-date labels if start_date is parseable
     start_dt: _d | None = None
@@ -130,8 +143,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Row 6: 4 sub-headers
     a.append({"action": "set_value", "params": {"range": "B6", "value": "Sub objective"}})
     a.append({"action": "set_value", "params": {"range": "H6", "value": "Major Tasks (Deadline)"}})
-    a.append({"action": "set_value", "params": {"range": "N6", "value": f"Project Completed By: {weeks_label}"}})
-    a.append({"action": "set_value", "params": {"range": "AE6", "value": "Owner / Priority"}})
+    a.append({"action": "set_value", "params": {"range": f"{L_WEEK_START}6", "value": f"Project Completed By: {weeks_label}"}})
+    a.append({"action": "set_value", "params": {"range": f"{L_OWNER_START}6", "value": "Owner / Priority"}})
 
     # ── 3. Task numbers 1..N in column G (G:H merged per row) + task names in I:M ──
     for i in range(1, task_count + 1):
@@ -170,32 +183,33 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     for r in range(R_GAP_START, R_GAP_END + 1):
         a.append({"action": "set_value", "params": {"range": f"B{r}", "value": ""}})
 
-    # 5c. Week-date rotated headers in M:AC — on matrix header row
+    # 5c. Week-date rotated headers — on matrix header row
     # Use real week dates if available, otherwise fall back to "Week N"
     week_labels = []
     if weeks_data and isinstance(weeks_data, list):
-        for w in weeks_data[:_SCAFFOLD_WEEK_DATE_COLS]:
+        for w in weeks_data[:week_col_count]:
             if isinstance(w, dict):
                 label = w.get("label") or w.get("date") or ""
             else:
                 label = str(w)
             week_labels.append(label)
-    # Pad with placeholders if fewer than 17 weeks
-    while len(week_labels) < _SCAFFOLD_WEEK_DATE_COLS:
+    # Pad with placeholders if fewer than week_col_count weeks
+    while len(week_labels) < week_col_count:
         week_labels.append(f"Week {len(week_labels) + 1}")
-    for w in range(_SCAFFOLD_WEEK_DATE_COLS):
-        col_letter = _col_index_to_letters(C_WEEK_START + w)  # M=13..AC=29 (1-based)
+    for w in range(week_col_count):
+        col_letter = _col_index_to_letters(C_WEEK_START + w)  # 1-based
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": week_labels[w]}})
 
     # 5d. Owner-name rotated headers in AD:AI (6 owner columns) — on matrix header row
     # Use real member names if available
     owner_labels = ["Project Leader"]
-    for i in range(5):
+    for i in range(owner_col_count - 1):
         if i < len(members):
             owner_labels.append(members[i])
         else:
             owner_labels.append(f"Member {i + 1}")
-    for col_letter, label in zip(("AE", "AF", "AG", "AH", "AI", "AJ"), owner_labels):
+    for col_idx, label in enumerate(owner_labels):
+        col_letter = _col_index_to_letters(C_OWNER_START + 1 + col_idx)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": label}})
 
     # ── 6. Summary / Forecast / Risk section ──
@@ -215,16 +229,16 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Row 2: logo | project leader | project name (each standalone row)
     a.append({"action": "merge_cells", "params": {"range": "B2:G2"}})
     a.append({"action": "merge_cells", "params": {"range": "H2:K2"}})
-    a.append({"action": "merge_cells", "params": {"range": "M2:AJ2"}})
+    a.append({"action": "merge_cells", "params": {"range": f"M2:{L_OWNER_END}2"}})
     # Rows 3-5: each row merged separately
-    a.append({"action": "merge_cells", "params": {"range": "H3:AJ3"}})
-    a.append({"action": "merge_cells", "params": {"range": "H4:AJ4"}})
-    a.append({"action": "merge_cells", "params": {"range": "H5:AJ5"}})
+    a.append({"action": "merge_cells", "params": {"range": f"H3:{L_OWNER_END}3"}})
+    a.append({"action": "merge_cells", "params": {"range": f"H4:{L_OWNER_END}4"}})
+    a.append({"action": "merge_cells", "params": {"range": f"H5:{L_OWNER_END}5"}})
     # Row 6 sub-headers
     a.append({"action": "merge_cells", "params": {"range": "B6:G6"}})
     a.append({"action": "merge_cells", "params": {"range": "H6:M6"}})
-    a.append({"action": "merge_cells", "params": {"range": "N6:AD6"}})
-    a.append({"action": "merge_cells", "params": {"range": "AE6:AJ6"}})
+    a.append({"action": "merge_cells", "params": {"range": f"{L_WEEK_START}6:{L_WEEK_END}6"}})
+    a.append({"action": "merge_cells", "params": {"range": f"{L_OWNER_START}6:{L_OWNER_END}6"}})
     # Task rows: G holds the task number (same width as identity letter column)
     # H:L merged per row as the task title/description area
     for i in range(1, task_count + 1):
@@ -250,7 +264,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "merge_cells", "params": {"range": f"H{R_FORECAST_START}:H{R_FORECAST_END}"}})
     a.append({"action": "merge_cells", "params": {"range": f"H{R_RISK_START}:H{R_RISK_END}"}})
     for r in range(R_SUMMARY_START, R_RISK_END + 1):
-        a.append({"action": "merge_cells", "params": {"range": f"I{r}:AJ{r}"}})
+        a.append({"action": "merge_cells", "params": {"range": f"I{r}:{L_OWNER_END}{r}"}})
 
     # ── 8. Row heights ──
     # Rows 1-2 header: compact
@@ -274,10 +288,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 6, "width": 30}})
     # Column I (task title): wide for long task descriptions
     a.append({"action": "set_column_width", "params": {"start_index": 8, "end_index": 8, "width": 280}})
-    # Columns J-AD (timeline grid): 17 columns at 25px each
-    a.append({"action": "set_column_width", "params": {"start_index": 9, "end_index": 30, "width": 25}})
-    # Columns AE-AJ (owner slots): match the Project Completed By grid width
-    a.append({"action": "set_column_width", "params": {"start_index": 30, "end_index": 36, "width": 25}})
+    # Timeline grid columns: week_col_count columns at 25px each
+    a.append({"action": "set_column_width", "params": {"start_index": 9, "end_index": C_WEEK_END + 1, "width": 25}})
+    # Owner columns: owner_col_count columns at 25px
+    a.append({"action": "set_column_width", "params": {"start_index": C_OWNER_START + 1, "end_index": C_OWNER_END + 1, "width": 25}})
 
     # ── 9. Backgrounds ──
     # Big white image area (G42:L54) — white blank background for image insertion
@@ -286,7 +300,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # ── 10. Borders — frame-only for merged areas, grid for non-merged areas ──
     # 10a. Header rows 2-6 → outer frame only (avoid borders inside merged cells)
     a.append({"action": "set_border", "params": {
-        "range": "B2:AJ6",
+        "range": f"B2:{L_OWNER_END}6",
         "style": "NONE",
         "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
@@ -309,10 +323,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
     # 10a-iii. Inner horizontal divider between rows 2 and 3 (below leader/title, above metadata)
-    a.append({"action": "set_border", "params": {"range": "B2:AJ2", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"B2:{L_OWNER_END}2", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # 10a-iv. Inner horizontal divider between rows 5 and 6 (below metadata, above sub-headers)
-    a.append({"action": "set_border", "params": {"range": "H5:AJ5", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"H5:{L_OWNER_END}5", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Top border on Sub objective cell (B6:G6)
     a.append({"action": "set_border", "params": {"range": "B6:G6", "style": "NONE",
@@ -350,10 +364,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     if LAST_TASK >= 8:
         a.append({"action": "set_border", "params": {"range": f"I8:M{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
     # 10b-iii. Remove borders from timeline area (N:AD) in task rows
-    a.append({"action": "set_border", "params": {"range": f"N7:AD{LAST_TASK}", "style": "NONE"}})
+    a.append({"action": "set_border", "params": {"range": f"{L_WEEK_START}7:{L_WEEK_END}{LAST_TASK}", "style": "NONE"}})
     # Restore the right divider at the edge of the Project Completed By area.
     a.append({"action": "set_border", "params": {
-        "range": f"AD7:AD{LAST_TASK}",
+        "range": f"{L_WEEK_END}7:{L_WEEK_END}{LAST_TASK}",
         "style": "NONE",
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
@@ -361,21 +375,21 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # The first owner column AE omits its left border so the black divider on AD remains visible.
     for row in range(7, LAST_TASK + 1):
         a.append({"action": "set_border", "params": {
-            "range": f"AE{row}:AE{row}",
+            "range": f"{L_OWNER_START}{row}:{L_OWNER_START}{row}",
             "style": "NONE",
             "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_TASK_GRAY, "bottom_width": 1,
             "right_style": "SOLID", "right_color": _SCAFFOLD_TASK_GRAY, "right_width": 1,
             **({"top_style": "SOLID", "top_color": _SCAFFOLD_TASK_GRAY, "top_width": 1} if row > 7 else {}),
         }})
     a.append({"action": "set_border", "params": {
-        "range": "AF7:AJ7",
+        "range": f"{L_OWNER_2ND}7:{L_OWNER_END}7",
         "style": "NONE",
         "left_style": "SOLID", "left_color": _SCAFFOLD_TASK_GRAY, "left_width": 1,
         "right_style": "SOLID", "right_color": _SCAFFOLD_TASK_GRAY, "right_width": 1,
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_TASK_GRAY, "bottom_width": 1,
     }})
     if LAST_TASK >= 8:
-        a.append({"action": "set_border", "params": {"range": f"AF8:AJ{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
+        a.append({"action": "set_border", "params": {"range": f"{L_OWNER_2ND}8:{L_OWNER_END}{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
     # 10e. Bottom matrix → outer border only on B:G (sub-obj check columns + identity column)
     # (inner vertical borders removed so columns C-F don't show lines)
     a.append({"action": "set_border", "params": {
@@ -398,7 +412,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Timeline grid header row (H:AI row 42) — outer border only, no inner grid
     # (week/member columns are merged vertically; inner borders would show at row 43)
     a.append({"action": "set_border", "params": {
-        "range": f"I{R_MATRIX_TOP}:AJ{R_MATRIX_TOP}",
+        "range": f"I{R_MATRIX_TOP}:{L_OWNER_END}{R_MATRIX_TOP}",
         "style": "NONE",
         "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
@@ -407,7 +421,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     }})
     # Timeline grid body (H:AI rows 43-54) — outer border only, no inner grid
     a.append({"action": "set_border", "params": {
-        "range": f"I{X_TOP}:AJ{X_BOTTOM}",
+        "range": f"I{X_TOP}:{L_OWNER_END}{X_BOTTOM}",
         "style": "NONE",
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
@@ -416,7 +430,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # 10f. Summary/Forecast/Risk section → outer borders only (avoid conflicts with merged H:AI)
     for (s, e) in ((R_SUMMARY_START, R_SUMMARY_DELIV_END), (R_FORECAST_START, R_FORECAST_END), (R_RISK_START, R_RISK_END)):
         a.append({"action": "set_border", "params": {
-            "range": f"H{s}:AJ{e}",
+            "range": f"H{s}:{L_OWNER_END}{e}",
             "style": "NONE",
             "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
             "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
@@ -446,7 +460,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({
         "action": "set_border",
         "params": {
-            "range": f"N7:N{LAST_TASK}",
+            "range": f"{L_WEEK_START}7:{L_WEEK_START}{LAST_TASK}",
             "style": "NONE",
             "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
         },
@@ -461,18 +475,18 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         },
     })
     # 10h. Horizontal thick dividers
-    a.append({"action": "set_border", "params": {"range": "B6:AJ6", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"B6:{L_OWNER_END}6", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
-    a.append({"action": "set_border", "params": {"range": f"B{LAST_TASK}:AJ{LAST_TASK}", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"B{LAST_TASK}:{L_OWNER_END}{LAST_TASK}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Thick divider below matrix header row
-    a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_HEADER}:AJ{R_MATRIX_HEADER}", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_HEADER}:{L_OWNER_END}{R_MATRIX_HEADER}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Thick divider above identity strip (separates the task block from the identity rows)
-    a.append({"action": "set_border", "params": {"range": f"B{R_IDENTITY_START - 1}:AJ{R_IDENTITY_START - 1}", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"B{R_IDENTITY_START - 1}:{L_OWNER_END}{R_IDENTITY_START - 1}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Thick divider below identity strip (separates identity rows from the matrix below)
-    a.append({"action": "set_border", "params": {"range": f"B{R_IDENTITY_END}:AJ{R_IDENTITY_END}", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"B{R_IDENTITY_END}:{L_OWNER_END}{R_IDENTITY_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Left border on column G (identity letters) and right border on the merged H:L label area
     a.append({"action": "set_border", "params": {
@@ -489,17 +503,17 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "inner_vertical_style": "NONE",
     }})
     # Thick divider below matrix (separates timeline body from Summary section)
-    a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_BOTTOM}:AJ{R_MATRIX_BOTTOM}", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_BOTTOM}:{L_OWNER_END}{R_MATRIX_BOTTOM}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # ── Matrix header area bottom borders ──
     # Week section (N:AC): bottom border at end of merged header area
     a.append({"action": "set_border", "params": {"range": f"N{R_DATE_HEADER_END}:AC{R_DATE_HEADER_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Week section right border at column AD (vertical divider between week and member)
-    a.append({"action": "set_border", "params": {"range": f"AD{R_MATRIX_HEADER}:AD{R_DATE_HEADER_END}", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"{L_WEEK_END}{R_MATRIX_HEADER}:{L_WEEK_END}{R_DATE_HEADER_END}", "style": "NONE",
                                                   "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1}})
     # Member section (AD:AJ): bottom border at end of merged header area
-    a.append({"action": "set_border", "params": {"range": f"AD{R_DATE_HEADER_END}:AJ{R_DATE_HEADER_END}", "style": "NONE",
+    a.append({"action": "set_border", "params": {"range": f"{L_WEEK_END}{R_DATE_HEADER_END}:{L_OWNER_END}{R_DATE_HEADER_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Restore the outer left/right edges after interior grids so task-row gray borders
     # do not override the full-form frame.
@@ -509,7 +523,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
     }})
     a.append({"action": "set_border", "params": {
-        "range": f"AJ1:AJ{R_FORM_BOTTOM}",
+        "range": f"{L_OWNER_END}1:{L_OWNER_END}{R_FORM_BOTTOM}",
         "style": "NONE",
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
@@ -519,16 +533,16 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
 
     # ── 11. Fonts, alignment, rotation ──
     # Rows 1-2 leader/name
-    a.append({"action": "set_font_size", "params": {"range": "B2:AJ2", "size": 11}})
-    a.append({"action": "set_bold", "params": {"range": "B2:AJ2", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": "B2:AJ2", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"B2:{L_OWNER_END}2", "size": 11}})
+    a.append({"action": "set_bold", "params": {"range": f"B2:{L_OWNER_END}2", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"B2:{L_OWNER_END}2", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     # Rows 3-5 metadata (left aligned, NOT bold — matches example)
-    a.append({"action": "set_font_size", "params": {"range": "H3:AJ5", "size": 10}})
-    a.append({"action": "set_alignment", "params": {"range": "H3:AJ5", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"H3:{L_OWNER_END}5", "size": 10}})
+    a.append({"action": "set_alignment", "params": {"range": f"H3:{L_OWNER_END}5", "horizontal": "LEFT", "vertical": "MIDDLE"}})
     # Row 5 sub-headers
-    a.append({"action": "set_font_size", "params": {"range": "B6:AJ6", "size": 10}})
-    a.append({"action": "set_bold", "params": {"range": "B6:AJ6", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": "B6:AJ6", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"B6:{L_OWNER_END}6", "size": 10}})
+    a.append({"action": "set_bold", "params": {"range": f"B6:{L_OWNER_END}6", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": f"B6:{L_OWNER_END}6", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     # Task numbers (column G only — same width as identity letter column)
     a.append({"action": "set_font_size", "params": {"range": f"H7:H{LAST_TASK}", "size": 10}})
     a.append({"action": "set_bold", "params": {"range": f"H7:H{LAST_TASK}", "bold": True}})
@@ -539,7 +553,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_text_wrap", "params": {"range": f"I7:M{LAST_TASK}", "mode": "CLIP"}})
     # Sub-objective check columns (A-F) and owner columns (AD-AI)
     a.append({"action": "set_alignment", "params": {"range": f"B7:G{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_alignment", "params": {"range": f"AE7:AJ{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_alignment", "params": {"range": f"{L_OWNER_START}7:{L_OWNER_END}{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     # Bottom matrix sub-objective header row numbers (A:F, row 42): horizontal, centered, small, bold
     a.append({"action": "set_alignment", "params": {"range": f"B{R_MATRIX_HEADER}:G{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_font_size", "params": {"range": f"B{R_MATRIX_HEADER}:G{R_MATRIX_HEADER}", "size": 9}})
@@ -554,14 +568,14 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_font_size", "params": {"range": f"H{R_IDENTITY_START}:H{R_IDENTITY_END}", "size": 9}})
     a.append({"action": "set_bold", "params": {"range": f"H{R_IDENTITY_START}:H{R_IDENTITY_END}", "bold": True}})
     # Bottom matrix date/timeline columns (M-AC): rotated 90° + center + small font
-    a.append({"action": "set_text_rotation", "params": {"range": f"N{R_MATRIX_HEADER}:AD{R_MATRIX_HEADER}", "angle": 90}})
-    a.append({"action": "set_alignment", "params": {"range": f"N{R_MATRIX_HEADER}:AD{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_font_size", "params": {"range": f"N{R_MATRIX_HEADER}:AD{R_MATRIX_HEADER}", "size": 9}})
+    a.append({"action": "set_text_rotation", "params": {"range": f"{L_WEEK_START}{R_MATRIX_HEADER}:{L_WEEK_END}{R_MATRIX_HEADER}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"{L_WEEK_START}{R_MATRIX_HEADER}:{L_WEEK_END}{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"{L_WEEK_START}{R_MATRIX_HEADER}:{L_WEEK_END}{R_MATRIX_HEADER}", "size": 9}})
     # Bottom matrix owner columns (AD-AI): header row rotated 90° + center
-    a.append({"action": "set_text_rotation", "params": {"range": f"AE{R_MATRIX_HEADER}:AJ{R_MATRIX_HEADER}", "angle": 90}})
-    a.append({"action": "set_alignment", "params": {"range": f"AE{R_MATRIX_HEADER}:AJ{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    a.append({"action": "set_font_size", "params": {"range": f"AE{R_MATRIX_HEADER}:AJ{R_MATRIX_HEADER}", "size": 9}})
-    a.append({"action": "set_bold", "params": {"range": f"AE{R_MATRIX_HEADER}:AJ{R_MATRIX_HEADER}", "bold": True}})
+    a.append({"action": "set_text_rotation", "params": {"range": f"{L_OWNER_START}{R_MATRIX_HEADER}:{L_OWNER_END}{R_MATRIX_HEADER}", "angle": 90}})
+    a.append({"action": "set_alignment", "params": {"range": f"{L_OWNER_START}{R_MATRIX_HEADER}:{L_OWNER_END}{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"{L_OWNER_START}{R_MATRIX_HEADER}:{L_OWNER_END}{R_MATRIX_HEADER}", "size": 9}})
+    a.append({"action": "set_bold", "params": {"range": f"{L_OWNER_START}{R_MATRIX_HEADER}:{L_OWNER_END}{R_MATRIX_HEADER}", "bold": True}})
     # Big white image area (G42:L54): centered
     a.append({"action": "set_alignment", "params": {"range": f"H{R_MATRIX_HEADER}:M{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_font_size", "params": {"range": f"H{R_MATRIX_HEADER}:M{R_MATRIX_BOTTOM}", "size": 10}})
@@ -572,9 +586,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_bold", "params": {"range": f"H{R_SUMMARY_START}:H{R_RISK_END}", "bold": True}})
     a.append({"action": "set_font_size", "params": {"range": f"H{R_SUMMARY_START}:H{R_RISK_END}", "size": 9}})
     # Summary text rows: smaller font, left-align, wrap
-    a.append({"action": "set_font_size", "params": {"range": f"I{R_SUMMARY_START}:AJ{R_RISK_END}", "size": 9}})
-    a.append({"action": "set_alignment", "params": {"range": f"I{R_SUMMARY_START}:AJ{R_RISK_END}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
-    a.append({"action": "set_text_wrap", "params": {"range": f"I{R_SUMMARY_START}:AJ{R_RISK_END}", "mode": "WRAP"}})
+    a.append({"action": "set_font_size", "params": {"range": f"I{R_SUMMARY_START}:{L_OWNER_END}{R_RISK_END}", "size": 9}})
+    a.append({"action": "set_alignment", "params": {"range": f"I{R_SUMMARY_START}:{L_OWNER_END}{R_RISK_END}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+    a.append({"action": "set_text_wrap", "params": {"range": f"I{R_SUMMARY_START}:{L_OWNER_END}{R_RISK_END}", "mode": "WRAP"}})
 
     # ── 12. Freeze header rows ──
     a.append({"action": "freeze_rows", "params": {"row_count": 6}})
@@ -754,14 +768,30 @@ def _exec_scaffold_oppm_form(
     R_SUMMARY_START = R_MATRIX_BOTTOM + 1
     R_SUMMARY_END = R_SUMMARY_START + 11
 
-    # ── Step 0: Expand grid (default sheet has 26 cols; OPPM needs 35 = AI) ─
+    # ── Dynamic column computation (mirrors _build_scaffold_actions) ──
+    weeks_data = params.get("weeks") or []
+    week_col_count = max(4, len(weeks_data)) if weeks_data and isinstance(weeks_data, list) else 4
+    owner_col_count = _SCAFFOLD_OWNER_COLS
+    C_WEEK_START = 14          # N = 14 (0-based)
+    C_WEEK_END = C_WEEK_START + week_col_count - 1
+    C_OWNER_START = C_WEEK_END + 1
+    C_OWNER_END = C_OWNER_START + owner_col_count - 1
+    LAST_COL_LETTER = _col_index_to_letters(C_OWNER_END + 1)
+    L_WEEK_START = _col_index_to_letters(C_WEEK_START)
+    L_WEEK_END = _col_index_to_letters(C_WEEK_END)
+    L_OWNER_START = _col_index_to_letters(C_OWNER_START)
+    L_OWNER_END = _col_index_to_letters(C_OWNER_END)
+    L_OWNER_2ND = _col_index_to_letters(C_OWNER_START + 1)
+
+    # ── Step 0: Expand grid (default sheet has 26 cols; expand to fit dynamic columns) ─
+    total_cols = C_OWNER_END + 2  # 0-based end + 1 for 1-based count
     try:
         service.spreadsheets().batchUpdate(
             spreadsheetId=spreadsheet_id,
             body={"requests": [{"updateSheetProperties": {
                 "properties": {
                     "sheetId": sheet_id,
-                    "gridProperties": {"rowCount": 100, "columnCount": 36},
+                    "gridProperties": {"rowCount": 100, "columnCount": total_cols},
                 },
                 "fields": "gridProperties.rowCount,gridProperties.columnCount",
             }}]},
@@ -773,7 +803,7 @@ def _exec_scaffold_oppm_form(
     try:
         service.spreadsheets().values().clear(
             spreadsheetId=spreadsheet_id,
-            range=f"'{sq}'!A1:AI100",
+            range=f"'{sq}'!A1:{LAST_COL_LETTER}100",
             body={},
         ).execute()
     except Exception as e:
@@ -788,9 +818,10 @@ def _exec_scaffold_oppm_form(
     )
 
     # _col_index_to_letters is 1-based: 1=A, 13=M, 29=AC, 30=AD, 35=AI
-    week_headers  = [f"W{i}" for i in range(1, 18)]          # W1..W17  → M42:AC42
-    owner_headers = ["Project Leader", "Owner 1", "Owner 2",  # AD42:AI42
-                     "Owner 3", "Owner 4", "Owner 5"]
+    week_headers  = [f"W{i}" for i in range(1, week_col_count + 1)]
+    owner_headers = ["Project Leader"] + [f"Owner {i}" for i in range(1, owner_col_count)]
+    sub_obj_labels = ["Sub Obj 1", "Sub Obj 2", "Sub Obj 3",
+                      "Sub Obj 4", "Sub Obj 5", "Sub Obj 6"]
     sub_obj_labels = ["Sub Obj 1", "Sub Obj 2", "Sub Obj 3",  # body A43:F43
                       "Sub Obj 4", "Sub Obj 5", "Sub Obj 6"]
 
@@ -804,8 +835,8 @@ def _exec_scaffold_oppm_form(
         # ── Sub-header row 5 ─────────────────────────────────────────────────
         {"range": f"'{sq}'!A5",  "values": [["Sub objective"]]},
         {"range": f"'{sq}'!G5",  "values": [["Major Tasks (Deadline)"]]},
-        {"range": f"'{sq}'!M5",  "values": [["Project Completed By:"]]},
-        {"range": f"'{sq}'!AD5", "values": [["Owner / Priority"]]},
+        {"range": f"'{sq}'!{L_WEEK_START}5",  "values": [["Project Completed By:"]]},
+        {"range": f"'{sq}'!{L_OWNER_START}5", "values": [["Owner / Priority"]]},
     ]
 
     # Task numbers 1..N in column G (rows 6..LAST_TASK)
@@ -826,14 +857,14 @@ def _exec_scaffold_oppm_form(
         col = chr(ord("A") + col_i)
         value_data.append({"range": f"'{sq}'!{col}{R_MATRIX_TOP + 1}", "values": [[label]]})
 
-    # Week headers W1-W17 in matrix header row (cols 13-29, 1-based)
+    # Week headers in matrix header row (cols 13..C_WEEK_END, 1-based)
     for w_i, label in enumerate(week_headers):
-        col = _col_index_to_letters(13 + w_i)   # M=13, N=14, ..., AC=29
+        col = _col_index_to_letters(13 + w_i)   # M=13, N=14, ...
         value_data.append({"range": f"'{sq}'!{col}{R_MATRIX_TOP}", "values": [[label]]})
 
-    # Owner headers in matrix header row (cols 30-35, 1-based)
+    # Owner headers in matrix header row (cols C_OWNER_START..C_OWNER_END, 1-based)
     for o_i, label in enumerate(owner_headers):
-        col = _col_index_to_letters(30 + o_i)   # AD=30, AE=31, ..., AI=35
+        col = _col_index_to_letters(C_OWNER_START + 1 + o_i)
         value_data.append({"range": f"'{sq}'!{col}{R_MATRIX_TOP}", "values": [[label]]})
 
     # Summary section labels (top of each merged G column)
@@ -896,10 +927,10 @@ def _exec_scaffold_oppm_form(
         # Header rows 1-4
         "B2:G5",      # Logo area
         "H2:K3",      # Project Leader  (value at G1)
-        "L2:AJ3",     # Project Name    (value at K1 ← must be top-left)
-        "H4:AJ5",     # Metadata block  (value at G3)
+        f"L2:{LAST_COL_LETTER}3",     # Project Name    (value at K1 ← must be top-left)
+        f"H4:{LAST_COL_LETTER}5",     # Metadata block  (value at G3)
         # Sub-header row 5
-        "B6:G6", "H6:M6", "N6:AD6", "AE6:AJ6",
+        "B6:G6", "H6:M6", f"{L_WEEK_START}6:{L_WEEK_END}6", f"{L_OWNER_START}6:{L_OWNER_END}6",
         # Matrix image area (G:L)
         f"G{R_MATRIX_TOP}:L{R_MATRIX_BOTTOM}",
         # Summary G-column labels
@@ -917,14 +948,13 @@ def _exec_scaffold_oppm_form(
     for col_i in range(6):
         col = chr(ord("A") + col_i)
         merge_list.append(f"{col}{R_MATRIX_TOP + 1}:{col}{R_SUMMARY_END}")
-    # Timeline/owner header columns M-AI merged vertically (rotated labels)
-    # _col_index_to_letters is 1-based: M=13, AC=29, AD=30, AI=35
-    for col_1based in range(14, 37):    # 13=M … 35=AI  (no +1 — index IS the 1-based col#)
+    # Timeline/owner header columns merged vertically (rotated labels)
+    for col_1based in range(C_WEEK_START + 1, C_OWNER_END + 2):
         col = _col_index_to_letters(col_1based)
         merge_list.append(f"{col}{R_MATRIX_TOP}:{col}{R_MATRIX_TOP + 6}")
     # Summary text rows H:AI merged per row
     for r in range(R_SUMMARY_START, R_SUMMARY_END + 1):
-        merge_list.append(f"I{r}:AJ{r}")
+        merge_list.append(f"I{r}:{L_OWNER_END}{r}")
 
     for mr in merge_list:
         try:
@@ -946,8 +976,8 @@ def _exec_scaffold_oppm_form(
         col_width(1, 6, 22),               # A-F: narrow sub-obj check columns
         col_width(7, 7, 30),               # G:  identity/task-number column
         col_width(8, 12, 90),              # H-L: task title area
-        col_width(13, 29, 25),             # M-AC: 17 weekly timeline columns
-        col_width(30, 35, 35),             # AD-AI: 6 owner columns
+        col_width(13, C_WEEK_END + 1, 25),             # M..L_WEEK_END: weekly timeline columns
+        col_width(C_OWNER_START + 1, C_OWNER_END + 1, 35),  # owner columns
     ]
 
     # ── Freeze rows 1-5 ──────────────────────────────────────────────────────
@@ -961,35 +991,35 @@ def _exec_scaffold_oppm_form(
     BG_WHITE  = _hex_to_rgb("#FFFFFF")
     requests += [
         # Rows 1-4 white (clean header — no fill)
-        rc("A1:AI4",   {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
+        rc(f"A1:{LAST_COL_LETTER}4",   {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
         # Row 5 sub-header row gets light gray so it reads as a column header
-        rc("B6:AJ6",   {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
+        rc(f"B6:{LAST_COL_LETTER}6",   {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
         # Matrix header row
         rc(f"A{R_MATRIX_TOP}:F{R_MATRIX_TOP}",  {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
-        rc(f"M{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
+        rc(f"M{R_MATRIX_TOP}:{LAST_COL_LETTER}{R_MATRIX_TOP}", {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
         # Image area in matrix stays white
         rc(f"G{R_MATRIX_TOP}:L{R_MATRIX_BOTTOM}",  {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
     ]
 
     # ── Borders ───────────────────────────────────────────────────────────────
     # Header rows 1-5: full black grid
-    requests.append(full_grid("B2:AJ6"))
-    # Task area: gray grid for A:L and AD:AI
+    requests.append(full_grid(f"B2:{LAST_COL_LETTER}6"))
+    # Task area: gray grid for A:L and owner columns
     requests.append(full_grid(f"B7:M{LAST_TASK}",  "#CCCCCC"))
-    requests.append(full_grid(f"AE7:AJ{LAST_TASK}", "#CCCCCC"))
+    requests.append(full_grid(f"{L_OWNER_START}7:{L_OWNER_END}{LAST_TASK}", "#CCCCCC"))
     # Identity rows A:L: black grid
     requests.append(full_grid(f"A{R_IDENTITY_START}:L{R_IDENTITY_END}"))
     # Matrix header row: black grid
-    requests.append(full_grid(f"A{R_MATRIX_TOP}:AI{R_MATRIX_TOP}"))
+    requests.append(full_grid(f"A{R_MATRIX_TOP}:{LAST_COL_LETTER}{R_MATRIX_TOP}"))
     # Matrix body A:F (sub-obj area): black grid
     requests.append(full_grid(f"A{R_MATRIX_TOP + 1}:F{R_MATRIX_BOTTOM}"))
-    # Matrix body H:AI: black grid  (G:L is the image area — outer border only)
-    requests.append(full_grid(f"M{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}"))
+    # Matrix body H..LAST_COL: black grid  (G:L is the image area — outer border only)
+    requests.append(full_grid(f"M{R_MATRIX_TOP + 1}:{LAST_COL_LETTER}{R_MATRIX_BOTTOM}"))
     requests.append(outer_border(f"G{R_MATRIX_TOP}:L{R_MATRIX_BOTTOM}"))
     # Summary section: black grid
-    requests.append(full_grid(f"A{R_SUMMARY_START}:AI{R_SUMMARY_END}"))
+    requests.append(full_grid(f"A{R_SUMMARY_START}:{LAST_COL_LETTER}{R_SUMMARY_END}"))
     # Outer frame for the entire form
-    requests.append(outer_border(f"A1:AI{R_SUMMARY_END}"))
+    requests.append(outer_border(f"A1:{LAST_COL_LETTER}{R_SUMMARY_END}"))
 
     # ── Text alignment + formatting ───────────────────────────────────────────
     CENTER_MIDDLE = {
@@ -1007,11 +1037,11 @@ def _exec_scaffold_oppm_form(
     CM_BOLD_FIELDS = CENTER_FIELDS + ",userEnteredFormat.textFormat.bold"
 
     # Rows 1-2: center + bold
-    requests.append(rc("B2:AJ3", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B2:{LAST_COL_LETTER}3", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
     # Row 5: center + bold
-    requests.append(rc("B6:AJ6", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B6:{LAST_COL_LETTER}6", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
     # Metadata block rows 3-4: left-align + wrap
-    requests.append(rc("H4:AJ5", {
+    requests.append(rc(f"H4:{LAST_COL_LETTER}5", {
         **LEFT_MIDDLE,
         "wrapStrategy": "WRAP",
     }, CENTER_FIELDS + ",userEnteredFormat.wrapStrategy"))
