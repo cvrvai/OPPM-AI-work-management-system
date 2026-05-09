@@ -506,8 +506,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_BOTTOM}:{L_OWNER_END}{R_MATRIX_BOTTOM}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # ── Matrix header area bottom borders ──
-    # Week section (N:AC): bottom border at end of merged header area
-    a.append({"action": "set_border", "params": {"range": f"N{R_DATE_HEADER_END}:AC{R_DATE_HEADER_END}", "style": "NONE",
+    # Week section: bottom border at end of merged header area
+    a.append({"action": "set_border", "params": {"range": f"{L_WEEK_START}{R_DATE_HEADER_END}:{L_WEEK_END}{R_DATE_HEADER_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Week section right border at column AD (vertical divider between week and member)
     a.append({"action": "set_border", "params": {"range": f"{L_WEEK_END}{R_MATRIX_HEADER}:{L_WEEK_END}{R_DATE_HEADER_END}", "style": "NONE",
