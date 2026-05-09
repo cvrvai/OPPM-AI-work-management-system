@@ -335,16 +335,24 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
     # 10c. Task area owners (AE:AJ) → gray grid.
-    # Row 7 omits its top border so row 6's black divider remains visible.
+    # The first owner column AE omits its left border so the black divider on AD remains visible.
+    for row in range(7, LAST_TASK + 1):
+        a.append({"action": "set_border", "params": {
+            "range": f"AE{row}:AE{row}",
+            "style": "NONE",
+            "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_TASK_GRAY, "bottom_width": 1,
+            "right_style": "SOLID", "right_color": _SCAFFOLD_TASK_GRAY, "right_width": 1,
+            **({"top_style": "SOLID", "top_color": _SCAFFOLD_TASK_GRAY, "top_width": 1} if row > 7 else {}),
+        }})
     a.append({"action": "set_border", "params": {
-        "range": "AE7:AJ7",
+        "range": "AF7:AJ7",
         "style": "NONE",
         "left_style": "SOLID", "left_color": _SCAFFOLD_TASK_GRAY, "left_width": 1,
         "right_style": "SOLID", "right_color": _SCAFFOLD_TASK_GRAY, "right_width": 1,
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_TASK_GRAY, "bottom_width": 1,
     }})
     if LAST_TASK >= 8:
-        a.append({"action": "set_border", "params": {"range": f"AE8:AJ{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
+        a.append({"action": "set_border", "params": {"range": f"AF8:AJ{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
     # 10e. Bottom matrix → black grid (A:F + H:AI, skipping the blank image area G)
     a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_TOP}:G{R_MATRIX_BOTTOM}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
     # Border around the full G42:L54 merged area (outer edges only)
