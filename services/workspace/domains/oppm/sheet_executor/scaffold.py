@@ -27,7 +27,7 @@ _SCAFFOLD_DEFAULT_TASK_COUNT = 24
 _SCAFFOLD_TASK_ROW_HEIGHT = 21
 _SCAFFOLD_MATRIX_DATE_ROW_HEIGHT = 100  # top matrix row holds rotated date headers — needs vertical room
 _SCAFFOLD_MATRIX_BODY_ROW_HEIGHT = 50   # body matrix rows (X-pattern / image area) — taller so the legend fills space like the reference OPPM
-_SCAFFOLD_MATRIX_HEIGHT_ROWS = 13      # rows 42-54: header(1) + body(12). Identity strip (A-F, one per row) lives ABOVE the matrix at rows 36-41.
+_SCAFFOLD_MATRIX_HEIGHT_ROWS = 13      # header(1) + body(12); the identity strip lives immediately above the matrix.
 _SCAFFOLD_WEEK_DATE_COLS = 17           # M..AC (17 weekly date columns)
 _SCAFFOLD_OWNER_COLS = 6                # AE..AJ (6 owner columns)
 _SCAFFOLD_LAST_COL = "AJ"               # rightmost column of the form
@@ -43,9 +43,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
       Rows 4-5         MERGED H4:AJ5 — multi-line block: Objective + Deliverable + Start + Deadline
       Row 6            sub-headers: "Sub objective" (B:G) | "Major Tasks (Deadline)" (H:M)
                        | "Project Completed By: ..." (N:AD) | "Owner / Priority" (AE:AJ)
-      Rows 7 .. 6+N    task rows, numbered 1..N in column I (default N=24)
-      Rows 37-42       Identity strip — letters A..F, one per row in column B
-      R_MATRIX         13-row bottom matrix (rows 43-55):
+    Rows 7 .. 6+N    task rows, numbered 1..N in column I (default N=24)
+    Identity strip (A..F) starts immediately after the last task row in column H
+    R_MATRIX         13-row bottom matrix immediately below the identity strip:
                          B:G  rotated labels merged in body
                          I:M  blank image area for OPPM legend image
                          N:AD rotated week-date headers (17 cols, header row only)
@@ -77,12 +77,13 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
 
     # Row positions
     ROW_OFFSET = 1                              # leave 1 empty row at top
+    GAP_ROWS = 0                                # no spacer gap — identity strip starts right after last task
     LAST_TASK = 5 + task_count + ROW_OFFSET
-    R_IDENTITY_START = 36 + ROW_OFFSET          # first identity row (letter A)
-    R_IDENTITY_END = 41 + ROW_OFFSET            # last identity row (letter F)
-    R_GAP_START = LAST_TASK + 1                 # first empty row after the last task
-    R_GAP_END = R_IDENTITY_START - 1            # last empty row before identity strip
-    R_MATRIX_TOP = 42 + ROW_OFFSET              # matrix header row
+    R_GAP_START = LAST_TASK + 1                 # (unused when GAP_ROWS == 0)
+    R_GAP_END = R_GAP_START + GAP_ROWS - 1      # (unused when GAP_ROWS == 0)
+    R_IDENTITY_START = LAST_TASK + 1            # first identity row (letter A), immediately after tasks, immediately after tasks
+    R_IDENTITY_END = R_IDENTITY_START + 5       # last identity row (letter F)
+    R_MATRIX_TOP = R_IDENTITY_END + 1           # matrix header row
     R_MATRIX_HEADER = R_MATRIX_TOP
     R_MATRIX_BOTTOM = R_MATRIX_TOP + _SCAFFOLD_MATRIX_HEIGHT_ROWS - 1
     R_SUMMARY_START = R_MATRIX_BOTTOM + 1
@@ -149,13 +150,13 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}", "value": label}})
 
     # 4b. X-pattern center area — one large blank rectangle (H:L) for image insertion
-    # Blank white area spans rows 42-54 (13 rows) within the matrix body
+    # Blank white area spans the full 13-row matrix block within the body
     X_TOP = R_MATRIX_HEADER + 1                 # = 43
     X_BOTTOM = R_MATRIX_BOTTOM                  # = 54
     # Leave the area blank (no text values) — user will insert an image later
     a.append({"action": "set_value", "params": {"range": f"I{X_TOP}", "value": ""}})
 
-    # 4c. Identity Symbol section — A-F vertical, one letter per row (rows 36-41), column G
+    # 4c. Identity Symbol section — A-F vertical, one letter per row, column H
     identity_letters = ["A", "B", "C", "D", "E", "F"]
     for idx, letter in enumerate(identity_letters):
         row = R_IDENTITY_START + idx
@@ -208,7 +209,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # H:L merged per row as the task title/description area
     for i in range(1, task_count + 1):
         a.append({"action": "merge_cells", "params": {"range": f"I{6 + i}:M{6 + i}"}})
-    # Identity rows 36-41: merge H:L on each row to give a description/label area
+    # Identity rows: merge I:M on each row to give a description/label area
     for r in range(R_IDENTITY_START, R_IDENTITY_END + 1):
         a.append({"action": "merge_cells", "params": {"range": f"I{r}:M{r}"}})
     # Big white image area: one rectangle spanning G42:L54 (combines header row G:L + body G column + X-pattern)
@@ -430,10 +431,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Thick divider below matrix header row
     a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_HEADER}:AJ{R_MATRIX_HEADER}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
-    # Thick divider above identity strip (separates gap/tasks from identity rows 36-41)
+    # Thick divider above identity strip (separates the task block from the identity rows)
     a.append({"action": "set_border", "params": {"range": f"B{R_IDENTITY_START - 1}:AJ{R_IDENTITY_START - 1}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
-    # Thick divider below identity strip (row 41, separates identity strip from matrix below)
+    # Thick divider below identity strip (separates identity rows from the matrix below)
     a.append({"action": "set_border", "params": {"range": f"B{R_IDENTITY_END}:AJ{R_IDENTITY_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Left border on column G (identity letters) and right border on the merged H:L label area
@@ -697,6 +698,12 @@ def _exec_scaffold_oppm_form(
 
     sq = sheet_title.replace("'", "''")  # escape single quotes for A1 range notation
     LAST_TASK = 5 + task_count           # last row of task area
+    R_IDENTITY_START = LAST_TASK + 1
+    R_IDENTITY_END = R_IDENTITY_START + 5
+    R_MATRIX_TOP = R_IDENTITY_END + 1
+    R_MATRIX_BOTTOM = R_MATRIX_TOP + 12
+    R_SUMMARY_START = R_MATRIX_BOTTOM + 1
+    R_SUMMARY_END = R_SUMMARY_START + 11
 
     # ── Step 0: Expand grid (default sheet has 26 cols; OPPM needs 35 = AI) ─
     try:
@@ -756,35 +763,35 @@ def _exec_scaffold_oppm_form(
     for i in range(1, task_count + 1):
         value_data.append({"range": f"'{sq}'!G{5 + i}", "values": [[str(i)]]})
 
-    # Identity letters A-F in column G (rows 36-41) — NOT column A
+    # Identity letters A-F in column G — NOT column A
     for idx, letter in enumerate(["A", "B", "C", "D", "E", "F"]):
-        value_data.append({"range": f"'{sq}'!G{36 + idx}", "values": [[letter]]})
+        value_data.append({"range": f"'{sq}'!G{R_IDENTITY_START + idx}", "values": [[letter]]})
 
-    # Matrix header row 42: sub-obj numbers in A:F
+    # Matrix header row: sub-obj numbers in A:F
     for col_i in range(6):
         col = chr(ord("A") + col_i)
-        value_data.append({"range": f"'{sq}'!{col}42", "values": [[str(col_i + 1)]]})
+        value_data.append({"range": f"'{sq}'!{col}{R_MATRIX_TOP}", "values": [[str(col_i + 1)]]})
 
-    # Sub-obj labels at top of each merged body column (A43, B43, ..., F43)
+    # Sub-obj labels at top of each merged body column
     for col_i, label in enumerate(sub_obj_labels):
         col = chr(ord("A") + col_i)
-        value_data.append({"range": f"'{sq}'!{col}43", "values": [[label]]})
+        value_data.append({"range": f"'{sq}'!{col}{R_MATRIX_TOP + 1}", "values": [[label]]})
 
-    # Week headers W1-W17 in M42:AC42 (cols 13-29, 1-based)
+    # Week headers W1-W17 in matrix header row (cols 13-29, 1-based)
     for w_i, label in enumerate(week_headers):
         col = _col_index_to_letters(13 + w_i)   # M=13, N=14, ..., AC=29
-        value_data.append({"range": f"'{sq}'!{col}42", "values": [[label]]})
+        value_data.append({"range": f"'{sq}'!{col}{R_MATRIX_TOP}", "values": [[label]]})
 
-    # Owner headers in AD42:AI42 (cols 30-35, 1-based)
+    # Owner headers in matrix header row (cols 30-35, 1-based)
     for o_i, label in enumerate(owner_headers):
         col = _col_index_to_letters(30 + o_i)   # AD=30, AE=31, ..., AI=35
-        value_data.append({"range": f"'{sq}'!{col}42", "values": [[label]]})
+        value_data.append({"range": f"'{sq}'!{col}{R_MATRIX_TOP}", "values": [[label]]})
 
     # Summary section labels (top of each merged G column)
     value_data += [
-        {"range": f"'{sq}'!G55", "values": [["Summary Deliverable"]]},
-        {"range": f"'{sq}'!G59", "values": [["Forecast"]]},
-        {"range": f"'{sq}'!G63", "values": [["Risk"]]},
+        {"range": f"'{sq}'!G{R_SUMMARY_START}",     "values": [["Summary Deliverable"]]},
+        {"range": f"'{sq}'!G{R_SUMMARY_START + 4}", "values": [["Forecast"]]},
+        {"range": f"'{sq}'!G{R_SUMMARY_START + 8}", "values": [["Risk"]]},
     ]
 
     service.spreadsheets().values().batchUpdate(
@@ -844,28 +851,30 @@ def _exec_scaffold_oppm_form(
         "H4:AJ5",     # Metadata block  (value at G3)
         # Sub-header row 5
         "B6:G6", "H6:M6", "N6:AD6", "AE6:AJ6",
-        # Matrix image area (G:L rows 42-54)
-        "G42:L54",
+        # Matrix image area (G:L)
+        f"G{R_MATRIX_TOP}:L{R_MATRIX_BOTTOM}",
         # Summary G-column labels
-        "G55:G58", "G59:G62", "G63:G66",
+        f"G{R_SUMMARY_START}:G{R_SUMMARY_START + 3}",
+        f"G{R_SUMMARY_START + 4}:G{R_SUMMARY_START + 7}",
+        f"G{R_SUMMARY_START + 8}:G{R_SUMMARY_START + 11}",
     ]
     # Task title cells H:L per task row
     for i in range(1, task_count + 1):
         merge_list.append(f"I{6 + i}:M{6 + i}")
-    # Identity rows H:L per row (36-41)
-    for r in range(36, 42):
+    # Identity rows H:L per row
+    for r in range(R_IDENTITY_START, R_IDENTITY_END + 1):
         merge_list.append(f"I{r}:M{r}")
-    # Sub-obj columns A-F merged vertically through matrix + summary (rows 43-66)
+    # Sub-obj columns A-F merged vertically through matrix + summary
     for col_i in range(6):
         col = chr(ord("A") + col_i)
-        merge_list.append(f"{col}43:{col}66")
-    # Timeline/owner header columns M-AI merged vertically rows 42-48 (rotated labels)
+        merge_list.append(f"{col}{R_MATRIX_TOP + 1}:{col}{R_SUMMARY_END}")
+    # Timeline/owner header columns M-AI merged vertically (rotated labels)
     # _col_index_to_letters is 1-based: M=13, AC=29, AD=30, AI=35
     for col_1based in range(14, 37):    # 13=M … 35=AI  (no +1 — index IS the 1-based col#)
         col = _col_index_to_letters(col_1based)
-        merge_list.append(f"{col}42:{col}48")
-    # Summary text rows H:AI merged per row (55-66)
-    for r in range(55, 67):
+        merge_list.append(f"{col}{R_MATRIX_TOP}:{col}{R_MATRIX_TOP + 6}")
+    # Summary text rows H:AI merged per row
+    for r in range(R_SUMMARY_START, R_SUMMARY_END + 1):
         merge_list.append(f"I{r}:AJ{r}")
 
     for mr in merge_list:
@@ -881,10 +890,10 @@ def _exec_scaffold_oppm_form(
         row_height(4, 4, 21),
         row_height(5, 5, 25),               # sub-header row slightly taller
         row_height(6, LAST_TASK, 21),       # task rows
-        row_height(36, 41, 21),             # identity rows
-        row_height(42, 42, 21),             # matrix header row
-        row_height(43, 54, 21),             # matrix body rows
-        row_height(55, 66, 40),             # summary rows (taller for text)
+        row_height(R_IDENTITY_START, R_IDENTITY_END, 21),   # identity rows
+        row_height(R_MATRIX_TOP, R_MATRIX_TOP, 21),           # matrix header row
+        row_height(R_MATRIX_TOP + 1, R_MATRIX_BOTTOM, 21),    # matrix body rows
+        row_height(R_SUMMARY_START, R_SUMMARY_END, 40),       # summary rows (taller for text)
         col_width(1, 6, 22),               # A-F: narrow sub-obj check columns
         col_width(7, 7, 30),               # G:  identity/task-number column
         col_width(8, 12, 90),              # H-L: task title area
@@ -906,11 +915,11 @@ def _exec_scaffold_oppm_form(
         rc("A1:AI4",   {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
         # Row 5 sub-header row gets light gray so it reads as a column header
         rc("B6:AJ6",   {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
-        # Matrix header row 42
-        rc("A42:F42",  {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
-        rc("M42:AI42", {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
+        # Matrix header row
+        rc(f"A{R_MATRIX_TOP}:F{R_MATRIX_TOP}",  {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
+        rc(f"M{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", {"backgroundColor": BG_HEADER}, "userEnteredFormat.backgroundColor"),
         # Image area in matrix stays white
-        rc("G42:L54",  {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
+        rc(f"G{R_MATRIX_TOP}:L{R_MATRIX_BOTTOM}",  {"backgroundColor": BG_WHITE},  "userEnteredFormat.backgroundColor"),
     ]
 
     # ── Borders ───────────────────────────────────────────────────────────────
@@ -920,18 +929,18 @@ def _exec_scaffold_oppm_form(
     requests.append(full_grid(f"B7:M{LAST_TASK}",  "#CCCCCC"))
     requests.append(full_grid(f"AE7:AJ{LAST_TASK}", "#CCCCCC"))
     # Identity rows A:L: black grid
-    requests.append(full_grid("A36:L41"))
+    requests.append(full_grid(f"A{R_IDENTITY_START}:L{R_IDENTITY_END}"))
     # Matrix header row: black grid
-    requests.append(full_grid("A42:AI42"))
+    requests.append(full_grid(f"A{R_MATRIX_TOP}:AI{R_MATRIX_TOP}"))
     # Matrix body A:F (sub-obj area): black grid
-    requests.append(full_grid("A43:F54"))
+    requests.append(full_grid(f"A{R_MATRIX_TOP + 1}:F{R_MATRIX_BOTTOM}"))
     # Matrix body H:AI: black grid  (G:L is the image area — outer border only)
-    requests.append(full_grid("M43:AI54"))
-    requests.append(outer_border("G42:L54"))
+    requests.append(full_grid(f"M{R_MATRIX_TOP + 1}:AI{R_MATRIX_BOTTOM}"))
+    requests.append(outer_border(f"G{R_MATRIX_TOP}:L{R_MATRIX_BOTTOM}"))
     # Summary section: black grid
-    requests.append(full_grid("A55:AI66"))
+    requests.append(full_grid(f"A{R_SUMMARY_START}:AI{R_SUMMARY_END}"))
     # Outer frame for the entire form
-    requests.append(outer_border("A1:AI66"))
+    requests.append(outer_border(f"A1:AI{R_SUMMARY_END}"))
 
     # ── Text alignment + formatting ───────────────────────────────────────────
     CENTER_MIDDLE = {
@@ -960,27 +969,27 @@ def _exec_scaffold_oppm_form(
     # Task numbers column G: center + bold
     requests.append(rc(f"H7:H{LAST_TASK}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
     # Identity letters column G: center + bold
-    requests.append(rc("G36:G41", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
-    # Matrix header row 42: center + bold
-    requests.append(rc("A42:AI42", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"G{R_IDENTITY_START}:G{R_IDENTITY_END}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    # Matrix header row: center + bold
+    requests.append(rc(f"A{R_MATRIX_TOP}:AI{R_MATRIX_TOP}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
     # Sub-obj matrix body A:F — rotated 90° + center + bold + small font
-    requests.append(rc("A43:F54", {
+    requests.append(rc(f"A{R_MATRIX_TOP + 1}:F{R_MATRIX_BOTTOM}", {
         "textRotation": {"angle": 90},
         "horizontalAlignment": "CENTER",
         "verticalAlignment": "MIDDLE",
         "textFormat": {"bold": True, "fontSize": 9},
     }, "userEnteredFormat.textRotation,userEnteredFormat.horizontalAlignment,"
        "userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat"))
-    # Summary G labels (G55:G66) — rotated 90° + center + bold
-    requests.append(rc("G55:G66", {
+    # Summary G labels — rotated 90° + center + bold
+    requests.append(rc(f"G{R_SUMMARY_START}:G{R_SUMMARY_END}", {
         "textRotation": {"angle": 90},
         "horizontalAlignment": "CENTER",
         "verticalAlignment": "MIDDLE",
         "textFormat": {"bold": True},
     }, "userEnteredFormat.textRotation,userEnteredFormat.horizontalAlignment,"
        "userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat.bold"))
-    # Timeline/owner header labels M:AI row 42 area (merged per column, rotated text)
-    requests.append(rc("M42:AI48", {
+    # Timeline/owner header labels M:AI matrix header area (merged per column, rotated text)
+    requests.append(rc(f"M{R_MATRIX_TOP}:AI{R_MATRIX_TOP + 6}", {
         "textRotation": {"angle": 90},
         "horizontalAlignment": "CENTER",
         "verticalAlignment": "BOTTOM",

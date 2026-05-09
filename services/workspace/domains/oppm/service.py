@@ -466,6 +466,7 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     as FortuneSheet JSON so the frontend can render it directly.
     """
     from domains.oppm.fortunesheet_builder import build_fortunesheet_from_scaffold
+    from domains.task.repository import TaskRepository
 
     project_repo = ProjectRepository(session)
     project = await project_repo.find_by_id(project_id)
@@ -487,6 +488,10 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     deadline = _parse_date(project.deadline)
     weeks = _compute_weeks(start_date, deadline)
 
+    task_repo = TaskRepository(session)
+    project_tasks = await task_repo.find_project_tasks(project_id, limit=31)
+    task_count = max(1, min(30, len(project_tasks)))
+
     params = {
         "title": project.title or "[Project Name]",
         "leader": lead_name,
@@ -495,7 +500,7 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
         "start_date": str(project.start_date) if project.start_date else "[Start Date]",
         "deadline": str(project.deadline) if project.deadline else "[Deadline]",
         "completed_by_weeks": len(weeks) if weeks else None,
-        "task_count": 24,
+        "task_count": task_count,
     }
 
     return build_fortunesheet_from_scaffold(params)
