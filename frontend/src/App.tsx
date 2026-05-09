@@ -1,9 +1,10 @@
 import { useEffect, useRef, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { ApiError, api } from '@/lib/api'
+import { api } from '@/lib/api'
+import { queryClient } from '@/lib/api/queryClient'
 import { hasStoredSession } from '@/lib/api/sessionClient'
 import { lazyNamed } from '@/lib/utils/lazyNamed'
 import { Layout } from '@/components/layout/Layout'
@@ -22,22 +23,6 @@ const Settings = lazyNamed(() => import('@/pages/Settings'), 'Settings')
 const AcceptInvite = lazyNamed(() => import('@/pages/AcceptInvite'), 'AcceptInvite')
 const Team = lazyNamed(() => import('@/pages/Team'), 'Team')
 const Invitations = lazyNamed(() => import('@/pages/Invitations'), 'Invitations')
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      // Disable window-focus refetch — causes jarring reloads when switching tabs/apps
-      refetchOnWindowFocus: false,
-      // Keep retry logic for transient errors
-      retry: (failureCount, error) => {
-        if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false
-        return failureCount < 3
-      },
-      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
-    },
-  },
-})
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuthStore()

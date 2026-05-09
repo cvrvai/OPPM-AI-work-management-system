@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api } from '@/lib/api'
+import { queryClient } from '@/lib/api/queryClient'
 import type { Workspace } from '@/types'
 
 interface WorkspaceState {
@@ -22,7 +23,31 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       currentWorkspace: null,
       loading: false,
 
-      setCurrentWorkspace: (ws) => set({ currentWorkspace: ws }),
+      setCurrentWorkspace: (ws) => {
+        set({ currentWorkspace: ws })
+        // Warm the React Query cache for the new workspace so the first page
+        // load feels instant instead of showing skeletons for 1–2 s.
+        const wsPath = `/v1/workspaces/${ws.id}`
+        // Fire-and-forget prefetch calls — we don't await them
+        queryClient.prefetchQuery({
+          queryKey: ['projects', ws.id],
+          queryFn: async () => {
+            const res = await api.get<{ items: unknown[]; total: number }>(`${wsPath}/projects`)
+            return res.items ?? []
+          },
+          staleTime: 30_000,
+        })
+        queryClient.prefetchQuery({
+          queryKey: ['dashboard-stats', ws.id],
+          queryFn: () => api.get(`${wsPath}/dashboard/stats`),
+          staleTime: 30_000,
+        })
+        queryClient.prefetchQuery({
+          queryKey: ['members', ws.id],
+          queryFn: () => api.get(`${wsPath}/members`),
+          staleTime: 5 * 60 * 1000,
+        })
+      },
 
       fetchWorkspaces: async () => {
         // Short-term memory cache: skip re-fetching within 5s of last success.

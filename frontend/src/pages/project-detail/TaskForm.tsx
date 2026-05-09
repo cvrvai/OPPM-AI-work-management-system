@@ -26,6 +26,7 @@ export function TaskForm({
   objectives,
   subObjectives = [],
   members,
+  allMembers = [],
   allTasks = [],
   onSubmit,
   onCancel,
@@ -40,6 +41,7 @@ export function TaskForm({
   objectives: OPPMObjective[]
   subObjectives?: OPPMSubObjective[]
   members: WorkspaceMember[]
+  allMembers?: { id: string; member_id: string; source: 'workspace' | 'virtual'; name: string; is_leader: boolean }[]
   allTasks?: Task[]
   onSubmit: (data: Record<string, unknown>) => void
   onCancel: () => void
@@ -115,6 +117,7 @@ export function TaskForm({
   })
   const [dependsOn, setDependsOn] = useState<string[]>(initial?.depends_on ?? [])
   const [subObjIds, setSubObjIds] = useState<string[]>((initial as unknown as Record<string, unknown>)?.sub_objective_ids as string[] ?? [])
+  const [virtualAssignees, setVirtualAssignees] = useState<string[]>(initial?.virtual_assignees?.map((v) => v.virtual_member_id) ?? [])
 
   const toggleDependency = (taskId: string) => {
     setDependsOn((prev) => prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId])
@@ -122,6 +125,10 @@ export function TaskForm({
 
   const toggleSubObj = (soId: string) => {
     setSubObjIds((prev) => prev.includes(soId) ? prev.filter((id) => id !== soId) : [...prev, soId])
+  }
+
+  const toggleVirtualAssignee = (vmId: string) => {
+    setVirtualAssignees((prev) => prev.includes(vmId) ? prev.filter((id) => id !== vmId) : [...prev, vmId])
   }
 
   const availableObjectives = [
@@ -132,12 +139,13 @@ export function TaskForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim()) return
-    const data: Record<string, unknown> = { ...form, depends_on: dependsOn, sub_objective_ids: subObjIds }
+    const data: Record<string, unknown> = { ...form, depends_on: dependsOn, sub_objective_ids: subObjIds, virtual_assignees: virtualAssignees }
     if (!data.start_date) delete data.start_date
     if (!data.due_date) delete data.due_date
     if (!data.oppm_objective_id) delete data.oppm_objective_id
     if (!data.assignee_id) delete data.assignee_id
     if (!data.parent_task_id) delete data.parent_task_id
+    if (virtualAssignees.length === 0) delete data.virtual_assignees
     if (!initial) {
       delete data.status
       if (data.progress === 0) delete data.progress
@@ -464,6 +472,24 @@ export function TaskForm({
                     <p className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-sm italic text-text-secondary">No workspace members found.</p>
                   )}
                 </div>
+
+                {allMembers.filter((m) => m.source === 'virtual').length > 0 && (
+                  <div className="mt-4">
+                    <label className={fieldLabelClass}>External Assignees</label>
+                    <div className="max-h-40 overflow-y-auto space-y-1.5 rounded-xl border border-border bg-white p-2">
+                      {allMembers.filter((m) => m.source === 'virtual').map((m) => (
+                        <label key={m.id} className={cn('flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-sm transition-colors', virtualAssignees.includes(m.member_id) ? 'border-primary/40 bg-primary/5 text-primary' : 'border-border bg-white text-text hover:bg-surface-alt')}>
+                          <input type="checkbox" checked={virtualAssignees.includes(m.member_id)} onChange={() => toggleVirtualAssignee(m.member_id)} className="h-3.5 w-3.5 accent-primary shrink-0" />
+                          <span className="flex-1 min-w-0 font-medium">{m.name}</span>
+                          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">External</span>
+                        </label>
+                      ))}
+                    </div>
+                    {virtualAssignees.length > 0 && (
+                      <p className="mt-2 text-xs text-primary font-medium">{virtualAssignees.length} external assignee{virtualAssignees.length === 1 ? '' : 's'} selected</p>
+                    )}
+                  </div>
+                )}
               </section>
 
               {allTasks.length > 0 && (

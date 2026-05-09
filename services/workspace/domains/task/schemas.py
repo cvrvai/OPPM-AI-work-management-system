@@ -17,6 +17,7 @@ class TaskCreate(BaseModel):
     oppm_objective_id: Optional[str] = None
     assignee_id: Optional[str] = None
     depends_on: Optional[List[str]] = Field(default_factory=list)
+    virtual_assignees: Optional[List[str]] = Field(default_factory=list)
 
 
 class TaskUpdate(BaseModel):
@@ -31,6 +32,7 @@ class TaskUpdate(BaseModel):
     oppm_objective_id: Optional[str] = None
     assignee_id: Optional[str] = None
     depends_on: Optional[List[str]] = None
+    virtual_assignees: Optional[List[str]] = None
 
 
 class TaskReportCreate(BaseModel):

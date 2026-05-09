@@ -52,6 +52,20 @@ class TaskAssignee(Base):
     )
 
 
+class TaskVirtualAssignee(Base):
+    """Assign external/virtual members to tasks."""
+    __tablename__ = "task_virtual_assignees"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    virtual_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_virtual_members.id", ondelete="CASCADE"), nullable=False, index=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "virtual_member_id", name="uq_task_virtual_assignees"),
+    )
+
+
 class TaskReport(Base):
     __tablename__ = "task_reports"
 

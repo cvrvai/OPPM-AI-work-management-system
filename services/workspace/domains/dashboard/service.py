@@ -19,19 +19,17 @@ async def get_dashboard_stats(session: AsyncSession, workspace_id: str) -> dict:
     projects = await project_repo.find_all_in_workspace(workspace_id, limit=1000)
     project_ids = [str(p.id) for p in projects]
 
-    # Count tasks across workspace projects
-    total_tasks = 0
-    completed_tasks = 0
-    for pid in project_ids:
-        tasks = await task_repo.find_project_tasks(pid, limit=1000)
-        total_tasks += len(tasks)
-        completed_tasks += sum(1 for t in tasks if t["status"] == "completed")
+    # Count tasks across workspace projects — single query via JOIN
+    all_tasks = await task_repo.find_workspace_tasks(workspace_id, limit=10000)
+    total_tasks = len(all_tasks)
+    completed_tasks = sum(1 for t in all_tasks if t.status == "completed")
 
-    # Commits today
+    # Commits today — single query for repos in all projects
     since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     repo_ids = []
-    for pid in project_ids:
-        repo_ids.extend(r["id"] for r in await repo_config_repo.find_project_repos(pid))
+    if project_ids:
+        repos = await repo_config_repo.find_workspace_repos(project_ids)
+        repo_ids = [str(r.id) for r in repos]
 
     commits_today = 0
     if repo_ids:

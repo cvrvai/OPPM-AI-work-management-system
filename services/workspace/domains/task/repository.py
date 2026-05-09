@@ -4,7 +4,7 @@ from sqlalchemy import select, delete, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.workspace.base_repository import BaseRepository
-from shared.models.task import Task, TaskReport, TaskDependency
+from shared.models.task import Task, TaskReport, TaskDependency, TaskVirtualAssignee
 from shared.models.project import Project
 
 
@@ -91,6 +91,61 @@ class TaskRepository(BaseRepository):
             rows = [{"task_id": task_id, "depends_on_task_id": dep_id} for dep_id in depends_on]
             await self.session.execute(insert(TaskDependency), rows)
         await self.session.flush()
+
+    # ── Virtual assignees ──────────────────────────────────────────────
+
+    async def get_virtual_assignees(self, task_id: str) -> list[dict]:
+        """Return list of virtual member dicts assigned to a task."""
+        stmt = (
+            select(
+                TaskVirtualAssignee.id,
+                TaskVirtualAssignee.assigned_at,
+                TaskVirtualAssignee.virtual_member_id,
+            )
+            .where(TaskVirtualAssignee.task_id == task_id)
+        )
+        result = await self.session.execute(stmt)
+        return [
+            {
+                "id": str(row.id),
+                "virtual_member_id": str(row.virtual_member_id),
+                "assigned_at": row.assigned_at.isoformat() if row.assigned_at else None,
+            }
+            for row in result.all()
+        ]
+
+    async def set_virtual_assignees(self, task_id: str, virtual_member_ids: list[str]) -> None:
+        """Replace all virtual assignees for a task."""
+        await self.session.execute(
+            delete(TaskVirtualAssignee).where(TaskVirtualAssignee.task_id == task_id)
+        )
+        if virtual_member_ids:
+            rows = [{"task_id": task_id, "virtual_member_id": vm_id} for vm_id in virtual_member_ids]
+            await self.session.execute(insert(TaskVirtualAssignee), rows)
+        await self.session.flush()
+
+    async def get_virtual_assignees_for_tasks(self, task_ids: list[str]) -> dict[str, list[dict]]:
+        """Return {task_id: [virtual_assignee_dict, ...]} for multiple tasks."""
+        if not task_ids:
+            return {}
+        stmt = (
+            select(
+                TaskVirtualAssignee.task_id,
+                TaskVirtualAssignee.id,
+                TaskVirtualAssignee.assigned_at,
+                TaskVirtualAssignee.virtual_member_id,
+            )
+            .where(TaskVirtualAssignee.task_id.in_(task_ids))
+        )
+        result = await self.session.execute(stmt)
+        out: dict[str, list[dict]] = {tid: [] for tid in task_ids}
+        for row in result.all():
+            out[str(row.task_id)].append({
+                "id": str(row.id),
+                "virtual_member_id": str(row.virtual_member_id),
+                "assigned_at": row.assigned_at.isoformat() if row.assigned_at else None,
+            })
+        return out
 
 
 class TaskReportRepository(BaseRepository):

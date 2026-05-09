@@ -12,6 +12,14 @@ interface VirtualMember {
   created_at?: string
 }
 
+interface WorkspaceMember {
+  id: string
+  user_id: string
+  display_name?: string | null
+  email?: string | null
+  role?: string | null
+}
+
 interface ProjectAllMember {
   id: string
   member_id: string
@@ -34,7 +42,7 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
   const [isOpen, setIsOpen] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState('stakeholder')
+  const [role, setRole] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const isControlled = !!onClose
@@ -52,6 +60,13 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
     queryKey: ['virtual-members', projectId, ws?.id],
     queryFn: () => api.get<{ items: VirtualMember[] }>(`${wsPath}/projects/${projectId}/oppm/virtual-members`),
     enabled: !!ws && !!projectId && showModal,
+  })
+
+  const workspaceMembersQuery = useQuery({
+    queryKey: ['workspace-members', ws?.id],
+    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    enabled: !!ws && showModal,
+    staleTime: 5 * 60 * 1000,
   })
 
   const allMembersQuery = useQuery({
@@ -72,7 +87,7 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
     onSuccess: () => {
       setName('')
       setEmail('')
-      setRole('stakeholder')
+      setRole('')
       setError(null)
       queryClient.invalidateQueries({ queryKey: ['virtual-members', projectId, ws?.id] })
       queryClient.invalidateQueries({ queryKey: ['all-members', projectId, ws?.id] })
@@ -91,9 +106,18 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
     },
   })
 
-  const addToAllMembers = useMutation({
+  const addVirtualMemberToProject = useMutation({
     mutationFn: (virtualMemberId: string) =>
       api.post(`${wsPath}/projects/${projectId}/oppm/all-members/virtual/${virtualMemberId}`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['all-members', projectId, ws?.id] })
+      queryClient.invalidateQueries({ queryKey: ['oppm-scaffold', projectId, ws?.id] })
+    },
+  })
+
+  const addWorkspaceMemberToProject = useMutation({
+    mutationFn: (workspaceMemberId: string) =>
+      api.post(`${wsPath}/projects/${projectId}/oppm/all-members/workspace/${workspaceMemberId}`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['all-members', projectId, ws?.id] })
       queryClient.invalidateQueries({ queryKey: ['oppm-scaffold', projectId, ws?.id] })
@@ -110,8 +134,18 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
   })
 
   const virtualMembers = virtualMembersQuery.data?.items ?? []
+  const workspaceMembers = workspaceMembersQuery.data ?? []
   const allMembers = allMembersQuery.data?.items ?? []
-  const virtualInProject = new Set(allMembers.filter((m) => m.source === 'virtual').map((m) => m.member_id))
+
+  const workspaceInProject = new Set(
+    allMembers.filter((m) => m.source === 'workspace').map((m) => m.member_id)
+  )
+  const virtualInProject = new Set(
+    allMembers.filter((m) => m.source === 'virtual').map((m) => m.member_id)
+  )
+
+  const activeWorkspaceMembers = allMembers.filter((m) => m.source === 'workspace')
+  const activeExternalMembers = allMembers.filter((m) => m.source === 'virtual')
 
   return (
     <>
@@ -182,10 +216,70 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
                 </div>
               </div>
 
-              {/* Virtual Members List */}
+              {/* ── Workspace Members (Internal) ── */}
+              {workspaceMembers.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Workspace Members ({workspaceMembers.length})
+                  </h3>
+                  <div className="flex flex-col gap-1.5">
+                    {workspaceMembers.map((wm) => {
+                      const isInProject = workspaceInProject.has(wm.id)
+                      const allMemberEntry = allMembers.find(
+                        (m) => m.member_id === wm.id && m.source === 'workspace'
+                      )
+                      return (
+                        <div
+                          key={wm.id}
+                          className="flex items-center justify-between rounded-md border border-gray-100 bg-white px-3 py-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700">
+                              S
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-gray-900 truncate">
+                                {wm.display_name || wm.email || wm.id.slice(0, 8)}
+                              </p>
+                              {wm.email && (
+                                <p className="text-[10px] text-gray-500 truncate">{wm.email}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {isInProject ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  allMemberEntry && removeFromAllMembers.mutate(allMemberEntry.id)
+                                }
+                                disabled={removeFromAllMembers.isPending}
+                                className="rounded-md border border-red-200 px-2 py-1 text-[10px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                              >
+                                Remove
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => addWorkspaceMemberToProject.mutate(wm.id)}
+                                disabled={addWorkspaceMemberToProject.isPending}
+                                className="rounded-md border border-gray-200 px-2 py-1 text-[10px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                Add to Project
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* External Members Pool */}
               {virtualMembers.length > 0 && (
                 <div className="mb-4">
-                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">External Members</h3>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">External Members Pool</h3>
                   <div className="flex flex-col gap-1.5">
                     {virtualMembers.map((vm) => {
                       const isInProject = virtualInProject.has(vm.id)
@@ -213,8 +307,8 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => addToAllMembers.mutate(vm.id)}
-                                disabled={addToAllMembers.isPending}
+                                onClick={() => addVirtualMemberToProject.mutate(vm.id)}
+                                disabled={addVirtualMemberToProject.isPending}
                                 className="rounded-md border border-gray-200 px-2 py-1 text-[10px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                               >
                                 Add to Project
@@ -225,7 +319,7 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
                               onClick={() => deleteVirtualMember.mutate(vm.id)}
                               disabled={deleteVirtualMember.isPending}
                               className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                              title="Delete virtual member"
+                              title="Delete external member"
                             >
                               <Trash2 className="h-3 w-3" />
                             </button>
@@ -237,42 +331,78 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
                 </div>
               )}
 
-              {/* All Members in Project */}
+              {/* ── Active Project Members ── */}
               <div>
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Active OPPM Members ({allMembers.length})
+                  Active Project Members ({allMembers.length})
                 </h3>
                 {allMembers.length === 0 ? (
                   <p className="text-xs text-gray-400 italic">No members assigned to this project yet.</p>
                 ) : (
                   <div className="flex flex-col gap-1.5">
-                    {allMembers.map((m) => (
-                      <div
-                        key={m.id}
-                        className="flex items-center justify-between rounded-md border border-gray-100 bg-white px-3 py-2"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
-                              m.source === 'workspace'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'bg-amber-100 text-amber-700'
-                            }`}
-                          >
-                            {m.source === 'workspace' ? 'W' : 'E'}
-                          </span>
-                          <div>
-                            <p className="text-xs font-medium text-gray-900">{m.name}</p>
-                            <p className="text-[10px] text-gray-400 capitalize">{m.source} member</p>
-                          </div>
+                    {/* System members first */}
+                    {activeWorkspaceMembers.length > 0 && (
+                      <div className="mb-1">
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-blue-600">
+                          System ({activeWorkspaceMembers.length})
+                        </p>
+                        <div className="flex flex-col gap-1.5">
+                          {activeWorkspaceMembers.map((m) => (
+                            <div
+                              key={m.id}
+                              className="flex items-center justify-between rounded-md border border-gray-100 bg-white px-3 py-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700">
+                                  S
+                                </span>
+                                <div>
+                                  <p className="text-xs font-medium text-gray-900">{m.name}</p>
+                                  <p className="text-[10px] text-gray-400">System member</p>
+                                </div>
+                              </div>
+                              {m.is_leader && (
+                                <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-700">
+                                  Leader
+                                </span>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                        {m.is_leader && (
-                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-700">
-                            Leader
-                          </span>
-                        )}
                       </div>
-                    ))}
+                    )}
+
+                    {/* External members */}
+                    {activeExternalMembers.length > 0 && (
+                      <div>
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                          External ({activeExternalMembers.length})
+                        </p>
+                        <div className="flex flex-col gap-1.5">
+                          {activeExternalMembers.map((m) => (
+                            <div
+                              key={m.id}
+                              className="flex items-center justify-between rounded-md border border-gray-100 bg-white px-3 py-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold text-amber-700">
+                                  E
+                                </span>
+                                <div>
+                                  <p className="text-xs font-medium text-gray-900">{m.name}</p>
+                                  <p className="text-[10px] text-gray-400">External member</p>
+                                </div>
+                              </div>
+                              {m.is_leader && (
+                                <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-700">
+                                  Leader
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

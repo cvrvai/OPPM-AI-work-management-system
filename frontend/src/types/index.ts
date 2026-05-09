@@ -138,6 +138,7 @@ export interface Task {
   assignees?: { id: string; display_name?: string | null }[]
   owners?: TaskOwner[]
   sub_objective_ids?: string[]
+  virtual_assignees?: { id: string; virtual_member_id: string; assigned_at?: string | null }[]
 }
 
 export interface TaskReport {

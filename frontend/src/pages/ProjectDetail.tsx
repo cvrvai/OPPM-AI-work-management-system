@@ -104,6 +104,13 @@ export function ProjectDetail() {
     placeholderData: (previousData) => previousData,
   })
 
+  const { data: allMembers } = useQuery({
+    queryKey: ['all-members', id, ws?.id],
+    queryFn: () => api.get<{ items: { id: string; member_id: string; source: 'workspace' | 'virtual'; name: string; is_leader: boolean }[] }>(`${wsPath}/projects/${id}/oppm/all-members`),
+    enabled: !!ws && !!id,
+    placeholderData: (previousData) => previousData,
+  })
+
   const createTask = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
       const subObjIds = data.sub_objective_ids as string[] | undefined
@@ -440,6 +447,7 @@ export function ProjectDetail() {
           objectives={objectives ?? []}
           subObjectives={subObjectives ?? []}
           members={members ?? []}
+          allMembers={allMembers?.items ?? []}
           allTasks={taskList}
           onSubmit={(data) => createTask.mutate(data)}
           onCancel={() => setShowCreate(false)}
@@ -457,6 +465,7 @@ export function ProjectDetail() {
           objectives={objectives ?? []}
           subObjectives={subObjectives ?? []}
           members={members ?? []}
+          allMembers={allMembers?.items ?? []}
           allTasks={taskList.filter((t) => t.id !== editingTask.id)}
           onSubmit={(data) => updateTask.mutate({ taskId: editingTask.id, data })}
           onCancel={() => setEditingTask(null)}

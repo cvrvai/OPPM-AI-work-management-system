@@ -87,7 +87,7 @@ from domains.oppm.google_sheets import (
     execute_sheet_actions,
     get_google_sheet_snapshot,
 )
-from domains.oppm.repository import OPPMTemplateRepository, OPPMBorderOverrideRepository
+from domains.oppm.repository import OPPMTemplateRepository, OPPMBorderOverrideRepository, _row_to_dict
 
 router = APIRouter()
 

@@ -143,33 +143,16 @@ class RiskUpdate(BaseModel):
 
 # ── Virtual Members ──
 
-_VALID_VIRTUAL_ROLES = {"stakeholder", "vendor", "advisor", "contractor", "observer"}
-
-
 class VirtualMemberCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     email: Optional[str] = Field(None, max_length=300)
     role: Optional[str] = Field(None, max_length=50)
-
-    @field_validator("role")
-    @classmethod
-    def _check_role(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in _VALID_VIRTUAL_ROLES:
-            raise ValueError(f"role must be one of: {', '.join(sorted(_VALID_VIRTUAL_ROLES))}")
-        return v
 
 
 class VirtualMemberUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=200)
     email: Optional[str] = Field(None, max_length=300)
     role: Optional[str] = Field(None, max_length=50)
-
-    @field_validator("role")
-    @classmethod
-    def _check_role(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in _VALID_VIRTUAL_ROLES:
-            raise ValueError(f"role must be one of: {', '.join(sorted(_VALID_VIRTUAL_ROLES))}")
-        return v
 
 
 class ProjectAllMemberReorder(BaseModel):

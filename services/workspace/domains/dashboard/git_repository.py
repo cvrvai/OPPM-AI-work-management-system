@@ -40,6 +40,14 @@ class RepoConfigRepository(BaseRepository):
     async def find_project_repos(self, project_id: str) -> list[RepoConfig]:
         return await self.find_all(filters={"project_id": project_id}, order_by="created_at")
 
+    async def find_workspace_repos(self, project_ids: list[str]) -> list[RepoConfig]:
+        """Return all repo configs whose project_id is in the given list."""
+        if not project_ids:
+            return []
+        stmt = select(RepoConfig).where(RepoConfig.project_id.in_(project_ids))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
 
 class CommitRepository(BaseRepository):
     model = CommitEvent
@@ -68,7 +76,8 @@ class CommitRepository(BaseRepository):
 
     async def find_commits_since(self, repo_config_ids: list[str], since: str) -> list[dict]:
         stmt = (
-            select(CommitEvent)
+            select(CommitEvent, CommitAnalysis)
+            .outerjoin(CommitAnalysis, CommitAnalysis.commit_event_id == CommitEvent.id)
             .where(
                 CommitEvent.repo_config_id.in_(repo_config_ids),
                 CommitEvent.pushed_at >= since,
@@ -77,11 +86,8 @@ class CommitRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         commits = []
-        for ce in result.scalars().all():
+        for ce, analysis in result.all():
             d = {c.name: getattr(ce, c.name) for c in ce.__table__.columns}
-            analysis_stmt = select(CommitAnalysis).where(CommitAnalysis.commit_event_id == ce.id).limit(1)
-            analysis_result = await self.session.execute(analysis_stmt)
-            analysis = analysis_result.scalar_one_or_none()
             d["analysis"] = {c.name: getattr(analysis, c.name) for c in analysis.__table__.columns} if analysis else None
             commits.append(d)
         return commits
