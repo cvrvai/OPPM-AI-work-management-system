@@ -71,37 +71,39 @@ system_prompt: |
   ## TEMPLATE REFERENCE
 
   You have access to a STRUCTURED TEMPLATE REFERENCE that defines the exact layout:
-  - Header rows: 1-5
-  - Task rows: 6+ (dynamic based on task count)
-  - Column A-F: Sub-objective checkmarks (width=40px each)
-  - Column G: Separator (width=10px)
-  - Column H: Task number (width=50px, centered, bold)
+  - Row 1: Empty spacer row
+  - Header rows: 2-6
+  - Task rows: 7+ (dynamic based on task count, default 24 → rows 7-30)
+  - Column A: Empty spacer column
+  - Columns B-G: Sub-objective checkmarks (width=30px each)
+  - Column H: Task number / identity letters (width=50px, centered, bold)
   - Column I: Task title (width=280px, left-aligned)
-  - Columns J-AI: Timeline grid (width=25px each, NO borders)
-  - Columns AJ-AL: Owner slots (width=80px each)
+  - Columns J-AD: Timeline grid (17 cols, width=25px each, NO borders)
+  - Columns AE-AJ: Owner slots (6 cols, width=80px each)
 
   ## BORDER RULES (from template)
 
-  - Header rows (1-5): SOLID, width=1, color=#000000 on ALL sides
-  - Task rows (6+): SOLID, width=1, color=#CCCCCC on ALL sides
-  - Timeline area (J-AI in task rows): NONE (no borders)
-  - Column G: No content, just separator
+  - Header rows (2-6): SOLID, width=1, color=#000000 on ALL sides
+  - Task rows (7+): SOLID, width=1, color=#CCCCCC on ALL sides
+  - Timeline area (J-AD in task rows): NONE (no borders)
+  - Column H: No content in task rows, just separator
 
   ## FONT RULES (from template)
 
-  - Row 1 (title): size=14, bold=true, alignment=CENTER
-  - Row 2 (leader): size=11, bold=true
-  - Row 3 (objective): size=10, wrap=true
-  - Row 4 (dates): size=10
-  - Row 5 (headers): size=10, bold=true, background=#E8E8E8
+  - Rows 2-3 (title/leader): size=11, bold=true, alignment=CENTER
+  - Rows 4-5 (metadata): size=10, wrap=true, alignment=LEFT
+  - Row 6 (headers): size=10, bold=true, background=#E8E8E8, alignment=CENTER
   - Task numbers (H): size=10, bold=true, alignment=CENTER
-  - Task titles (I): size=10, alignment=LEFT, wrap=false (CLIP)
-  - Sub-objective checks (A-F): size=10, alignment=CENTER
-  - Owner slots (AJ-AL): size=10, alignment=CENTER
+  - Task titles (I): size=10, alignment=LEFT, wrap=CLIP
+  - Sub-objective checks (B-G): size=10, alignment=CENTER
+  - Owner slots (AE-AJ): size=10, alignment=CENTER
 
   ## ROW HEIGHT RULES
 
   - Task rows: 21 pixels
+  - Matrix header row: 21 pixels
+  - Matrix body rows: 21 pixels
+  - Summary/Forecast/Risk rows: 40 pixels
 
   ## WHEN ASKED TO "DELETE AND RECREATE"
 
@@ -139,15 +141,15 @@ system_prompt: |
   ## WHEN ASKED TO "MAKE IT STANDARD"
 
   Follow this EXACT sequence (from sheet-actions.yaml make_standard sequence):
-  1. Remove all existing borders from task rows: set_border style=NONE on A6:AI{N}
-  2. Re-apply standard thin borders: set_border style=SOLID #CCCCCC on A6:AI{N}
-  3. Ensure timeline has NO borders: set_border style=NONE on J6:AI{N}
-  4. Ensure header has black borders: set_border style=SOLID #000000 on A1:AI5
+  1. Remove all existing borders from task rows: set_border style=NONE on B7:AJ{N}
+  2. Re-apply standard thin borders: set_border style=SOLID #CCCCCC on B7:AJ{N}
+  3. Ensure timeline has NO borders: set_border style=NONE on J7:AD{N}
+  4. Ensure header has black borders: set_border style=SOLID #000000 on B2:AJ6
   5. Set task row heights to 21px
   6. Set column widths to standard values
-  7. Set header row 5 background to #E8E8E8
+  7. Set header row 6 background to #E8E8E8
   8. Set all fonts/sizes/alignments to standard values
-  9. Freeze rows 1-5
+  9. Freeze rows 1-6 (row_count=6)
 
   ## SHEET ACTIONS REFERENCE
 

@@ -7,7 +7,7 @@
     "current_state": "Task rows have no borders (b field is empty or N)"
   },
   "expected_actions": [
-    { "action": "set_border", "params": { "range": "A6:AL20", "style": "SOLID", "color": "#CCCCCC", "width": 1 } },
-    { "action": "set_border", "params": { "range": "J6:AI20", "style": "NONE" } }
+    { "action": "set_border", "params": { "range": "B7:AJ30", "style": "SOLID", "color": "#CCCCCC", "width": 1 } },
+    { "action": "set_border", "params": { "range": "J7:AD20", "style": "NONE" } }
   ]
 }

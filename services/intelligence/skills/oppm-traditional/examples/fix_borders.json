@@ -7,7 +7,7 @@
     "current_state": "Row 10 has b='T:K2#000000|B:K2#000000|L:K2#000000|R:K2#000000' (thick black)"
   },
   "expected_actions": [
-    { "action": "set_border", "params": { "range": "A10:AL10", "style": "NONE" } },
-    { "action": "set_border", "params": { "range": "A10:AL10", "style": "SOLID", "color": "#CCCCCC", "width": 1 } }
+    { "action": "set_border", "params": { "range": "B10:AJ30", "style": "NONE" } },
+    { "action": "set_border", "params": { "range": "B10:AJ30", "style": "SOLID", "color": "#CCCCCC", "width": 1 } }
   ]
 }

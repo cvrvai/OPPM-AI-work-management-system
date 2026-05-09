@@ -28,7 +28,7 @@
     {
       "action": "set_border",
       "params": {
-        "range": "A30:AI30",
+        "range": "B30:AJ30",
         "style": "SOLID",
         "color": "#CCCCCC",
         "width": 1
@@ -38,7 +38,7 @@
     {
       "action": "set_border",
       "params": {
-        "range": "J30:AI30",
+        "range": "J30:AD30",
         "style": "NONE"
       },
       "reason": "Step 4: Remove borders from timeline area of new row (error_prevention: timeline J-AI must NEVER have borders)"

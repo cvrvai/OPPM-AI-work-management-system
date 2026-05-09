@@ -38,14 +38,14 @@
 ### Standard Dimensions
 | Element | Value | Source |
 |---------|-------|--------|
-| Sub-objective columns (A-F) | 40px | template.yaml columns |
-| Separator (G) | 10px | template.yaml columns |
-| Task number (H) | 50px | template.yaml columns |
-| Task title (I) | 280px | template.yaml columns |
-| Timeline (J-AI) | 25px each | template.yaml columns |
-| Owner slots (AJ-AL) | 80px each | template.yaml columns |
+| Sub-objective columns (B-G) | 40px | template.yaml columns |
+| Separator (H) | 10px | template.yaml columns |
+| Task number (I) | 50px | template.yaml columns |
+| Task title (J) | 280px | template.yaml columns |
+| Timeline (K-AJ) | 25px each | template.yaml columns |
+| Owner slots (AK-AM) | 80px each | template.yaml columns |
 | Task row height | 21px | template.yaml row_heights |
-| Header rows | 1-5 | template.yaml rows.header |
+| Header rows | 2-6 | template.yaml rows.header |
 
 ### Standard Colors
 | Element | Color | Source |
@@ -53,7 +53,7 @@
 | Header borders | #000000 (black) | template.yaml borders.header |
 | Task borders | #CCCCCC (gray) | template.yaml borders.task_area |
 | Timeline borders | NONE | template.yaml borders.timeline |
-| Header background | #E8E8E8 | template.yaml backgrounds.header_row_5 |
+| Header background | #E8E8E8 | template.yaml backgrounds.header_row_6 |
 | Timeline on-track | #1D9E75 (green) | template.yaml backgrounds.timeline_on_track |
 | Timeline at-risk | #EF9F27 (yellow) | template.yaml backgrounds.timeline_at_risk |
 | Timeline late | #E24B4A (red) | template.yaml backgrounds.timeline_late |
@@ -61,15 +61,15 @@
 ### Standard Fonts
 | Element | Size | Bold | Align | Source |
 |---------|------|------|-------|--------|
-| Title (row 1) | 14 | yes | CENTER | template.yaml fonts.project_title |
-| Leader (row 2) | 11 | yes | — | template.yaml fonts.project_leader |
-| Objective (row 3) | 10 | no | — | template.yaml fonts.project_objective |
-| Dates (row 4) | 10 | no | — | template.yaml fonts.dates |
-| Headers (row 5) | 10 | yes | — | template.yaml fonts.column_headers |
-| Task number (H) | 10 | yes | CENTER | template.yaml fonts.task_number |
-| Task title (I) | 10 | no | LEFT | template.yaml fonts.task_title |
-| Sub-obj checks (A-F) | 10 | no | CENTER | template.yaml fonts.sub_objective_check |
-| Owner slots (AJ-AL) | 10 | no | CENTER | template.yaml fonts.owner_slot |
+| Title (row 2) | 14 | yes | CENTER | template.yaml fonts.project_title |
+| Leader (row 3) | 11 | yes | — | template.yaml fonts.project_leader |
+| Objective (row 4) | 10 | no | — | template.yaml fonts.project_objective |
+| Dates (row 5) | 10 | no | — | template.yaml fonts.dates |
+| Headers (row 6) | 10 | yes | — | template.yaml fonts.column_headers |
+| Task number (I) | 10 | yes | CENTER | template.yaml fonts.task_number |
+| Task title (J) | 10 | no | LEFT | template.yaml fonts.task_title |
+| Sub-obj checks (B-G) | 10 | no | CENTER | template.yaml fonts.sub_objective_check |
+| Owner slots (AK-AM) | 10 | no | CENTER | template.yaml fonts.owner_slot |
 
 ---
 
@@ -79,12 +79,12 @@
 
 | # | Rule | Why | Fix |
 |---|------|-----|-----|
-| 1 | Add borders to timeline (J-AI) | Dots need clean white background | Always set_border style=NONE on J6:AI{N} |
+| 1 | Add borders to timeline (K-AJ) | Dots need clean white background | Always set_border style=NONE on K7:AJ{N} |
 | 2 | Use black borders on task rows | Gray is less visually heavy | Always use #CCCCCC for task rows |
 | 3 | Use gray borders on header | Header needs strong separation | Always use #000000 for header |
-| 4 | Put content in column G | It's a separator, not content | Never set values in column G |
-| 5 | Use WRAP for task titles | Expands row height, breaks spacing | Always use CLIP for I column |
-| 6 | Forget to freeze rows 1-5 | Header must stay visible | Always freeze_rows row_count=5 |
+| 4 | Put content in column H | It's a separator, not content | Never set values in column H |
+| 5 | Use WRAP for task titles | Expands row height, breaks spacing | Always use CLIP for J column |
+| 6 | Forget to freeze rows 2-6 | Header must stay visible | Always freeze_rows row_count=6 |
 | 7 | Set borders before values | Can interfere with value setting | Order: set_value → set_alignment → set_border |
 | 8 | Guess row numbers | Use template reference for exact values | Check template.yaml for row definitions |
 
@@ -94,32 +94,32 @@
 
 ### Make It Standard
 ```
-1. set_border style=NONE on A6:AI{N}
-2. set_border style=SOLID #CCCCCC on A6:AI{N}
-3. set_border style=NONE on J6:AI{N}
-4. set_border style=SOLID #000000 on A1:AI5
-5. set_background #E8E8E8 on A5:AI5
-6. set_row_height 21 on rows 6-{N}
-7. set_column_width 40 on A-F, 10 on G, 50 on H, 280 on I, 25 on J-AI, 80 on AJ-AL
-8. set_font_size 14 on A1:AI1, 11 on A2:AI2, 10 on A3:AI5
-9. set_bold true on A1:AI2, A5:AI5
-10. set_alignment CENTER on A1:AI1, H6:H{N}, A6:F{N}, AJ6:AL{N}
-11. set_alignment LEFT on I6:I{N}
-12. set_text_wrap CLIP on I6:I{N}
-13. freeze_rows 5
+1. set_border style=NONE on B7:AJ{N}
+2. set_border style=SOLID #CCCCCC on B7:AJ{N}
+3. set_border style=NONE on K7:AJ{N}
+4. set_border style=SOLID #000000 on B2:AJ6
+5. set_background #E8E8E8 on B6:AJ6
+6. set_row_height 21 on rows 7-{N}
+7. set_column_width 40 on B-G, 10 on H, 50 on I, 280 on J, 25 on K-AJ, 80 on AK-AM
+8. set_font_size 14 on B2:AJ2, 11 on B3:AJ3, 10 on B4:AJ6
+9. set_bold true on B2:AJ3, B6:AJ6
+10. set_alignment CENTER on B2:AJ2, I7:I{N}, B7:G{N}, AK7:AM{N}
+11. set_alignment LEFT on J7:J{N}
+12. set_text_wrap CLIP on J7:J{N}
+13. freeze_rows 6
 ```
 
 ### Add Task
 ```
-1. set_value on H{row}: "{task_number}"
-2. set_value on I{row}: "{task_title}"
-3. set_border SOLID #CCCCCC on A{row}:AI{row}
-4. set_border NONE on J{row}:AI{row}
-5. set_font_size 10 on H{row}:I{row}
-6. set_bold true on H{row}
-7. set_alignment CENTER on H{row}
-8. set_alignment LEFT on I{row}
-9. set_text_wrap CLIP on I{row}
+1. set_value on I{row}: "{task_number}"
+2. set_value on J{row}: "{task_title}"
+3. set_border SOLID #CCCCCC on B{row}:AJ{row}
+4. set_border NONE on K{row}:AJ{row}
+5. set_font_size 10 on I{row}:J{row}
+6. set_bold true on I{row}
+7. set_alignment CENTER on I{row}
+8. set_alignment LEFT on J{row}
+9. set_text_wrap CLIP on J{row}
 10. set_row_height 21 on row {row}
 ```
 
@@ -256,7 +256,7 @@ User says...
 2. **ALWAYS follow error_prevention rules** — They prevent common mistakes
 3. **ALWAYS use the correct sequence** — Order matters (values before borders)
 4. **ALWAYS remove timeline borders** — After applying task borders
-5. **ALWAYS freeze rows 1-5** — After rebuilding header
+5. **ALWAYS freeze rows 2-6** — After rebuilding header (leave row 1 empty)
 6. **PREFER scaffold_oppm_form** — For full-form recreation (1 action vs 80+)
 
 ---

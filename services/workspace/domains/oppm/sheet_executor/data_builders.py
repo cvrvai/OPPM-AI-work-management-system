@@ -167,14 +167,13 @@ def _exec_clear_sheet(service: Any, spreadsheet_id: str, params: dict, sheet_id:
         },
     ).execute()
 
-    # 5. Reset column widths to standard OPPM values
+    # 5. Reset column widths to standard OPPM values (offset layout)
     col_widths = [
-        (0, 6, 40),    # A-F: 40px
-        (6, 7, 10),    # G: 10px
-        (7, 8, 50),    # H: 50px
-        (8, 9, 280),   # I: 280px
-        (9, 35, 25),   # J-AI: 25px
-        (35, 38, 80),  # AJ-AL: 80px
+        (1, 7, 30),    # B-G: 30px (sub-objective check columns)
+        (7, 8, 50),    # H: 50px (task number / identity)
+        (8, 9, 280),   # I: 280px (task title)
+        (9, 30, 25),   # J-AD: 25px (timeline grid, 17 cols)
+        (30, 36, 25),  # AE-AJ: 25px (owner columns, matches Project Completed By grid)
     ]
     requests = []
     for start, end, width in col_widths:

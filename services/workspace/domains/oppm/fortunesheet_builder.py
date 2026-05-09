@@ -290,20 +290,16 @@ class _FortuneSheetBuilder:
         is_frame_only = style.upper() == "NONE" and any([top, bottom, left, right]) and not has_inner
 
         if is_frame_only:
-            # Outer frame only
-            s = top or bottom or left or right or {"style": _FORTUNE_STYLE_THIN, "color": color}
-            _draw_frame(self.borders, r1 - 1, c1 - 1, r2 - 1, c2 - 1, s)
-            # Apply per-side overrides individually if they differ
-            if top and top != s:
+            if top:
                 for c in range(c1 - 1, c2):
                     self.borders.append(_border_cell(r1 - 1, c, {"t": top}))
-            if bottom and bottom != s:
+            if bottom:
                 for c in range(c1 - 1, c2):
                     self.borders.append(_border_cell(r2 - 1, c, {"b": bottom}))
-            if left and left != s:
+            if left:
                 for r in range(r1 - 1, r2):
                     self.borders.append(_border_cell(r, c1 - 1, {"l": left}))
-            if right and right != s:
+            if right:
                 for r in range(r1 - 1, r2):
                     self.borders.append(_border_cell(r, c2 - 1, {"r": right}))
         else:
@@ -318,14 +314,14 @@ class _FortuneSheetBuilder:
         end = params.get("end_index", start)
         height = params.get("height", 21)
         for r in range(start, end + 1):
-            self.rowlen[r - 1] = height
+            self.rowlen[r] = height
 
     def _handle_set_column_width(self, params: dict) -> None:
         start = params.get("start_index", 1)
         end = params.get("end_index", start)
         width = params.get("width", 100)
         for c in range(start, end + 1):
-            self.columnlen[c - 1] = width
+            self.columnlen[c] = width
 
     def _handle_set_background(self, params: dict) -> None:
         range_str = params.get("range", "")
@@ -403,6 +399,23 @@ class _FortuneSheetBuilder:
 
     def build_sheet(self, name: str = "OPPM", version: str = "backend-v1") -> list[dict]:
         """Return the final FortuneSheet sheet array."""
+        # Deduplicate borders: keep only the last border for each (row, col, side)
+        border_map: dict[tuple[int, int, str], dict] = {}
+        for b in self.borders:
+            v = b["value"]
+            r, c = v["row_index"], v["col_index"]
+            for side in ("l", "r", "t", "b"):
+                if side in v:
+                    border_map[(r, c, side)] = {"rangeType": "cell", "value": {"row_index": r, "col_index": c, side: v[side]}}
+        # Merge borders for same cell
+        merged_borders: dict[tuple[int, int], dict] = {}
+        for (r, c, side), b in border_map.items():
+            key = (r, c)
+            if key not in merged_borders:
+                merged_borders[key] = {"rangeType": "cell", "value": {"row_index": r, "col_index": c}}
+            merged_borders[key]["value"][side] = b["value"][side]
+        deduped_borders = list(merged_borders.values())
+
         # Compute dimensions
         max_row = 0
         max_col = 0
@@ -417,7 +430,7 @@ class _FortuneSheetBuilder:
             "name": name,
             "celldata": self.cells,
             "config": {
-                "borderInfo": self.borders,
+                "borderInfo": deduped_borders,
                 "merge": self.merges,
                 "columnlen": self.columnlen,
                 "rowlen": self.rowlen,

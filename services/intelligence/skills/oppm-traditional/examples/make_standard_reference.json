@@ -11,7 +11,7 @@
     {
       "action": "set_border",
       "params": {
-        "range": "A6:AI29",
+        "range": "B7:AJ29",
         "style": "NONE"
       },
       "reason": "Step 1: Remove all existing borders from task rows (from sheet-actions.yaml make_standard sequence)"
@@ -19,7 +19,7 @@
     {
       "action": "set_border",
       "params": {
-        "range": "A6:AI29",
+        "range": "B7:AJ29",
         "style": "SOLID",
         "color": "#CCCCCC",
         "width": 1
@@ -29,7 +29,7 @@
     {
       "action": "set_border",
       "params": {
-        "range": "J6:AI29",
+        "range": "J7:AD29",
         "style": "NONE"
       },
       "reason": "Step 3: Remove borders from timeline area (error_prevention rule: timeline area J-AI must NEVER have borders)"
@@ -37,7 +37,7 @@
     {
       "action": "set_border",
       "params": {
-        "range": "A1:AI5",
+        "range": "B2:AJ6",
         "style": "SOLID",
         "color": "#000000",
         "width": 1
@@ -47,7 +47,7 @@
     {
       "action": "set_background",
       "params": {
-        "range": "A5:AI5",
+        "range": "B6:AJ6",
         "color": "#E8E8E8"
       },
       "reason": "Step 5: Set header row 5 background to light gray (from template.yaml backgrounds.header_row_5)"
@@ -55,7 +55,7 @@
     {
       "action": "set_row_height",
       "params": {
-        "start_index": 6,
+        "start_index": 7,
         "end_index": 29,
         "height": 21
       },
@@ -65,8 +65,8 @@
       "action": "set_column_width",
       "params": {
         "start_index": 1,
-        "end_index": 6,
-        "width": 40
+        "end_index": 7,
+        "width": 30
       },
       "reason": "Step 7a: Set sub-objective columns A-F to 40px (from template.yaml columns A-F)"
     },
@@ -74,8 +74,8 @@
       "action": "set_column_width",
       "params": {
         "start_index": 7,
-        "end_index": 7,
-        "width": 10
+        "end_index": 8,
+        "width": 50
       },
       "reason": "Step 7b: Set separator column G to 10px (from template.yaml column G)"
     },
@@ -83,8 +83,8 @@
       "action": "set_column_width",
       "params": {
         "start_index": 8,
-        "end_index": 8,
-        "width": 50
+        "end_index": 9,
+        "width": 280
       },
       "reason": "Step 7c: Set task number column H to 50px (from template.yaml column H)"
     },
@@ -100,8 +100,8 @@
     {
       "action": "set_column_width",
       "params": {
-        "start_index": 10,
-        "end_index": 35,
+        "start_index": 9,
+        "end_index": 30,
         "width": 25
       },
       "reason": "Step 7e: Set timeline columns J-AI to 25px each (from template.yaml columns J:AI)"
@@ -109,8 +109,8 @@
     {
       "action": "set_column_width",
       "params": {
-        "start_index": 36,
-        "end_index": 38,
+        "start_index": 30,
+        "end_index": 36,
         "width": 80
       },
       "reason": "Step 7f: Set owner columns AJ-AL to 80px each (from template.yaml columns AJ-AL)"
@@ -143,7 +143,7 @@
     {
       "action": "freeze_rows",
       "params": {
-        "row_count": 5
+        "row_count": 6
       },
       "reason": "Step 9: Freeze header rows 1-5 (from template.yaml sheet.frozen_rows and error_prevention rule)"
     }
