@@ -97,10 +97,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     R_RISK_END = R_RISK_START + 3               # 4 risk rows
     R_FORM_BOTTOM = R_RISK_END                   # last form row
 
-    # ── Dynamic week column count ──
-    # Scale up/down based on actual weeks data; minimum 4 columns as fallback
+    # ── Dynamic column counts ──
+    # Scale up/down based on actual data; minimum 4 columns as fallback
     week_col_count = max(4, len(weeks_data)) if weeks_data and isinstance(weeks_data, list) else 4
-    owner_col_count = _SCAFFOLD_OWNER_COLS
+    owner_col_count = max(4, len(members)) if members and isinstance(members, list) else 4
 
     # Column indices (0-based) for dynamic ranges
     COL_OFFSET = 1                              # leave 1 empty column on left
@@ -209,7 +209,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         else:
             owner_labels.append(f"Member {i + 1}")
     for col_idx, label in enumerate(owner_labels):
-        col_letter = _col_index_to_letters(C_OWNER_START + 1 + col_idx)
+        col_letter = _col_index_to_letters(C_OWNER_START + col_idx)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": label}})
 
     # ── 6. Summary / Forecast / Risk section ──
@@ -252,10 +252,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     for col_idx in range(2, 8):
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_FORM_BOTTOM}"}})
-    # Timeline date header columns (M:AC) and owner columns (AD:AI): each column merged vertically rows 42-48
+    # Timeline date header columns and owner columns: each column merged vertically rows 42-48
     # so the rotated labels occupy a taller area; grid cells start at row 49
     R_DATE_HEADER_END = R_MATRIX_HEADER + 6  # = 48
-    for col_idx in range(14, 37):  # M=13 to AI=35 (1-based)
+    for col_idx in range(C_WEEK_START, C_OWNER_END + 1):
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}:{col_letter}{R_DATE_HEADER_END}"}})
     # Summary/Forecast/Risk: G column labels merged vertically per section
@@ -770,8 +770,9 @@ def _exec_scaffold_oppm_form(
 
     # ── Dynamic column computation (mirrors _build_scaffold_actions) ──
     weeks_data = params.get("weeks") or []
+    members = params.get("members") or []
     week_col_count = max(4, len(weeks_data)) if weeks_data and isinstance(weeks_data, list) else 4
-    owner_col_count = _SCAFFOLD_OWNER_COLS
+    owner_col_count = max(4, len(members)) if members and isinstance(members, list) else 4
     C_WEEK_START = 14          # N = 14 (0-based)
     C_WEEK_END = C_WEEK_START + week_col_count - 1
     C_OWNER_START = C_WEEK_END + 1
