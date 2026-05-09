@@ -62,9 +62,34 @@ def _fortune_border(style: str, color: str, width: int) -> dict:
     return {"style": fortune_style, "color": color}
 
 
+def _make_inline_string_parts(text: str) -> list[dict]:
+    """Split text on \\r\\n / \\n and build FortuneSheet inlineStr ct.s array."""
+    # Normalize all line endings to \\n then split
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    parts: list[dict] = []
+    for i, line in enumerate(lines):
+        parts.append({"v": line})
+        if i < len(lines) - 1:
+            # FortuneSheet core requires every ct.s entry to have a 'v' key,
+            # even wrap separators, or v.replace() throws at runtime.
+            parts.append({"v": "", "wrap": True})
+    return parts
+
+
 def _make_cell(r: int, c: int, text: str, opts: dict | None = None) -> dict:
     """Build a FortuneSheet cell value object."""
-    v: dict[str, Any] = {"v": text, "m": text, "ct": {"fa": "General", "t": "s"}}
+    # Detect explicit line breaks → use inlineStr format so FortuneSheet
+    # renders each segment on its own line (required for \\r\\n support).
+    has_newlines = "\n" in text or "\r" in text
+    if has_newlines:
+        v: dict[str, Any] = {
+            "v": text,
+            "m": text,
+            "ct": {"fa": "General", "t": "inlineStr", "s": _make_inline_string_parts(text)},
+        }
+    else:
+        v = {"v": text, "m": text, "ct": {"fa": "General", "t": "s"}}
     if opts:
         if opts.get("bold"):
             v["bl"] = 1
@@ -200,7 +225,21 @@ class _FortuneSheetBuilder:
             if existing:
                 # Merge format into existing cell
                 for k, v in fmt.items():
-                    existing["v"][k] = v
+                    if k == "wrap" and v:
+                        existing["v"]["tb"] = "2"
+                    elif k == "rotation":
+                        existing["v"]["tr"] = v
+                    else:
+                        existing["v"][k] = v
+                # If the existing cell has inlineStr with newlines, ensure
+                # the display text (m) stays in sync with the raw value (v)
+                if "\n" in text or "\r" in text:
+                    existing["v"]["m"] = text
+                    existing["v"]["ct"] = {
+                        "fa": "General",
+                        "t": "inlineStr",
+                        "s": _make_inline_string_parts(text),
+                    }
             else:
                 self.cells.append(_make_cell(r, c, text, fmt))
         self._cell_format.clear()

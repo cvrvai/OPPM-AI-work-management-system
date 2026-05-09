@@ -116,19 +116,15 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "clear_sheet", "params": {}})
 
     # ── 2. Header content ──
-    # Rows 1-2 merged: Logo placeholder (A:F) | Project Leader (G:N) | Project Name (O:AI)
+    # Row 2: Logo placeholder (B:G) | Project Leader (H:K) | Project Name (L:AJ)
     a.append({"action": "set_value", "params": {"range": "B2", "value": ""}})
     a.append({"action": "set_value", "params": {"range": "H2", "value": f"Project Leader: {leader}"}})
-    a.append({"action": "set_value", "params": {"range": "P2", "value": f"Project Name: {title}"}})
-    # Rows 3-4 (merged): multi-line metadata block
-    metadata_block = (
-        f"Project Objective: {objective}\n"
-        f"Deliverable Output: {deliverable}\n"
-        f"Start Date: {start_date}\n"
-        f"Deadline: {deadline}"
-    )
-    a.append({"action": "set_value", "params": {"range": "H4", "value": metadata_block}})
-    # Row 5: 4 sub-headers
+    a.append({"action": "set_value", "params": {"range": "M2", "value": f"Project Name: {title}"}})
+    # Rows 3-5: metadata block (one line per row)
+    a.append({"action": "set_value", "params": {"range": "H3", "value": f"Project Objective: {objective}"}})
+    a.append({"action": "set_value", "params": {"range": "H4", "value": f"Deliverable Output: {deliverable}"}})
+    a.append({"action": "set_value", "params": {"range": "H5", "value": f"Start Date: {start_date}    Deadline: {deadline}"}})
+    # Row 6: 4 sub-headers
     a.append({"action": "set_value", "params": {"range": "B6", "value": "Sub objective"}})
     a.append({"action": "set_value", "params": {"range": "H6", "value": "Major Tasks (Deadline)"}})
     a.append({"action": "set_value", "params": {"range": "N6", "value": f"Project Completed By: {weeks_label}"}})
@@ -194,13 +190,15 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "set_value", "params": {"range": f"I{R_RISK_START + i}", "value": f"Risk: ..."}})
 
     # ── 7. Merges ──
-    # Rows 1-2 three-way split: logo | project leader | project name
-    a.append({"action": "merge_cells", "params": {"range": "B2:G5"}})
-    a.append({"action": "merge_cells", "params": {"range": "H2:K3"}})
-    a.append({"action": "merge_cells", "params": {"range": "L2:AJ3"}})
-    # Rows 3-4 metadata block — starts at G so A:F stays empty (logo area)
-    a.append({"action": "merge_cells", "params": {"range": "H4:AJ5"}})
-    # Row 5 sub-headers
+    # Row 2: logo | project leader | project name (each standalone row)
+    a.append({"action": "merge_cells", "params": {"range": "B2:G2"}})
+    a.append({"action": "merge_cells", "params": {"range": "H2:K2"}})
+    a.append({"action": "merge_cells", "params": {"range": "M2:AJ2"}})
+    # Rows 3-5: each row merged separately
+    a.append({"action": "merge_cells", "params": {"range": "H3:AJ3"}})
+    a.append({"action": "merge_cells", "params": {"range": "H4:AJ4"}})
+    a.append({"action": "merge_cells", "params": {"range": "H5:AJ5"}})
+    # Row 6 sub-headers
     a.append({"action": "merge_cells", "params": {"range": "B6:G6"}})
     a.append({"action": "merge_cells", "params": {"range": "H6:M6"}})
     a.append({"action": "merge_cells", "params": {"range": "N6:AD6"}})
@@ -235,9 +233,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # ── 8. Row heights ──
     # Rows 1-2 header: compact
     a.append({"action": "set_row_height", "params": {"start_index": 2, "end_index": 3, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
-    # Rows 3-4 metadata block: row 3 taller, row 4 compact
-    a.append({"action": "set_row_height", "params": {"start_index": 4, "end_index": 4, "height": 80}})
-    a.append({"action": "set_row_height", "params": {"start_index": 5, "end_index": 5, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
+    # Rows 3-5 metadata: compact height for each row
+    a.append({"action": "set_row_height", "params": {"start_index": 4, "end_index": 6, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
     a.append({"action": "set_row_height", "params": {"start_index": 7, "end_index": LAST_TASK, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
     # All matrix rows at body height first
     a.append({"action": "set_row_height", "params": {"start_index": R_MATRIX_TOP, "end_index": R_MATRIX_BOTTOM, "height": _SCAFFOLD_MATRIX_BODY_ROW_HEIGHT}})
@@ -274,27 +271,30 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
-    # 10a-i. Inner vertical dividers in header: between logo/leader, leader/title, metadata block
+    # 10a-i. Inner vertical dividers in header: between logo/leader, leader/title
     a.append({"action": "set_border", "params": {
-        "range": "B2:G5",
+        "range": "B2:G2",
         "style": "NONE",
         "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
-    # 10a-ii. Thick right border between Project Leader and Project Name
+    # 10a-ii. Thick right border between Project Leader (H:K) and Project Name (M:AJ) (row 2)
     a.append({"action": "set_border", "params": {
-        "range": "H2:K3",
+        "range": "K2",
         "style": "NONE",
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
-    # 10a-iii. Inner horizontal divider between rows 3 and 4 (below leader/title, above metadata)
-    a.append({"action": "set_border", "params": {"range": "B3:AJ3", "style": "NONE",
+    # 10a-iii. Inner horizontal divider between rows 2 and 3 (below leader/title, above metadata)
+    a.append({"action": "set_border", "params": {"range": "B2:AJ2", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # 10a-iv. Inner horizontal divider between rows 5 and 6 (below metadata, above sub-headers)
     a.append({"action": "set_border", "params": {"range": "H5:AJ5", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
+    # Top border on Sub objective cell (B6:G6)
+    a.append({"action": "set_border", "params": {"range": "B6:G6", "style": "NONE",
+                                                  "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1}})
     # 10b. Task area sub-objectives (B:F) → gray grid.
     # Row 7 omits its top border so row 6's black divider remains visible.
     a.append({"action": "set_border", "params": {
@@ -497,13 +497,12 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
 
     # ── 11. Fonts, alignment, rotation ──
     # Rows 1-2 leader/name
-    a.append({"action": "set_font_size", "params": {"range": "B2:AJ3", "size": 11}})
-    a.append({"action": "set_bold", "params": {"range": "B2:AJ3", "bold": True}})
-    a.append({"action": "set_alignment", "params": {"range": "B2:AJ3", "horizontal": "CENTER", "vertical": "MIDDLE"}})
-    # Rows 3-4 metadata (multi-line, left aligned, wrap, NOT bold — matches example)
-    a.append({"action": "set_font_size", "params": {"range": "H4:AJ5", "size": 10}})
-    a.append({"action": "set_alignment", "params": {"range": "H4:AJ5", "horizontal": "LEFT", "vertical": "MIDDLE"}})
-    a.append({"action": "set_text_wrap", "params": {"range": "H4:AJ5", "mode": "WRAP"}})
+    a.append({"action": "set_font_size", "params": {"range": "B2:AJ2", "size": 11}})
+    a.append({"action": "set_bold", "params": {"range": "B2:AJ2", "bold": True}})
+    a.append({"action": "set_alignment", "params": {"range": "B2:AJ2", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    # Rows 3-5 metadata (left aligned, NOT bold — matches example)
+    a.append({"action": "set_font_size", "params": {"range": "H3:AJ5", "size": 10}})
+    a.append({"action": "set_alignment", "params": {"range": "H3:AJ5", "horizontal": "LEFT", "vertical": "MIDDLE"}})
     # Row 5 sub-headers
     a.append({"action": "set_font_size", "params": {"range": "B6:AJ6", "size": 10}})
     a.append({"action": "set_bold", "params": {"range": "B6:AJ6", "bold": True}})
