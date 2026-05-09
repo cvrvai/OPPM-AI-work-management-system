@@ -68,6 +68,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     weeks_label = f"{int(weeks)} weeks" if weeks else "N weeks"
     task_count = max(1, int(params.get("task_count") or _SCAFFOLD_DEFAULT_TASK_COUNT))
     tasks = params.get("tasks") or []
+    weeks_data = params.get("weeks") or []
+    members = params.get("members") or []
     # Optional public image URL for the X-pattern matrix center (replaces the
     # five text labels Major Tasks / Target Dates / Sub Objectives / Costs /
     # Summary & Forecast with an embedded image). Must be publicly fetchable
@@ -168,17 +170,31 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     for r in range(R_GAP_START, R_GAP_END + 1):
         a.append({"action": "set_value", "params": {"range": f"B{r}", "value": ""}})
 
-    # 5c. Week-date rotated headers in M:AC (17 weekly placeholders) — on matrix header row
+    # 5c. Week-date rotated headers in M:AC — on matrix header row
+    # Use real week dates if available, otherwise fall back to "Week N"
+    week_labels = []
+    if weeks_data and isinstance(weeks_data, list):
+        for w in weeks_data[:_SCAFFOLD_WEEK_DATE_COLS]:
+            if isinstance(w, dict):
+                label = w.get("label") or w.get("date") or ""
+            else:
+                label = str(w)
+            week_labels.append(label)
+    # Pad with placeholders if fewer than 17 weeks
+    while len(week_labels) < _SCAFFOLD_WEEK_DATE_COLS:
+        week_labels.append(f"Week {len(week_labels) + 1}")
     for w in range(_SCAFFOLD_WEEK_DATE_COLS):
         col_letter = _col_index_to_letters(C_WEEK_START + w)  # M=13..AC=29 (1-based)
-        if start_dt:
-            label = (start_dt + _td(weeks=w)).strftime("%d-%b-%Y")
-        else:
-            label = f"Week {w + 1}"
-        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": label}})
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": week_labels[w]}})
 
-    # 5d. Owner-name rotated placeholders in AD:AI (6 owner columns) — on matrix header row
-    owner_labels = ["Project Leader", "Member 1", "Member 2", "Member 3", "Member 4", "Member 5"]
+    # 5d. Owner-name rotated headers in AD:AI (6 owner columns) — on matrix header row
+    # Use real member names if available
+    owner_labels = ["Project Leader"]
+    for i in range(5):
+        if i < len(members):
+            owner_labels.append(members[i])
+        else:
+            owner_labels.append(f"Member {i + 1}")
     for col_letter, label in zip(("AE", "AF", "AG", "AH", "AI", "AJ"), owner_labels):
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": label}})
 

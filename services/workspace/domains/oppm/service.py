@@ -139,7 +139,7 @@ def _compute_weeks(start: date | None, end: date | None, max_weeks: int = 20) ->
     current = start_monday
     while current <= end + timedelta(days=6) and len(weeks) < max_weeks:
         weeks.append({
-            "label": f"{current.month}/{current.day}",
+            "label": f"{current.month}/{current.day}/{current.year % 100}",
             "start": current.isoformat(),
         })
         current += timedelta(weeks=1)
@@ -488,6 +488,19 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     deadline = _parse_date(project.deadline)
     weeks = _compute_weeks(start_date, deadline)
 
+    # Fetch project members for owner columns
+    project_member_repo = ProjectMemberRepository(session)
+    project_members = await project_member_repo.find_project_members(project_id)
+    member_names = []
+    for pm in project_members:
+        wm = pm.get("workspace_members", {})
+        name = wm.get("display_name") or wm.get("email", "").split("@")[0]
+        if name:
+            member_names.append(name)
+    # Ensure at least placeholders if no members
+    if not member_names:
+        member_names = ["Member 1", "Member 2", "Member 3", "Member 4", "Member 5"]
+
     task_repo = TaskRepository(session)
     project_tasks = await task_repo.find_project_tasks(project_id, limit=1000)
     task_count = len(project_tasks)
@@ -510,6 +523,8 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
         "completed_by_weeks": len(weeks) if weeks else None,
         "task_count": task_count,
         "tasks": tasks,
+        "weeks": weeks,
+        "members": member_names,
     }
 
     return build_fortunesheet_from_scaffold(params)
