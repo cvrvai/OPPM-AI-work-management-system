@@ -365,13 +365,20 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
-    # Timeline grid header row (H:AI row 42) — vertical grid for dates/members
-    a.append({"action": "set_border", "params": {"range": f"I{R_MATRIX_TOP}:AJ{R_MATRIX_TOP}", "style": "SOLID", "color": _SCAFFOLD_HEADER_BLACK, "width": 1}})
+    # Timeline grid header row (H:AI row 42) — outer border only, no inner grid
+    # (week/member columns are merged vertically; inner borders would show at row 43)
+    a.append({"action": "set_border", "params": {
+        "range": f"I{R_MATRIX_TOP}:AJ{R_MATRIX_TOP}",
+        "style": "NONE",
+        "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
+        "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
+        "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
+        "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
+    }})
     # Timeline grid body (H:AI rows 43-54) — outer border only, no inner grid
     a.append({"action": "set_border", "params": {
         "range": f"I{X_TOP}:AJ{X_BOTTOM}",
         "style": "NONE",
-        "top_style": "SOLID", "top_color": _SCAFFOLD_HEADER_BLACK, "top_width": 1,
         "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1,
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
@@ -454,14 +461,11 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Thick divider below matrix (separates timeline body from Summary section)
     a.append({"action": "set_border", "params": {"range": f"B{R_MATRIX_BOTTOM}:AJ{R_MATRIX_BOTTOM}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
-    # ── Matrix header area borders ──
-    # Week section (N:AC): bottom border at row 49 (end of merged header area)
+    # ── Matrix header area bottom borders ──
+    # Week section (N:AC): bottom border at end of merged header area
     a.append({"action": "set_border", "params": {"range": f"N{R_DATE_HEADER_END}:AC{R_DATE_HEADER_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
-    # Week section right border at column AD
-    a.append({"action": "set_border", "params": {"range": f"AD{R_MATRIX_HEADER}:AD{R_DATE_HEADER_END}", "style": "NONE",
-                                                  "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1}})
-    # Member section (AD:AJ): bottom border at row 49
+    # Member section (AD:AJ): bottom border at end of merged header area
     a.append({"action": "set_border", "params": {"range": f"AD{R_DATE_HEADER_END}:AJ{R_DATE_HEADER_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Restore the outer left/right edges after interior grids so task-row gray borders
