@@ -12,6 +12,9 @@ interface WorkspaceState {
   createWorkspace: (name: string, slug: string, description?: string) => Promise<Workspace>
 }
 
+let lastFetchAt = 0
+const FETCH_DEBOUNCE_MS = 5_000
+
 export const useWorkspaceStore = create<WorkspaceState>()(
   persist(
     (set, get) => ({
@@ -22,6 +25,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       setCurrentWorkspace: (ws) => set({ currentWorkspace: ws }),
 
       fetchWorkspaces: async () => {
+        // Short-term memory cache: skip re-fetching within 5s of last success.
+        const now = Date.now()
+        if (now - lastFetchAt < FETCH_DEBOUNCE_MS && get().workspaces.length > 0) {
+          return
+        }
         set({ loading: true })
         try {
           const workspaces = await api.get<Workspace[]>('/v1/workspaces')
@@ -30,6 +38,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           const current = get().currentWorkspace
           const freshCurrent = current ? (workspaces.find((w) => w.id === current.id) ?? null) : null
           set({ workspaces, currentWorkspace: freshCurrent ?? workspaces[0] ?? null, loading: false })
+          lastFetchAt = Date.now()
         } catch {
           set({ loading: false })
         }
@@ -39,6 +48,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const ws = await api.post<Workspace>('/v1/workspaces', { name, slug, description })
         const workspaces = [...get().workspaces, ws]
         set({ workspaces, currentWorkspace: ws })
+        lastFetchAt = Date.now()
         return ws
       },
     }),

@@ -215,3 +215,67 @@ class OPPMBorderOverride(Base):
         ),
         UniqueConstraint("project_id", "cell_row", "cell_col", "side", name="uq_border_override_cell_side"),
     )
+
+
+class OPPMVirtualMember(Base):
+    """External stakeholders without system accounts.
+
+    Used in the OPPM owner section when a project contributor does not have
+    a workspace_members record (e.g. vendors, advisors, contractors).
+    """
+    __tablename__ = "oppm_virtual_members"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    role: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, default="stakeholder"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OPPMProjectAllMember(Base):
+    """Unified view of real + virtual members for a project's OPPM owner section.
+
+    Either workspace_member_id OR virtual_member_id must be set (enforced by
+    CHECK constraint).  display_order controls column ordering; is_leader flags
+    the project leader in the OPPM header.
+    """
+    __tablename__ = "oppm_project_all_members"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspace_members.id", ondelete="CASCADE"), nullable=True
+    )
+    virtual_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("oppm_virtual_members.id", ondelete="CASCADE"), nullable=True
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_leader: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(workspace_member_id IS NOT NULL) OR (virtual_member_id IS NOT NULL)",
+            name="ck_project_all_members_at_least_one",
+        ),
+        UniqueConstraint(
+            "project_id", "workspace_member_id", name="uq_project_all_members_ws"
+        ),
+        UniqueConstraint(
+            "project_id", "virtual_member_id", name="uq_project_all_members_virtual"
+        ),
+    )

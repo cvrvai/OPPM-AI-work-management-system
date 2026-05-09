@@ -13,6 +13,7 @@ from shared.models.oppm import (
     OPPMDeliverable, OPPMForecast, OPPMRisk,
     OPPMTemplate, OPPMHeader, OPPMTaskItem,
     OPPMBorderOverride,
+    OPPMVirtualMember,
 )
 from shared.models.task import Task, TaskAssignee, TaskOwner
 from shared.models.workspace import WorkspaceMember
@@ -475,3 +476,128 @@ class OPPMBorderOverrideRepository(BaseRepository):
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount or 0
+
+
+# ─── Virtual Members ──────────────────────────────────────────
+
+class VirtualMemberRepository(BaseRepository):
+    model = OPPMVirtualMember
+
+    async def find_project_virtual_members(self, project_id: str) -> list[OPPMVirtualMember]:
+        return await self.find_all(
+            filters={"project_id": project_id},
+            order_by="created_at",
+            desc=False,
+        )
+
+
+# ─── Project All Members (real + virtual) ─────────────────────
+
+class ProjectAllMemberRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def find_project_all_members(self, project_id: str) -> list[dict]:
+        """Return unified list of real and virtual members ordered by display_order."""
+        from shared.models.oppm import OPPMProjectAllMember
+        from shared.models.workspace import WorkspaceMember
+        from shared.models.user import User
+
+        stmt = (
+            select(
+                OPPMProjectAllMember.id,
+                OPPMProjectAllMember.workspace_member_id,
+                OPPMProjectAllMember.virtual_member_id,
+                OPPMProjectAllMember.display_order,
+                OPPMProjectAllMember.is_leader,
+                WorkspaceMember.display_name.label("ws_display_name"),
+                User.email.label("ws_email"),
+                User.full_name.label("ws_full_name"),
+                OPPMVirtualMember.name.label("virtual_name"),
+                OPPMVirtualMember.email.label("virtual_email"),
+            )
+            .outerjoin(WorkspaceMember, WorkspaceMember.id == OPPMProjectAllMember.workspace_member_id)
+            .outerjoin(User, WorkspaceMember.user_id == User.id)
+            .outerjoin(OPPMVirtualMember, OPPMVirtualMember.id == OPPMProjectAllMember.virtual_member_id)
+            .where(OPPMProjectAllMember.project_id == project_id)
+            .order_by(OPPMProjectAllMember.display_order)
+        )
+        result = await self.session.execute(stmt)
+        rows = []
+        for r in result.all():
+            if r.workspace_member_id:
+                email = r.ws_email
+                name = r.ws_display_name or r.ws_full_name or (email.split("@")[0] if email else None) or "Member"
+                source = "workspace"
+                member_id = str(r.workspace_member_id)
+            else:
+                name = r.virtual_name or "External"
+                source = "virtual"
+                member_id = str(r.virtual_member_id)
+            rows.append({
+                "id": str(r.id),
+                "member_id": member_id,
+                "source": source,
+                "name": name,
+                "display_order": r.display_order,
+                "is_leader": r.is_leader,
+            })
+        return rows
+
+    async def add_workspace_member(self, project_id: str, workspace_member_id: str, display_order: int = 0, is_leader: bool = False) -> dict:
+        from shared.models.oppm import OPPMProjectAllMember
+        instance = OPPMProjectAllMember(
+            project_id=project_id,
+            workspace_member_id=workspace_member_id,
+            display_order=display_order,
+            is_leader=is_leader,
+        )
+        self.session.add(instance)
+        await self.session.flush()
+        return _row_to_dict(instance)
+
+    async def add_virtual_member(self, project_id: str, virtual_member_id: str, display_order: int = 0, is_leader: bool = False) -> dict:
+        from shared.models.oppm import OPPMProjectAllMember
+        instance = OPPMProjectAllMember(
+            project_id=project_id,
+            virtual_member_id=virtual_member_id,
+            display_order=display_order,
+            is_leader=is_leader,
+        )
+        self.session.add(instance)
+        await self.session.flush()
+        return _row_to_dict(instance)
+
+    async def remove_member(self, all_member_id: str) -> bool:
+        from shared.models.oppm import OPPMProjectAllMember
+        stmt = sa_delete(OPPMProjectAllMember).where(OPPMProjectAllMember.id == all_member_id)
+        await self.session.execute(stmt)
+        await self.session.flush()
+        return True
+
+    async def update_order(self, all_member_id: str, display_order: int) -> dict | None:
+        from shared.models.oppm import OPPMProjectAllMember
+        stmt = select(OPPMProjectAllMember).where(OPPMProjectAllMember.id == all_member_id).limit(1)
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if not existing:
+            return None
+        existing.display_order = display_order
+        await self.session.flush()
+        return _row_to_dict(existing)
+
+    async def set_leader(self, project_id: str, all_member_id: str) -> dict | None:
+        """Unset any existing leader for the project, then set the new one."""
+        from shared.models.oppm import OPPMProjectAllMember
+        await self.session.execute(
+            sa_delete(OPPMProjectAllMember)
+            .where(OPPMProjectAllMember.project_id == project_id, OPPMProjectAllMember.is_leader == True)
+        )
+        stmt = select(OPPMProjectAllMember).where(OPPMProjectAllMember.id == all_member_id).limit(1)
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if not existing:
+            return None
+        existing.is_leader = True
+        await self.session.flush()
+        return _row_to_dict(existing)

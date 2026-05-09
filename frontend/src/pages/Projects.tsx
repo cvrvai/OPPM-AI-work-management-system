@@ -76,12 +76,16 @@ export function Projects() {
       return res.items ?? []
     },
     enabled: !!ws,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData, // Keep previous workspace data visible while loading new one
   })
 
   const { data: members = [] } = useQuery<WorkspaceMember[]>({
     queryKey: ['members', ws?.id],
     queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
     enabled: !!ws,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
   })
 
   const createMutation = useMutation({

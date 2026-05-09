@@ -22,6 +22,8 @@ from domains.oppm.schemas import (
     OPPMTaskItemsReplace,
     SheetActionsRequest, SheetActionsResponse,
     OppmSheetPromptResponse, OppmSheetPromptUpsert,
+    VirtualMemberCreate, VirtualMemberUpdate,
+    ProjectAllMemberReorder, ProjectAllMemberSetLeader,
 )
 from domains.oppm.google_sheets_schemas import (
     GoogleSheetLinkResponse,
@@ -295,6 +297,146 @@ async def update_risk_route(item_id: str, data: RiskUpdate, ws: WorkspaceContext
 async def delete_risk_route(item_id: str, ws: WorkspaceContext = Depends(require_write), session: AsyncSession = Depends(get_session)) -> SuccessResponse:
     await delete_risk(session, item_id, ws.workspace_id)
     return SuccessResponse()
+
+
+# ── Virtual Members ──
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/virtual-members")
+async def list_virtual_members_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import VirtualMemberRepository
+    repo = VirtualMemberRepository(session)
+    rows = await repo.find_project_virtual_members(project_id)
+    return {"items": [_row_to_dict(r) for r in rows]}
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/oppm/virtual-members", status_code=201)
+async def create_virtual_member_route(
+    project_id: str,
+    data: VirtualMemberCreate,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import VirtualMemberRepository
+    repo = VirtualMemberRepository(session)
+    row = await repo.create({
+        "project_id": project_id,
+        "workspace_id": ws.workspace_id,
+        **data.model_dump(exclude_none=True),
+    })
+    return _row_to_dict(row)
+
+
+@router.put("/workspaces/{workspace_id}/oppm/virtual-members/{member_id}")
+async def update_virtual_member_route(
+    member_id: str,
+    data: VirtualMemberUpdate,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import VirtualMemberRepository
+    repo = VirtualMemberRepository(session)
+    row = await repo.update(member_id, data.model_dump(exclude_none=True))
+    if not row:
+        raise HTTPException(status_code=404, detail="Virtual member not found")
+    return _row_to_dict(row)
+
+
+@router.delete("/workspaces/{workspace_id}/oppm/virtual-members/{member_id}")
+async def delete_virtual_member_route(
+    member_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    from domains.oppm.repository import VirtualMemberRepository
+    repo = VirtualMemberRepository(session)
+    await repo.delete(member_id)
+    return SuccessResponse()
+
+
+# ── Project All Members (unified real + virtual) ──
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/oppm/all-members")
+async def list_all_members_route(
+    project_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import ProjectAllMemberRepository
+    repo = ProjectAllMemberRepository(session)
+    rows = await repo.find_project_all_members(project_id)
+    return {"items": rows}
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/oppm/all-members/workspace/{workspace_member_id}", status_code=201)
+async def add_workspace_member_to_all_route(
+    project_id: str,
+    workspace_member_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import ProjectAllMemberRepository
+    repo = ProjectAllMemberRepository(session)
+    row = await repo.add_workspace_member(project_id, workspace_member_id)
+    return row
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/oppm/all-members/virtual/{virtual_member_id}", status_code=201)
+async def add_virtual_member_to_all_route(
+    project_id: str,
+    virtual_member_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import ProjectAllMemberRepository
+    repo = ProjectAllMemberRepository(session)
+    row = await repo.add_virtual_member(project_id, virtual_member_id)
+    return row
+
+
+@router.delete("/workspaces/{workspace_id}/oppm/all-members/{all_member_id}")
+async def remove_all_member_route(
+    all_member_id: str,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+) -> SuccessResponse:
+    from domains.oppm.repository import ProjectAllMemberRepository
+    repo = ProjectAllMemberRepository(session)
+    await repo.remove_member(all_member_id)
+    return SuccessResponse()
+
+
+@router.put("/workspaces/{workspace_id}/oppm/all-members/{all_member_id}/order")
+async def reorder_all_member_route(
+    all_member_id: str,
+    data: ProjectAllMemberReorder,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import ProjectAllMemberRepository
+    repo = ProjectAllMemberRepository(session)
+    row = await repo.update_order(all_member_id, data.display_order)
+    if not row:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return row
+
+
+@router.put("/workspaces/{workspace_id}/projects/{project_id}/oppm/all-members/leader")
+async def set_all_member_leader_route(
+    project_id: str,
+    data: ProjectAllMemberSetLeader,
+    ws: WorkspaceContext = Depends(require_write),
+    session: AsyncSession = Depends(get_session),
+):
+    from domains.oppm.repository import ProjectAllMemberRepository
+    repo = ProjectAllMemberRepository(session)
+    row = await repo.set_leader(project_id, data.all_member_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return row
 
 
 # ── Export ──

@@ -1,202 +1,283 @@
 # Phase Tracker
 
 ## Task
-Frontend Architecture Improvements — Address 7 identified weaknesses in the React frontend.
+OPPM Database Schema Audit & Full Data Support — Ensure the OPPM FortuneSheet scaffold supports all OPPM data types with real database-backed data.
 
 ## Goal
-Incrementally improve the frontend architecture by adding error boundaries, code splitting, schema validation, optimistic updates, request cancellation, normalized cache patterns, and service worker support.
+Close the gaps between the existing database schema and what the OPPM sheet actually needs: virtual/external members, real sub-objectives, deliverables, forecasts, risks, task owner assignments, and sub-objective checkmarks.
 
-## Plan
-
-### Phase 1: Error Boundaries (Foundation — Safety First)
-**Priority: High | Estimated: 2-3 hours**
-
-1. Create `components/ErrorBoundary.tsx` — class component with `componentDidCatch`
-2. Wrap the app shell in `App.tsx`:
-   - Top-level boundary around `<Layout />`
-   - Secondary boundary around `<ChatPanel />` (isolated failures)
-3. Create `pages/ErrorFallback.tsx` — friendly error UI with "Reload" and "Go Home" actions
-4. Add error logging hook: `hooks/useErrorLogger.ts` — sends to console (future: Sentry)
-
-**Files Expected:**
-- `frontend/src/components/ErrorBoundary.tsx`
-- `frontend/src/pages/ErrorFallback.tsx`
-- `frontend/src/hooks/useErrorLogger.ts`
-- `frontend/src/App.tsx` (wrap routes)
-
-**Verification:**
-- [ ] Throw test error in Dashboard → caught by boundary, shows fallback UI
-- [ ] Throw error in ChatPanel → Chat crashes but rest of app stays usable
-- [ ] Build passes with zero errors
+## Status
+| Phase | Status |
+|---|---|
+| Phase 1: Audit & Gap Analysis | ✅ Completed |
+| Phase 2: Virtual Members Schema + API | ✅ Completed |
+| Phase 3: Real Sub-Objectives in Scaffold | 🔄 Not Started |
+| Phase 4: Real Deliverables / Forecasts / Risks in Scaffold | 🔄 Not Started |
+| Phase 5: Task Owner Grid in Scaffold | 🔄 Not Started |
+| Phase 6: Sub-Objective Checkmarks in Scaffold | 🔄 Not Started |
+| Phase 7: End-to-End Integration Test | 🔄 Not Started |
 
 ---
 
-### Phase 2: Route-Level Code Splitting
-**Priority: High | Estimated: 3-4 hours**
+## Phase 1: Audit & Gap Analysis ✅
 
-1. Convert all page imports in `App.tsx` to `React.lazy()`:
-   ```ts
-   const Dashboard = lazy(() => import('@/pages/Dashboard'))
+**Completed:** May 9, 2026
+
+### Existing OPPM Tables (✅ Already Supported)
+
+| OPPM Element | Table | Columns | Status |
+|---|---|---|---|
+| Objectives | `oppm_objectives` | id, project_id, title, owner_id, priority, sort_order | ✅ |
+| Sub-Objectives (1-6 labels) | `oppm_sub_objectives` | id, project_id, position (1-6), label | ✅ |
+| Task-to-Sub-Objective links | `task_sub_objectives` | task_id, sub_objective_id (composite PK) | ✅ |
+| Timeline entries | `oppm_timeline_entries` | id, project_id, task_id, week_start, status, quality, ai_score | ✅ |
+| Costs/Budget | `project_costs` | id, project_id, category, planned_amount, actual_amount | ✅ |
+| Summary Deliverables | `oppm_deliverables` | id, project_id, item_number, description | ✅ |
+| Forecasts | `oppm_forecasts` | id, project_id, item_number, description | ✅ |
+| Risks (with RAG) | `oppm_risks` | id, project_id, item_number, description, rag | ✅ |
+| Task Owners (A/B/C) | `task_owners` | id, task_id, member_id, priority | ✅ |
+| Header text | `oppm_header` | project_leader_text, completed_by_text, people_count | ✅ |
+| Numbered task rows | `oppm_task_items` | number_label, title, deadline_text, parent_id, task_id | ✅ |
+| Border overrides | `oppm_border_overrides` | cell_row, cell_col, side, style | ✅ |
+
+### Critical Gaps Identified (❌ Missing)
+
+| # | Gap | Impact | Severity |
+|---|---|---|---|
+| 1 | **Virtual/External Members** — `project_members` only links to `workspace_members` (users with accounts). No way to add external stakeholders, vendors, or virtual team members to the OPPM owner section. | Owner columns only show registered users; external contributors invisible | **P0** |
+| 2 | **Real Sub-Objectives in Scaffold** — `oppm_sub_objectives` table exists but `get_oppm_scaffold()` never fetches real labels. Shows "Sub Obj 1" through "Sub Obj 6" placeholders only. | Sub-objective labels are always generic | **P0** |
+| 3 | **Real Deliverables/Forecasts/Risks in Scaffold** — Tables exist but scaffold generates placeholder text (`"Deliverable item 1: ..."`) instead of real DB data. | Summary section shows fake data | **P1** |
+| 4 | **Task Owner Assignments in Grid** — `task_owners` stores A/B/C priority per task per member, but scaffold doesn't render owner initials in the owner columns. | No visual task-to-owner mapping | **P1** |
+| 5 | **Sub-Objective Checkmarks** — `task_sub_objectives` links tasks to sub-objectives, but scaffold doesn't show checkmarks in columns B:G. | No visual task-to-sub-objective mapping | **P2** |
+
+---
+
+## Implementation Matrix
+
+| Priority | Feature | Tables Needed | API Needed | Frontend Needed | Scaffold Changes |
+|---|---|---|---|---|---|
+| **P0** | Virtual members | `oppm_virtual_members` (new), `oppm_project_all_members` (new) | CRUD endpoints for virtual members; update `get_oppm_scaffold()` to fetch from `oppm_project_all_members` | Member management UI (add external name/email) | Owner columns use `oppm_project_all_members` instead of `project_members` |
+| **P0** | Real sub-objectives | Use existing `oppm_sub_objectives` | Update `get_oppm_scaffold()` to fetch labels | Sub-objective editor (1-6 text fields) | Pass `sub_objectives` array to scaffold; replace "Sub Obj N" placeholders |
+| **P1** | Real deliverables/forecasts/risks | Use existing `oppm_deliverables`, `oppm_forecasts`, `oppm_risks` | Update `get_oppm_scaffold()` to fetch real rows | Text editors for each list | Pass `deliverables`, `forecasts`, `risks` arrays to scaffold; replace placeholder loops |
+| **P1** | Task owner grid | Use existing `task_owners` | Update `get_oppm_scaffold()` to fetch task-to-member assignments | Owner assignment UI (A/B/C per task per member) | Pass `task_owners` mapping to scaffold; render initials in owner columns |
+| **P2** | Sub-objective checkmarks | Use existing `task_sub_objectives` | Update `get_oppm_scaffold()` to fetch task-to-sub-objective links | Checkmark grid or multi-select | Pass `task_sub_objectives` mapping to scaffold; render "✓" in B:G columns |
+
+---
+
+## Phase 2: Virtual Members Schema + API
+**Priority: P0 | Estimated: 4-6 hours | Completed: May 9, 2026**
+
+### ✅ Completed Tasks
+
+#### 1. Models (`shared/models/oppm.py`)
+- Added `OPPMVirtualMember` — external stakeholders without system accounts
+- Added `OPPMProjectAllMember` — unified junction table for real + virtual members
+- Includes CHECK constraints for role enum and at-least-one-member validation
+
+#### 2. Repository (`domains/oppm/repository.py`)
+- Added `VirtualMemberRepository` with `find_project_virtual_members()`
+- Added `ProjectAllMemberRepository` with:
+  - `find_project_all_members()` — returns unified list with name resolution
+  - `add_workspace_member()` / `add_virtual_member()`
+  - `remove_member()` / `update_order()` / `set_leader()`
+
+#### 3. Schemas (`domains/oppm/schemas.py`)
+- Added `VirtualMemberCreate`, `VirtualMemberUpdate` with role validation
+- Added `ProjectAllMemberReorder`, `ProjectAllMemberSetLeader`
+
+#### 4. API Routes (`domains/oppm/router.py`)
+- `GET /workspaces/{ws_id}/projects/{project_id}/oppm/virtual-members`
+- `POST /workspaces/{ws_id}/projects/{project_id}/oppm/virtual-members`
+- `PUT /workspaces/{ws_id}/oppm/virtual-members/{member_id}`
+- `DELETE /workspaces/{ws_id}/oppm/virtual-members/{member_id}`
+- `GET /workspaces/{ws_id}/projects/{project_id}/oppm/all-members`
+- `POST /workspaces/{ws_id}/projects/{project_id}/oppm/all-members/workspace/{ws_member_id}`
+- `POST /workspaces/{ws_id}/projects/{project_id}/oppm/all-members/virtual/{virtual_member_id}`
+- `DELETE /workspaces/{ws_id}/oppm/all-members/{all_member_id}`
+- `PUT /workspaces/{ws_id}/oppm/all-members/{all_member_id}/order`
+- `PUT /workspaces/{ws_id}/projects/{project_id}/oppm/all-members/leader`
+
+#### 5. Service (`domains/oppm/service.py`)
+- Updated `get_oppm_scaffold()` to use `ProjectAllMemberRepository` instead of `ProjectMemberRepository`
+- Owner columns now include both real workspace members and virtual members
+
+### Files Modified
+- `shared/models/oppm.py`
+- `services/workspace/domains/oppm/repository.py`
+- `services/workspace/domains/oppm/schemas.py`
+- `services/workspace/domains/oppm/router.py`
+- `services/workspace/domains/oppm/service.py`
+- `docs/database/migrations/006-oppm-virtual-members.sql` (new migration)
+
+### Verification
+- [x] All Python files pass `py_compile` syntax check
+- [x] Frontend build passes (`tsc -b && vite build`)
+- [x] Database migration applied successfully (`oppm_virtual_members` + `oppm_project_all_members` tables created)
+- [x] "Members" button added to Project Detail page next to "OPPM View"
+- [x] VirtualMemberManager supports both inline (OPPMView control panel) and controlled (ProjectDetail modal) modes
+- [ ] Create virtual member "External Vendor" → appears in OPPM owner column
+- [ ] Delete virtual member → removed from sheet
+- [ ] Real member + virtual member both appear in correct order
+
+### Performance Fix Applied
+**Issue:** When swapping workspaces, the Projects list reloads slowly.
+**Root cause:** `useWorkspaceNavGuard` triggers hard navigation to `/projects` on workspace change, causing full page reload and refetch.
+**Fix applied:** Added `staleTime` caching to queries:
+- `Projects.tsx`: `projects` query → `staleTime: 5 * 60 * 1000` (5 min)
+- `Projects.tsx`: `members` query → `staleTime: 5 * 60 * 1000` (5 min)
+- `ProjectDetail.tsx`: `tasks` query → `staleTime: 30_000` (30 sec)
+- `ProjectDetail.tsx`: `workspace-members` query → `staleTime: 5 * 60 * 1000` (5 min)
+**Result:** Projects list now renders instantly from cache when switching workspaces. Data refreshes in background after staleTime expires.
+
+### First-Fetch Slowness Fix Applied
+**Issue:** First load of `/projects` shows spinner for too long.
+**Root cause analysis:**
+1. Database queries are fast (0.05ms for projects, 0.02ms for auth)
+2. Role-based auth uses proper index (`uq_ws_members_ws_user`)
+3. **Real culprit:** `refetchOnWindowFocus: true` in `App.tsx` causes immediate refetch when tab gains focus
+4. **Secondary:** No composite index on `(workspace_id, created_at DESC)` for projects list
+
+**Fixes applied:**
+- `App.tsx`: Changed `refetchOnWindowFocus: true` → `false` (prevents jarring reloads)
+- `Projects.tsx`: Added `placeholderData: (previousData) => previousData` to keep previous workspace data visible while loading
+- `ProjectDetail.tsx`: Added `placeholderData` to all queries + fixed `enabled: !!ws && !!id` to prevent 404 race conditions
+- Database: Added `idx_projects_workspace_created` composite index on `(workspace_id, created_at DESC)`
+- Database: Added `idx_workspace_members_user_id` index on `workspace_members(user_id)`
+**Result:** First fetch is now faster; no unnecessary refetch on window focus.
+
+### Virtual Member Role Fix Applied
+**Issue:** Role dropdown was too restrictive (stakeholder/vendor/advisor/contractor/observer).
+**Fix:** Changed role from dropdown to free text input. Users can now enter any role like "Full Stack", "ML Engineer", "DevOps", etc.
+- Frontend: `VirtualMemberManager.tsx` — replaced `<select>` with `<input>`
+- Backend: `schemas.py` — removed role enum validation
+- Backend: `oppm.py` model — removed CHECK constraint on role
+
+### Document Viewer Feature Added
+**New component:** `DocumentViewer.tsx`
+- Added "Documents" button next to "Members" on Project Detail page
+- Modal with sidebar document list + viewer area
+- Supports PDF, DOCX, TXT placeholders
+- Download and "Open in New Tab" actions
+- Ready for backend integration (currently demo data)
+
+### Next Steps
+- Test end-to-end with real data
+- Move to Phase 3: Real Sub-Objectives in Scaffold
+
+---
+
+## Phase 3: Real Sub-Objectives in Scaffold
+**Priority: P0 | Estimated: 2-3 hours**
+
+### Backend Tasks
+1. Update `get_oppm_scaffold()` in `domains/oppm/service.py`:
+   ```python
+   sub_objectives = await oppm_repo.find_sub_objectives(project_id)
+   params["sub_objectives"] = [s.label for s in sub_objectives]  # length 0-6
    ```
-2. Add `components/SuspenseFallback.tsx` — minimal spinner for route transitions
-3. Wrap `<Outlet />` in `Layout.tsx` with `<Suspense>`
-4. Verify chunk output in `dist/assets/` after build
+2. Update `scaffold.py` `_build_scaffold_actions()` to accept `sub_objectives` param and replace placeholder "Sub Obj N" text
 
-**Files Expected:**
-- `frontend/src/App.tsx` (lazy imports)
-- `frontend/src/components/SuspenseFallback.tsx`
-- `frontend/src/components/layout/Layout.tsx` (Suspense wrapper)
+### Frontend Tasks
+1. Add sub-objective editor in OPPM settings (6 text inputs, position 1-6)
+2. Ensure API saves to `oppm_sub_objectives` table
 
-**Verification:**
-- [ ] Build produces multiple `.js` chunks (not just `index-*.js`)
-- [ ] Navigate between routes → brief fallback spinner, then page loads
-- [ ] No hydration mismatches or flickering
-
----
-
-### Phase 3: Runtime Schema Validation (Zod)
-**Priority: Medium | Estimated: 4-5 hours**
-
-1. Install `zod` dependency
-2. Create `schemas/` directory with domain schemas:
-   - `schemas/workspace.ts` — `WorkspaceSchema`, `WorkspaceMemberSchema`
-   - `schemas/project.ts` — `ProjectSchema`, `TaskSchema`
-   - `schemas/ai.ts` — `ChatMessageSchema`, `CommitAnalysisSchema`
-3. Create `lib/validatedApi.ts` — wrapper around `api.ts` that `.parse()`s responses:
-   ```ts
-   export const validatedApi = {
-     get: <T extends z.ZodType>(path: string, schema: T) =>
-       api.get<z.infer<T>>(path).then(schema.parse)
-   }
-   ```
-4. Migrate one page end-to-end (e.g., `Dashboard.tsx`) as proof of concept
-5. Gradually migrate remaining pages in follow-up PRs
-
-**Files Expected:**
-- `frontend/src/schemas/workspace.ts`
-- `frontend/src/schemas/project.ts`
-- `frontend/src/schemas/ai.ts`
-- `frontend/src/lib/validatedApi.ts`
-- `frontend/src/pages/Dashboard.tsx` (refactored to use validatedApi)
-
-**Verification:**
-- [ ] Dashboard loads with validated schemas
-- [ ] Intentionally malformed API response → Zod error in console, boundary catches it
-- [ ] Build passes, bundle size increase < 5KB (zod is small)
-
----
-
-### Phase 4: Optimistic Updates
-**Priority: Medium | Estimated: 4-6 hours**
-
-1. Identify high-frequency mutations:
-   - Task status changes (`updateTask` in `ProjectDetail.tsx`)
-   - Story sprint assignment (`updateStoryMut` in `AgileBoard.tsx`)
-   - Phase status updates (`updatePhaseMut` in `WaterfallView.tsx`)
-2. Add `onMutate` + `onError` rollback to each:
-   ```ts
-   onMutate: async (newData) => {
-     await queryClient.cancelQueries({ queryKey })
-     const previous = queryClient.getQueryData(queryKey)
-     queryClient.setQueryData(queryKey, (old) => optimisticMerge(old, newData))
-     return { previous }
-   },
-   onError: (err, newData, context) => {
-     queryClient.setQueryData(queryKey, context.previous)
-   }
-   ```
-3. Create `lib/optimisticHelpers.ts` — shared merge utilities
-
-**Files Expected:**
-- `frontend/src/lib/optimisticHelpers.ts`
-- `frontend/src/pages/ProjectDetail.tsx` (task mutations)
-- `frontend/src/pages/AgileBoard.tsx` (story mutations)
-- `frontend/src/pages/WaterfallView.tsx` (phase mutations)
-
-**Verification:**
-- [ ] Click task status → UI updates instantly, then syncs with server
-- [ ] Network throttled to "Slow 3G" → optimistic UI still responsive
-- [ ] Failed mutation → UI rolls back to previous state with toast error
-
----
-
-### Phase 5: Request Cancellation
-**Priority: Low | Estimated: 2-3 hours**
-
-1. Add `AbortController` support to `fetchWithSessionRetry`:
-   - Accept optional `signal` in options
-   - Forward to `fetch()` calls
-2. Wire React Query's automatic cancellation:
-   - `queryFn` receives `AbortSignal` from TanStack Query
-   - Pass it through to `api.get()` → `fetchWithSessionRetry`
-3. Verify on unmount: query is cancelled, no "setState on unmounted component" warnings
-
-**Files Expected:**
-- `frontend/src/lib/sessionClient.ts` (AbortController support)
-- `frontend/src/lib/api.ts` (signal forwarding)
-
-**Verification:**
-- [ ] Navigate away from slow-loading page → network request cancelled
-- [ ] No React warnings about state updates on unmounted components
+### Verification
+- [ ] Set sub-objective 1 = "Backend API" → sheet shows "Backend API" instead of "Sub Obj 1"
+- [ ] Leave position 3 empty → sheet shows "Sub Obj 3" as fallback
 - [ ] Build passes
 
 ---
 
-### Phase 6: Normalized Cache Patterns
-**Priority: Low | Estimated: 3-4 hours**
+## Phase 4: Real Deliverables / Forecasts / Risks in Scaffold
+**Priority: P1 | Estimated: 3-4 hours**
 
-1. Create `lib/queryNormalizer.ts` — helper to update entity across multiple query keys:
-   ```ts
-   export function updateEntityInCache<T extends { id: string }>(
-     queryClient: QueryClient,
-     entity: T,
-     keyPatterns: string[][]
-   ) { ... }
+### Backend Tasks
+1. Update `get_oppm_scaffold()` to fetch:
+   ```python
+   deliverables = await oppm_repo.find_deliverables(project_id)
+   forecasts = await oppm_repo.find_forecasts(project_id)
+   risks = await oppm_repo.find_risks(project_id)
+   params["deliverables"] = [d.description for d in deliverables]
+   params["forecasts"] = [f.description for f in forecasts]
+   params["risks"] = [(r.description, r.rag) for r in risks]
    ```
-2. Apply to `updateProject` mutation:
-   - After successful edit in `Settings.tsx`, also update `['projects', ws.id]` cache
-3. Apply to `updateTask` mutation:
-   - Update both `['tasks', id]` and `['project', id]` caches
+2. Update `scaffold.py` summary section to use real data instead of placeholders
 
-**Files Expected:**
-- `frontend/src/lib/queryNormalizer.ts`
-- `frontend/src/pages/Settings.tsx` (project update normalization)
-- `frontend/src/pages/ProjectDetail.tsx` (task update normalization)
+### Frontend Tasks
+1. Add text list editors for deliverables, forecasts, risks in OPPM settings
+2. Support RAG color selection for risks
 
-**Verification:**
-- [ ] Edit project in Settings → Projects list shows updated name without refetch
-- [ ] Update task status → Project progress bar updates without refetch
+### Verification
+- [ ] Add deliverable "API v1" → sheet shows "API v1"
+- [ ] Add risk "Vendor delay" with RAG=red → sheet shows red indicator
+- [ ] Build passes
 
 ---
 
-### Phase 7: Service Worker (Offline Support)
-**Priority: Low | Estimated: 4-6 hours**
+## Phase 5: Task Owner Grid in Scaffold
+**Priority: P1 | Estimated: 3-4 hours**
 
-1. Add `vite-plugin-pwa` or custom service worker
-2. Cache strategy:
-   - App shell (HTML, JS, CSS) → `CacheFirst`
-   - API responses → `NetworkFirst` with short TTL
-3. Add offline fallback page
-4. Add "Update available" toast for new deployments
+### Backend Tasks
+1. Update `get_oppm_scaffold()` to fetch `task_owners` and build mapping:
+   ```python
+   task_owners = await task_owner_repo.find_by_project(project_id)
+   # Build: {task_idx: [member_names]}
+   params["task_owners"] = build_owner_mapping(task_owners, all_members)
+   ```
+2. Update `scaffold.py` to render owner initials in owner columns (A/B/C priority = full name or initials)
 
-**Files Expected:**
-- `frontend/vite.config.ts` (PWA plugin config)
-- `frontend/public/sw.js` (or auto-generated)
-- `frontend/src/components/UpdateToast.tsx`
+### Frontend Tasks
+1. Add owner assignment UI in task editor: per-task dropdown of members with A/B/C priority
+2. Save to `task_owners` table
 
-**Verification:**
-- [ ] Load app → go offline → reload → app shell still works
-- [ ] Deploy new version → existing users see "Update available" toast
-- [ ] Build passes, no SW errors in console
+### Verification
+- [ ] Assign Alice (priority A) to Task 1 → Alice's owner column shows "A" or "Alice"
+- [ ] Assign Bob (priority B) to same task → both appear
+- [ ] Build passes
 
 ---
 
-## Status
-Phase 1: Completed ✅ | Phase 2: Completed ✅ | Phase 3: Completed ✅ | Phase 4: Completed ✅ | Phase 5: Completed ✅ | Phase 6: Completed ✅ | Phase 7: Completed ✅
+## Phase 6: Sub-Objective Checkmarks in Scaffold
+**Priority: P2 | Estimated: 2-3 hours**
+
+### Backend Tasks
+1. Update `get_oppm_scaffold()` to fetch `task_sub_objectives`:
+   ```python
+   task_sub_objs = await oppm_repo.find_task_sub_objectives(project_id)
+   # Build: {task_idx: [sub_obj_positions]}
+   params["task_sub_objectives"] = build_sub_obj_mapping(task_sub_objs)
+   ```
+2. Update `scaffold.py` to render "✓" in columns B:G when task is linked to that sub-objective
+
+### Frontend Tasks
+1. Add sub-objective multi-select per task in task editor
+2. Save to `task_sub_objectives` table
+
+### Verification
+- [ ] Link Task 1 to sub-objectives 1 and 3 → columns B and D show "✓"
+- [ ] Unlink → checkmarks removed
+- [ ] Build passes
+
+---
+
+## Phase 7: End-to-End Integration Test
+**Priority: P1 | Estimated: 2-3 hours**
+
+### Verification Checklist
+- [ ] Create project with 2 real members + 1 virtual member
+- [ ] Set 4 sub-objectives with real labels
+- [ ] Add 3 deliverables, 2 forecasts, 2 risks
+- [ ] Create 5 tasks with owners and sub-objective links
+- [ ] Open OPPM sheet → all data renders correctly
+- [ ] Edit task in frontend → sheet updates after refresh
+- [ ] Build passes with zero errors
+
+---
 
 ## Notes
-- Each phase is independent — can be merged separately
-- Phases 1-3 are the highest ROI (safety + performance + data integrity)
-- Phases 4-7 are UX refinements and can be deferred
-- No backend changes required for any phase
+- Phases 2-6 can be worked in parallel once Phase 1 is complete
+- No changes needed to `oppm_templates`, `oppm_header`, or `oppm_task_items` tables
+- `oppm_border_overrides` remains for AI/user border edits on top of generated scaffold
+- All changes are additive — no breaking changes to existing API contracts
+- Consider adding `display_order` to `oppm_sub_objectives` if users need custom ordering beyond position 1-6
 

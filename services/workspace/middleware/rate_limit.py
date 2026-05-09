@@ -20,7 +20,7 @@ async def init_redis(redis_url: str = "redis://localhost:6379"):
     global _redis
     try:
         import redis.asyncio as aioredis
-        _redis = aioredis.from_url(redis_url, decode_responses=True)
+        _redis = aioredis.from_url(redis_url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
         await _redis.ping()
         logger.info("Rate limiter: Redis connected at %s", redis_url)
     except Exception as e:

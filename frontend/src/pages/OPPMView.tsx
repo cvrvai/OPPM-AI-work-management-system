@@ -28,6 +28,7 @@ import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import { api } from '@/lib/api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore } from '@/stores/chatStore'
+import { VirtualMemberManager } from '@/components/features/VirtualMemberManager'
 
 /* ── Types ── */
 
@@ -409,6 +410,8 @@ export function OPPMView() {
                 </button>
               </>
             )}
+
+            {editorMode === 'app' && id && <VirtualMemberManager projectId={id} />}
 
             <div className="group relative inline-flex">
               <button

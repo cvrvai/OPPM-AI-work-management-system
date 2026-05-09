@@ -12,6 +12,8 @@ import type { Project, Task, TaskReport, Priority, TaskStatus, OPPMObjective, OP
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { GanttChart } from '@/components/features/GanttChart'
+import { VirtualMemberManager } from '@/components/features/VirtualMemberManager'
+import { DocumentViewer } from '@/components/features/DocumentViewer'
 import {
   ArrowLeft,
   Target,
@@ -36,6 +38,7 @@ import {
   GitBranch,
   Download,
   FileText,
+  Users,
 } from 'lucide-react'
 import { exportTasksCSV, exportTasksPDF } from '@/lib/domain/taskReport'
 import { TaskCard } from './project-detail/TaskCard'
@@ -60,11 +63,13 @@ export function ProjectDetail() {
   const [showCreate, setShowCreate] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [viewMode, setViewMode] = useState<'board' | 'list' | 'timeline'>('board')
+  const [showMemberManager, setShowMemberManager] = useState(false)
 
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id, ws?.id],
     queryFn: () => api.get<Project>(`${wsPath}/projects/${id}`),
     enabled: !!ws && !!id,
+    placeholderData: (previousData) => previousData,
   })
 
   useChatContext('project', id, project?.title)
@@ -73,24 +78,30 @@ export function ProjectDetail() {
     queryKey: ['tasks', id, ws?.id],
     queryFn: () => api.get<Task[]>(`${wsPath}/tasks?project_id=${id}`),
     enabled: !!ws && !!id,
+    staleTime: 30_000,
+    placeholderData: (previousData) => previousData,
   })
 
   const { data: objectives } = useQuery({
     queryKey: ['oppm-objectives', id, ws?.id],
     queryFn: () => api.get<OPPMObjective[]>(`${wsPath}/projects/${id}/oppm/objectives`),
-    enabled: !!ws,
+    enabled: !!ws && !!id,
+    placeholderData: (previousData) => previousData,
   })
 
   const { data: subObjectives } = useQuery({
     queryKey: ['oppm-sub-objectives', id, ws?.id],
     queryFn: () => api.get<OPPMSubObjective[]>(`${wsPath}/projects/${id}/oppm/sub-objectives`),
-    enabled: !!ws,
+    enabled: !!ws && !!id,
+    placeholderData: (previousData) => previousData,
   })
 
   const { data: members } = useQuery({
     queryKey: ['workspace-members', ws?.id],
     queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
     enabled: !!ws,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
   })
 
   const createTask = useMutation({
@@ -272,6 +283,14 @@ export function ProjectDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowMemberManager(true)}
+            className="flex items-center gap-2 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold text-text hover:bg-surface-alt transition-colors whitespace-nowrap"
+          >
+            <Users className="h-4 w-4" /> Members
+          </button>
+          {id && <DocumentViewer projectId={id} projectTitle={p.title} />}
           {(!p.methodology || p.methodology === 'oppm' || p.methodology === 'hybrid') && (
             <Link
               to={`/projects/${id}/oppm`}
@@ -508,6 +527,10 @@ export function ProjectDetail() {
           tasks={taskList}
           onTaskClick={(task) => setEditingTask(task)}
         />
+      )}
+
+      {showMemberManager && id && (
+        <VirtualMemberManager projectId={id} onClose={() => setShowMemberManager(false)} />
       )}
     </div>
   )

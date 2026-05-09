@@ -20,7 +20,21 @@ function getJsonHeaders(headers?: HeadersInit): Headers {
 
 async function getApiError(response: Response, fallbackMessage = 'Request failed'): Promise<ApiError> {
   const error = await response.json().catch(() => ({ detail: response.statusText }))
-  return new ApiError(response.status, error.detail || fallbackMessage)
+  // Pydantic / FastAPI validation errors return { detail: [...] } arrays.
+  const detail = error.detail
+  let message: string
+  if (Array.isArray(detail)) {
+    message = detail
+      .map((e: any) => {
+        const loc = Array.isArray(e.loc) ? e.loc.join('.') : ''
+        const msg = e.msg || e.message || JSON.stringify(e)
+        return loc ? `${loc}: ${msg}` : msg
+      })
+      .join('; ')
+  } else {
+    message = detail || error.message || fallbackMessage
+  }
+  return new ApiError(response.status, message)
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

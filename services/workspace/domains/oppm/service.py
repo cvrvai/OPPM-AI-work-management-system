@@ -488,15 +488,11 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     deadline = _parse_date(project.deadline)
     weeks = _compute_weeks(start_date, deadline)
 
-    # Fetch project members for owner columns
-    project_member_repo = ProjectMemberRepository(session)
-    project_members = await project_member_repo.find_project_members(project_id)
-    member_names = []
-    for pm in project_members:
-        wm = pm.get("workspace_members", {})
-        name = wm.get("display_name") or wm.get("email", "").split("@")[0]
-        if name:
-            member_names.append(name)
+    # Fetch unified project members (real + virtual) for owner columns
+    from domains.oppm.repository import ProjectAllMemberRepository
+    all_member_repo = ProjectAllMemberRepository(session)
+    all_members = await all_member_repo.find_project_all_members(project_id)
+    member_names = [m["name"] for m in all_members if m.get("name")]
     # Ensure at least placeholders if no members
     if not member_names:
         member_names = ["Member 1", "Member 2", "Member 3", "Member 4", "Member 5"]
