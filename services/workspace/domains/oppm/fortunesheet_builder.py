@@ -387,7 +387,7 @@ class _FortuneSheetBuilder:
         for r in range(r1, r2 + 1):
             for c in range(c1, c2 + 1):
                 fmt = self._ensure_cell_format(r - 1, c - 1)
-                fmt["rotation"] = rotation
+                fmt["tr"] = rotation
 
     def _handle_clear_sheet(self, _params: dict) -> None:
         # No-op for FortuneSheet — we start fresh anyway
