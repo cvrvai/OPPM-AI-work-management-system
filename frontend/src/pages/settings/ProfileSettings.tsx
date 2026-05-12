@@ -1,5 +1,9 @@
 import { useState } from 'react'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  updateProfileRouteApiV1AuthProfilePatch,
+  updateMyDisplayNameRouteApiV1WorkspacesWorkspaceIdMembersMeDisplayNamePatch,
+} from '@/generated/workspace-api/sdk.gen'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { Loader2, CheckCircle2 } from 'lucide-react'
@@ -17,10 +21,15 @@ export function ProfileSettings() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await api.patch('/auth/profile', { full_name: displayName })
+      await updateProfileRouteApiV1AuthProfilePatch({
+        client: workspaceClient,
+        body: { full_name: displayName },
+      })
       if (ws) {
-        await api.patch(`/v1/workspaces/${ws.id}/members/me/display-name`, {
-          display_name: displayName,
+        await updateMyDisplayNameRouteApiV1WorkspacesWorkspaceIdMembersMeDisplayNamePatch({
+          client: workspaceClient,
+          path: { workspace_id: ws.id },
+          body: { display_name: displayName },
         })
       }
       setSaved(true)

@@ -1,7 +1,17 @@
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, X, Users, UserPlus } from 'lucide-react'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listVirtualMembersRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmVirtualMembersGet,
+  listMembersApiV1WorkspacesWorkspaceIdMembersGet,
+  listAllMembersRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersGet,
+  createVirtualMemberRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmVirtualMembersPost,
+  deleteVirtualMemberRouteApiV1WorkspacesWorkspaceIdOppmVirtualMembersMemberIdDelete,
+  addVirtualMemberToAllRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersVirtualVirtualMemberIdPost,
+  addWorkspaceMemberToAllRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersWorkspaceWorkspaceMemberIdPost,
+  removeAllMemberRouteApiV1WorkspacesWorkspaceIdOppmAllMembersAllMemberIdDelete,
+} from '@/generated/workspace-api/sdk.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 interface VirtualMember {
@@ -58,31 +68,47 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
 
   const virtualMembersQuery = useQuery({
     queryKey: ['virtual-members', projectId, ws?.id],
-    queryFn: () => api.get<{ items: VirtualMember[] }>(`${wsPath}/projects/${projectId}/oppm/virtual-members`),
+    queryFn: () =>
+      listVirtualMembersRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmVirtualMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: projectId },
+      }).then((res) => (res.data as { items?: VirtualMember[] }) ?? { items: [] }),
     enabled: !!ws && !!projectId && showModal,
   })
 
   const workspaceMembersQuery = useQuery({
     queryKey: ['workspace-members', ws?.id],
-    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    queryFn: () =>
+      listMembersApiV1WorkspacesWorkspaceIdMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as WorkspaceMember[]),
     enabled: !!ws && showModal,
     staleTime: 5 * 60 * 1000,
   })
 
   const allMembersQuery = useQuery({
     queryKey: ['all-members', projectId, ws?.id],
-    queryFn: () => api.get<{ items: ProjectAllMember[] }>(`${wsPath}/projects/${projectId}/oppm/all-members`),
+    queryFn: () =>
+      listAllMembersRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: projectId },
+      }).then((res) => (res.data as { items?: ProjectAllMember[] }) ?? { items: [] }),
     enabled: !!ws && !!projectId && showModal,
   })
 
   const createVirtualMember = useMutation({
     mutationFn: async () => {
       if (!name.trim()) throw new Error('Name is required')
-      return api.post<VirtualMember>(`${wsPath}/projects/${projectId}/oppm/virtual-members`, {
-        name: name.trim(),
-        email: email.trim() || undefined,
-        role,
-      })
+      return createVirtualMemberRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmVirtualMembersPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: projectId },
+        body: {
+          name: name.trim(),
+          email: email.trim() || undefined,
+          role,
+        },
+      }).then((res) => res.data as VirtualMember)
     },
     onSuccess: () => {
       setName('')
@@ -98,7 +124,10 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
 
   const deleteVirtualMember = useMutation({
     mutationFn: (memberId: string) =>
-      api.delete(`${wsPath}/oppm/virtual-members/${memberId}`),
+      deleteVirtualMemberRouteApiV1WorkspacesWorkspaceIdOppmVirtualMembersMemberIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, member_id: memberId },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['virtual-members', projectId, ws?.id] })
       queryClient.invalidateQueries({ queryKey: ['all-members', projectId, ws?.id] })
@@ -108,7 +137,10 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
 
   const addVirtualMemberToProject = useMutation({
     mutationFn: (virtualMemberId: string) =>
-      api.post(`${wsPath}/projects/${projectId}/oppm/all-members/virtual/${virtualMemberId}`, {}),
+      addVirtualMemberToAllRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersVirtualVirtualMemberIdPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: projectId, virtual_member_id: virtualMemberId },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['all-members', projectId, ws?.id] })
       queryClient.invalidateQueries({ queryKey: ['oppm-scaffold', projectId, ws?.id] })
@@ -117,7 +149,10 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
 
   const addWorkspaceMemberToProject = useMutation({
     mutationFn: (workspaceMemberId: string) =>
-      api.post(`${wsPath}/projects/${projectId}/oppm/all-members/workspace/${workspaceMemberId}`, {}),
+      addWorkspaceMemberToAllRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersWorkspaceWorkspaceMemberIdPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: projectId, workspace_member_id: workspaceMemberId },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['all-members', projectId, ws?.id] })
       queryClient.invalidateQueries({ queryKey: ['oppm-scaffold', projectId, ws?.id] })
@@ -126,7 +161,10 @@ export function VirtualMemberManager({ projectId, onClose }: VirtualMemberManage
 
   const removeFromAllMembers = useMutation({
     mutationFn: (allMemberId: string) =>
-      api.delete(`${wsPath}/oppm/all-members/${allMemberId}`),
+      removeAllMemberRouteApiV1WorkspacesWorkspaceIdOppmAllMembersAllMemberIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, all_member_id: allMemberId },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['all-members', projectId, ws?.id] })
       queryClient.invalidateQueries({ queryKey: ['oppm-scaffold', projectId, ws?.id] })

@@ -1,5 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  dashboardStatsApiV1WorkspacesWorkspaceIdDashboardStatsGet,
+  recentAnalysesRouteApiV1WorkspacesWorkspaceIdGitRecentAnalysesGet,
+} from '@/generated/workspace-api/sdk.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatContext } from '@/hooks/useChatContext'
 import type { DashboardStats, CommitAnalysis } from '@/types'
@@ -120,12 +124,15 @@ function ScorePill({ value, label }: { value: number; label: string }) {
 
 export function Dashboard() {
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
-  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   useChatContext('workspace')
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats', ws?.id],
-    queryFn: () => api.get<DashboardStats>(`${wsPath}/dashboard/stats`),
+    queryFn: () =>
+      dashboardStatsApiV1WorkspacesWorkspaceIdDashboardStatsGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => res.data as DashboardStats),
     enabled: !!ws,
   })
 
@@ -137,7 +144,11 @@ export function Dashboard() {
     queryKey: ['recent-analyses', ws?.id],
     queryFn: async () => {
       try {
-        return await api.get<CommitAnalysis[]>(`${wsPath}/git/recent-analyses`)
+        const res = await recentAnalysesRouteApiV1WorkspacesWorkspaceIdGitRecentAnalysesGet({
+          client: workspaceClient,
+          path: { workspace_id: ws!.id },
+        })
+        return res.data as CommitAnalysis[]
       } catch (e) {
         const msg = (e as Error).message ?? ''
         // Gateway/service-down errors — treat as unavailable, don't retry

@@ -509,6 +509,19 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
             "title": t.title or "",
         })
 
+    # Fetch sub-objectives for scaffold labels
+    sub_obj_repo = SubObjectiveRepository(session)
+    sub_objectives = await sub_obj_repo.find_project_sub_objectives(project_id)
+    sub_obj_labels = [so.label for so in sub_objectives]
+
+    # Fetch deliverables, forecasts, risks for scaffold
+    deliv_repo = DeliverableRepository(session)
+    forecast_repo = ForecastRepository(session)
+    risk_repo = RiskRepository(session)
+    deliverables = await deliv_repo.find_project_deliverables(project_id)
+    forecasts = await forecast_repo.find_project_forecasts(project_id)
+    risks = await risk_repo.find_project_risks(project_id)
+
     params = {
         "title": project.title or "[Project Name]",
         "leader": lead_name,
@@ -521,6 +534,10 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
         "tasks": tasks,
         "weeks": weeks,
         "members": member_names,
+        "sub_objectives": sub_obj_labels,
+        "deliverables": [{"description": d.description, "item_number": d.item_number} for d in deliverables],
+        "forecasts": [{"description": f.description, "item_number": f.item_number} for f in forecasts],
+        "risks": [{"description": r.description, "rag": r.rag, "item_number": r.item_number} for r in risks],
     }
 
     return build_fortunesheet_from_scaffold(params)

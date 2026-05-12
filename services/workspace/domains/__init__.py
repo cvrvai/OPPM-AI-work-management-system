@@ -12,12 +12,14 @@ from domains.waterfall.router import router as waterfall_router
 from domains.notification.router import router as notifications_router
 from domains.dashboard.router import router as dashboard_router
 from domains.github.router import router as github_router
+from domains.project_files.router import router as project_files_router
 
 router = APIRouter(prefix="/v1")
 
 router.include_router(auth_router, tags=["auth"])
 router.include_router(workspaces_router, tags=["workspaces"])
 router.include_router(projects_router, tags=["projects"])
+router.include_router(project_files_router, tags=["project-files"])
 router.include_router(tasks_router, tags=["tasks"])
 router.include_router(oppm_router, tags=["oppm"])
 router.include_router(agile_router, tags=["agile"])

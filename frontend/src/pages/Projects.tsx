@@ -2,7 +2,16 @@ import { useState } from 'react'
 import type React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet,
+  listMembersApiV1WorkspacesWorkspaceIdMembersGet,
+  createProjectRouteApiV1WorkspacesWorkspaceIdProjectsPost,
+  addProjectMemberRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdMembersPost,
+  updateProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPut,
+  deleteProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdDelete,
+} from '@/generated/workspace-api/sdk.gen'
+import type { ProjectCreate, ProjectUpdate } from '@/generated/workspace-api/types.gen'
 import { updateEntityInCache } from '@/lib/utils/queryNormalizer'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -64,7 +73,6 @@ export function Projects() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
-  const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   useChatContext('workspace')
   const openChat = useChatStore((s) => s.open)
   const addChatMessage = useChatStore((s) => s.addMessage)
@@ -72,8 +80,12 @@ export function Projects() {
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
-      const res = await api.get<PaginatedResponse<Project>>(`${wsPath}/projects`)
-      return res.items ?? []
+      const res = await listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      })
+      const data = res.data as PaginatedResponse<Project>
+      return data.items ?? []
     },
     enabled: !!ws,
     staleTime: 5 * 60 * 1000,
@@ -82,7 +94,11 @@ export function Projects() {
 
   const { data: members = [] } = useQuery<WorkspaceMember[]>({
     queryKey: ['members', ws?.id],
-    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    queryFn: () =>
+      listMembersApiV1WorkspacesWorkspaceIdMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as WorkspaceMember[]),
     enabled: !!ws,
     staleTime: 5 * 60 * 1000,
     placeholderData: (previousData) => previousData,
@@ -90,12 +106,21 @@ export function Projects() {
 
   const createMutation = useMutation({
     mutationFn: async ({ data, memberAssignments }: { data: CreateProjectPayload; memberAssignments: { userId: string; role: string }[] }) => {
-      const project = await api.post<Project>(`${wsPath}/projects`, data)
+      const res = await createProjectRouteApiV1WorkspacesWorkspaceIdProjectsPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+        body: data as unknown as ProjectCreate,
+      })
+      const project = res.data as Project
       // Add selected members to the project (best-effort, parallel)
       if (memberAssignments.length > 0) {
         await Promise.allSettled(
           memberAssignments.map(({ userId, role }) =>
-            api.post(`${wsPath}/projects/${project.id}/members`, { user_id: userId, role })
+            addProjectMemberRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdMembersPost({
+              client: workspaceClient,
+              path: { workspace_id: ws!.id, project_id: project.id },
+              body: { user_id: userId, role },
+            })
           )
         )
       }
@@ -109,7 +134,11 @@ export function Projects() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateProjectPayload }) =>
-      api.put<Project>(`${wsPath}/projects/${id}`, data),
+      updateProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPut({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id },
+        body: data as unknown as ProjectUpdate,
+      }).then((res) => res.data as Project),
     onSuccess: (updatedProject) => {
       updateEntityInCache(queryClient, updatedProject, [['projects']])
       queryClient.invalidateQueries({ queryKey: ['projects'] })
@@ -118,7 +147,11 @@ export function Projects() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`${wsPath}/projects/${id}`),
+    mutationFn: (id: string) =>
+      deleteProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       setDeletingProject(null)

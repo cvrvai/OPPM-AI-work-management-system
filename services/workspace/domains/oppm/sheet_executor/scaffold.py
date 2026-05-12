@@ -161,7 +161,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": str(col_idx)}})
     # 4a-ii. Sub-objective labels in the matrix body — each column A-F is merged vertically
-    sub_obj_labels = ["Sub Obj 1", "Sub Obj 2", "Sub Obj 3", "Sub Obj 4", "Sub Obj 5", "Sub Obj 6"]
+    sub_obj_labels = params.get("sub_objectives") or []
+    # Pad to 6 with fallback placeholders
+    while len(sub_obj_labels) < 6:
+        sub_obj_labels.append(f"Sub Obj {len(sub_obj_labels) + 1}")
     for col_idx, label in enumerate(sub_obj_labels, start=2):
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}", "value": label}})
@@ -217,13 +220,30 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_value", "params": {"range": f"H{R_SUMMARY_START}", "value": "Summary Deliverable"}})
     a.append({"action": "set_value", "params": {"range": f"H{R_FORECAST_START}", "value": "Forecast"}})
     a.append({"action": "set_value", "params": {"range": f"H{R_RISK_START}", "value": "Risk"}})
-    # Placeholder text — one line per row in H:AI (single cell per row, not merged vertically)
+    # Real data from params — up to 4 items each, with placeholders for empty slots
+    deliverables = params.get("deliverables") or []
+    forecasts = params.get("forecasts") or []
+    risks = params.get("risks") or []
     for i in range(4):
-        a.append({"action": "set_value", "params": {"range": f"I{R_SUMMARY_START + i}", "value": f"Deliverable item {i + 1}: ..."}})
+        d = deliverables[i] if i < len(deliverables) else None
+        val = d["description"] if d and d.get("description") else f"Deliverable item {i + 1}: ..."
+        a.append({"action": "set_value", "params": {"range": f"I{R_SUMMARY_START + i}", "value": val}})
     for i in range(4):
-        a.append({"action": "set_value", "params": {"range": f"I{R_FORECAST_START + i}", "value": f"Forecast: ..."}})
+        f = forecasts[i] if i < len(forecasts) else None
+        val = f["description"] if f and f.get("description") else f"Forecast: ..."
+        a.append({"action": "set_value", "params": {"range": f"I{R_FORECAST_START + i}", "value": val}})
     for i in range(4):
-        a.append({"action": "set_value", "params": {"range": f"I{R_RISK_START + i}", "value": f"Risk: ..."}})
+        r = risks[i] if i < len(risks) else None
+        val = r["description"] if r and r.get("description") else f"Risk: ..."
+        a.append({"action": "set_value", "params": {"range": f"I{R_RISK_START + i}", "value": val}})
+        # RAG color indicator for risk rows
+        rag = (r.get("rag") or "").lower() if r else ""
+        if rag == "red":
+            a.append({"action": "set_background", "params": {"range": f"I{R_RISK_START + i}", "color": "#FF6B6B"}})
+        elif rag == "amber":
+            a.append({"action": "set_background", "params": {"range": f"I{R_RISK_START + i}", "color": "#FFD93D"}})
+        elif rag == "green":
+            a.append({"action": "set_background", "params": {"range": f"I{R_RISK_START + i}", "color": "#6BCB77"}})
 
     # ── 7. Merges ──
     # Row 2: logo | project leader | project name (each standalone row)
@@ -821,10 +841,9 @@ def _exec_scaffold_oppm_form(
     # _col_index_to_letters is 1-based: 1=A, 13=M, 29=AC, 30=AD, 35=AI
     week_headers  = [f"W{i}" for i in range(1, week_col_count + 1)]
     owner_headers = ["Project Leader"] + [f"Owner {i}" for i in range(1, owner_col_count)]
-    sub_obj_labels = ["Sub Obj 1", "Sub Obj 2", "Sub Obj 3",
-                      "Sub Obj 4", "Sub Obj 5", "Sub Obj 6"]
-    sub_obj_labels = ["Sub Obj 1", "Sub Obj 2", "Sub Obj 3",  # body A43:F43
-                      "Sub Obj 4", "Sub Obj 5", "Sub Obj 6"]
+    sub_obj_labels = params.get("sub_objectives") or []
+    while len(sub_obj_labels) < 6:
+        sub_obj_labels.append(f"Sub Obj {len(sub_obj_labels) + 1}")
 
     value_data: list[dict] = [
         # ── Header rows 1-2 ──────────────────────────────────────────────────

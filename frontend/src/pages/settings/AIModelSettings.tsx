@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { intelligenceClient } from '@/lib/api/intelligenceClient'
+import {
+  listAiModelsApiV1WorkspacesWorkspaceIdAiModelsGet,
+  addAiModelApiV1WorkspacesWorkspaceIdAiModelsPost,
+  toggleAiModelApiV1WorkspacesWorkspaceIdAiModelsModelIdTogglePut,
+  deleteAiModelApiV1WorkspacesWorkspaceIdAiModelsModelIdDelete,
+  capabilitiesRouteApiV1WorkspacesWorkspaceIdAiChatCapabilitiesGet,
+  reindexRouteApiV1WorkspacesWorkspaceIdAiReindexPost,
+} from '@/generated/intelligence-api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { AIModel } from '@/types'
 import { Plus, Trash2, Check, Loader2 } from 'lucide-react'
@@ -100,14 +108,32 @@ export function AIModelSettings() {
 
   const { data: models, isLoading } = useQuery({
     queryKey: ['ai-models', ws?.id],
-    queryFn: () => api.get<AIModel[]>(`${wsPath}/ai/models`),
+    queryFn: async () => {
+      if (!ws) return []
+      const res = await listAiModelsApiV1WorkspacesWorkspaceIdAiModelsGet({
+        client: intelligenceClient,
+        path: { workspace_id: ws.id },
+      })
+      if (res.error) {
+        throw new Error((res.error as { detail?: string })?.detail || 'Failed to load AI models')
+      }
+      return (res.data ?? []) as AIModel[]
+    },
     enabled: !!ws,
   })
 
   const createModel = useMutation({
-    mutationFn: (data: { name: string; provider: string; model_id: string; endpoint_url: string | null }) => {
+    mutationFn: async (data: { name: string; provider: string; model_id: string; endpoint_url: string | null }) => {
       if (!ws) throw new Error('Select a workspace before managing AI models.')
-      return api.post(`${wsPath}/ai/models`, data)
+      const res = await addAiModelApiV1WorkspacesWorkspaceIdAiModelsPost({
+        client: intelligenceClient,
+        path: { workspace_id: ws.id },
+        body: data,
+      })
+      if (res.error) {
+        throw new Error((res.error as { detail?: string })?.detail || 'Failed to add AI model')
+      }
+      return res.data
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-models'] })
@@ -121,17 +147,31 @@ export function AIModelSettings() {
   })
 
   const toggleModel = useMutation({
-    mutationFn: (id: string) => {
+    mutationFn: async (id: string) => {
       if (!ws) throw new Error('Select a workspace before managing AI models.')
-      return api.put(`${wsPath}/ai/models/${id}/toggle`, {})
+      const res = await toggleAiModelApiV1WorkspacesWorkspaceIdAiModelsModelIdTogglePut({
+        client: intelligenceClient,
+        path: { workspace_id: ws.id, model_id: id },
+      })
+      if (res.error) {
+        throw new Error((res.error as { detail?: string })?.detail || 'Failed to toggle AI model')
+      }
+      return res.data
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ai-models'] }),
   })
 
   const deleteModel = useMutation({
-    mutationFn: (id: string) => {
+    mutationFn: async (id: string) => {
       if (!ws) throw new Error('Select a workspace before managing AI models.')
-      return api.delete(`${wsPath}/ai/models/${id}`)
+      const res = await deleteAiModelApiV1WorkspacesWorkspaceIdAiModelsModelIdDelete({
+        client: intelligenceClient,
+        path: { workspace_id: ws.id, model_id: id },
+      })
+      if (res.error) {
+        throw new Error((res.error as { detail?: string })?.detail || 'Failed to delete AI model')
+      }
+      return res.data
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ai-models'] }),
   })
@@ -140,15 +180,35 @@ export function AIModelSettings() {
 
   const { data: capabilities } = useQuery({
     queryKey: ['ai-capabilities', ws?.id],
-    queryFn: () => api.get<{ has_project: boolean; can_execute_tools: boolean; indexed_documents: number }>(`${wsPath}/ai/chat/capabilities`),
+    queryFn: async () => {
+      if (!ws) return null
+      const res = await capabilitiesRouteApiV1WorkspacesWorkspaceIdAiChatCapabilitiesGet({
+        client: intelligenceClient,
+        path: { workspace_id: ws.id },
+      })
+      if (res.error) {
+        throw new Error((res.error as { detail?: string })?.detail || 'Failed to load AI capabilities')
+      }
+      return res.data
+    },
     enabled: !!ws,
   })
 
   const reindexMutation = useMutation({
-    mutationFn: () => api.post<{ total_indexed: number }>(`${wsPath}/ai/reindex`, {}),
+    mutationFn: async () => {
+      if (!ws) throw new Error('Select a workspace before reindexing.')
+      const res = await reindexRouteApiV1WorkspacesWorkspaceIdAiReindexPost({
+        client: intelligenceClient,
+        path: { workspace_id: ws.id },
+      })
+      if (res.error) {
+        throw new Error((res.error as { detail?: string })?.detail || 'Failed to reindex')
+      }
+      return res.data
+    },
     onSuccess: (data) => {
       setReindexStatus('done')
-      setReindexResult(data.total_indexed)
+      setReindexResult(data?.total_indexed ?? null)
       queryClient.invalidateQueries({ queryKey: ['ai-capabilities'] })
     },
     onError: () => setReindexStatus('error'),

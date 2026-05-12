@@ -106,6 +106,20 @@ export interface ProjectMember {
   email?: string
 }
 
+// ── Project Files ──
+export interface ProjectFile {
+  id: string
+  workspace_id: string
+  project_id: string
+  file_name: string
+  original_name: string
+  file_size: number
+  content_type: string
+  storage_path: string
+  uploaded_by: string | null
+  created_at: string
+}
+
 // ── Task ──
 export type TaskStatus = 'todo' | 'in_progress' | 'completed'
 

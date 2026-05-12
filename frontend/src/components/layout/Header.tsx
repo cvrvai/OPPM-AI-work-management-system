@@ -2,7 +2,14 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  unreadCountApiV1NotificationsUnreadCountGet,
+  listNotificationsApiV1NotificationsGet,
+  markAsReadApiV1NotificationsNotificationIdReadPut,
+  markAllAsReadRouteApiV1NotificationsReadAllPut,
+  deleteNotificationRouteApiV1NotificationsNotificationIdDelete,
+} from '@/generated/workspace-api/sdk.gen'
 import { getInitials, formatRelativeTime, cn } from '@/lib/utils'
 import type { Notification } from '@/types'
 import {
@@ -50,18 +57,27 @@ export function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
   const { data: unreadData } = useQuery({
     queryKey: ['notifications-unread-count'],
-    queryFn: () => api.get<{ count: number }>('/v1/notifications/unread-count'),
+    queryFn: () =>
+      unreadCountApiV1NotificationsUnreadCountGet({ client: workspaceClient }).then((res) => res.data as { count: number }),
     refetchInterval: 30000,
   })
 
   const { data: notifications } = useQuery({
     queryKey: ['notifications'],
-    queryFn: () => api.get<Notification[]>('/v1/notifications?limit=20'),
+    queryFn: () =>
+      listNotificationsApiV1NotificationsGet({
+        client: workspaceClient,
+        query: { limit: 20 },
+      }).then((res) => (res.data ?? []) as Notification[]),
     enabled: showNotifs,
   })
 
   const markRead = useMutation({
-    mutationFn: (id: string) => api.put(`/v1/notifications/${id}/read`, {}),
+    mutationFn: (id: string) =>
+      markAsReadApiV1NotificationsNotificationIdReadPut({
+        client: workspaceClient,
+        path: { notification_id: id },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
       queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] })
@@ -69,7 +85,8 @@ export function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   })
 
   const markAllRead = useMutation({
-    mutationFn: () => api.put('/v1/notifications/read-all', {}),
+    mutationFn: () =>
+      markAllAsReadRouteApiV1NotificationsReadAllPut({ client: workspaceClient }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
       queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] })
@@ -77,7 +94,11 @@ export function Header({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   })
 
   const deleteNotif = useMutation({
-    mutationFn: (id: string) => api.delete(`/v1/notifications/${id}`),
+    mutationFn: (id: string) =>
+      deleteNotificationRouteApiV1NotificationsNotificationIdDelete({
+        client: workspaceClient,
+        path: { notification_id: id },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
       queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] })

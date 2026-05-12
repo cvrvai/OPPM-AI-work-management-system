@@ -1,7 +1,20 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  getProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdGet,
+  listTasksRouteApiV1WorkspacesWorkspaceIdTasksGet,
+  createTaskRouteApiV1WorkspacesWorkspaceIdTasksPost,
+  updateTaskRouteApiV1WorkspacesWorkspaceIdTasksTaskIdPut,
+  deleteTaskRouteApiV1WorkspacesWorkspaceIdTasksTaskIdDelete,
+  listObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmObjectivesGet,
+  listSubObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmSubObjectivesGet,
+  listMembersApiV1WorkspacesWorkspaceIdMembersGet,
+  listAllMembersRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersGet,
+  setTaskSubObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmTasksTaskIdSubObjectivesPut,
+} from '@/generated/workspace-api/sdk.gen'
+import type { TaskCreate, TaskUpdate } from '@/generated/workspace-api/types.gen'
 import { optimisticUpdateInList, rollbackOnError } from '@/lib/utils/optimisticHelpers'
 import { updateEntityInCache } from '@/lib/utils/queryNormalizer'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -67,7 +80,11 @@ export function ProjectDetail() {
 
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id, ws?.id],
-    queryFn: () => api.get<Project>(`${wsPath}/projects/${id}`),
+    queryFn: () =>
+      getProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => res.data as Project),
     enabled: !!ws && !!id,
     placeholderData: (previousData) => previousData,
   })
@@ -76,7 +93,12 @@ export function ProjectDetail() {
 
   const { data: tasks, isLoading: loadingTasks } = useQuery({
     queryKey: ['tasks', id, ws?.id],
-    queryFn: () => api.get<Task[]>(`${wsPath}/tasks?project_id=${id}`),
+    queryFn: () =>
+      listTasksRouteApiV1WorkspacesWorkspaceIdTasksGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+        query: { project_id: id! },
+      }).then((res) => (res.data ?? []) as Task[]),
     enabled: !!ws && !!id,
     staleTime: 30_000,
     placeholderData: (previousData) => previousData,
@@ -84,21 +106,33 @@ export function ProjectDetail() {
 
   const { data: objectives } = useQuery({
     queryKey: ['oppm-objectives', id, ws?.id],
-    queryFn: () => api.get<OPPMObjective[]>(`${wsPath}/projects/${id}/oppm/objectives`),
+    queryFn: () =>
+      listObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmObjectivesGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => (res.data ?? []) as OPPMObjective[]),
     enabled: !!ws && !!id,
     placeholderData: (previousData) => previousData,
   })
 
   const { data: subObjectives } = useQuery({
     queryKey: ['oppm-sub-objectives', id, ws?.id],
-    queryFn: () => api.get<OPPMSubObjective[]>(`${wsPath}/projects/${id}/oppm/sub-objectives`),
+    queryFn: () =>
+      listSubObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmSubObjectivesGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => (res.data ?? []) as OPPMSubObjective[]),
     enabled: !!ws && !!id,
     placeholderData: (previousData) => previousData,
   })
 
   const { data: members } = useQuery({
     queryKey: ['workspace-members', ws?.id],
-    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    queryFn: () =>
+      listMembersApiV1WorkspacesWorkspaceIdMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as WorkspaceMember[]),
     enabled: !!ws,
     staleTime: 5 * 60 * 1000,
     placeholderData: (previousData) => previousData,
@@ -106,7 +140,11 @@ export function ProjectDetail() {
 
   const { data: allMembers } = useQuery({
     queryKey: ['all-members', id, ws?.id],
-    queryFn: () => api.get<{ items: { id: string; member_id: string; source: 'workspace' | 'virtual'; name: string; is_leader: boolean }[] }>(`${wsPath}/projects/${id}/oppm/all-members`),
+    queryFn: () =>
+      listAllMembersRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => (res.data ?? { items: [] }) as { items: { id: string; member_id: string; source: 'workspace' | 'virtual'; name: string; is_leader: boolean }[] }),
     enabled: !!ws && !!id,
     placeholderData: (previousData) => previousData,
   })
@@ -116,10 +154,19 @@ export function ProjectDetail() {
       const subObjIds = data.sub_objective_ids as string[] | undefined
       const { sub_objective_ids: _removed, ...rest } = data
       void _removed
-      const payload = { ...rest, project_id: id }
-      const task = await api.post<{ id: string }>(`${wsPath}/tasks`, payload)
+      const payload = { ...rest, project_id: id } as unknown as TaskCreate
+      const res = await createTaskRouteApiV1WorkspacesWorkspaceIdTasksPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+        body: payload,
+      })
+      const task = res.data as { id: string }
       if (subObjIds && subObjIds.length > 0 && task?.id) {
-        await api.put(`${wsPath}/projects/${id}/oppm/tasks/${task.id}/sub-objectives`, { sub_objective_ids: subObjIds })
+        await setTaskSubObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmTasksTaskIdSubObjectivesPut({
+          client: workspaceClient,
+          path: { workspace_id: ws!.id, project_id: id!, task_id: task.id },
+          body: { sub_objective_ids: subObjIds },
+        })
       }
       return task
     },
@@ -133,7 +180,11 @@ export function ProjectDetail() {
 
   const updateTask = useMutation({
     mutationFn: ({ taskId, data }: { taskId: string; data: Record<string, unknown> }) =>
-      api.put(`${wsPath}/tasks/${taskId}`, data),
+      updateTaskRouteApiV1WorkspacesWorkspaceIdTasksTaskIdPut({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, task_id: taskId },
+        body: data as unknown as TaskUpdate,
+      }).then((res) => res.data),
     onMutate: async ({ taskId, data }) => {
       await queryClient.cancelQueries({ queryKey: ['tasks', id] })
       const previous = optimisticUpdateInList<Task>(queryClient, ['tasks', id], {
@@ -157,7 +208,11 @@ export function ProjectDetail() {
   })
 
   const deleteTask = useMutation({
-    mutationFn: (taskId: string) => api.delete(`${wsPath}/tasks/${taskId}`),
+    mutationFn: (taskId: string) =>
+      deleteTaskRouteApiV1WorkspacesWorkspaceIdTasksTaskIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, task_id: taskId },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', id] })
       queryClient.invalidateQueries({ queryKey: ['project', id] })

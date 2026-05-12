@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listTaskReportsRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsGet,
+  createTaskReportRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsPost,
+  approveTaskReportRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsReportIdApprovePatch,
+  deleteTaskReportRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsReportIdDelete,
+  createObjectiveRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmObjectivesPost,
+} from '@/generated/workspace-api/sdk.gen'
+import type { TaskReportCreate, TaskReportApprove } from '@/generated/workspace-api/types.gen'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { Task, TaskReport, OPPMObjective, OPPMSubObjective, WorkspaceMember, Priority, TaskStatus } from '@/types'
 import { cn } from '@/lib/utils'
 import {
@@ -51,6 +60,8 @@ export function TaskForm({
   currentUserId?: string
 }) {
   const queryClient = useQueryClient()
+  const workspace = useWorkspaceStore((s) => s.currentWorkspace)
+  const wsId = workspace?.id
   const [tab, setTab] = useState<'details' | 'reports'>('details')
   const [reportForm, setReportForm] = useState({ report_date: new Date().toISOString().slice(0, 10), hours: '', description: '' })
   const [showReportForm, setShowReportForm] = useState(false)
@@ -61,18 +72,31 @@ export function TaskForm({
 
   const reportsQuery = useQuery<TaskReport[]>({
     queryKey: ['task-reports', initial?.id],
-    queryFn: () => api.get<TaskReport[]>(`${wsPath}/tasks/${initial!.id}/reports`),
-    enabled: !!initial && tab === 'reports',
+    queryFn: () =>
+      listTaskReportsRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsGet({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, task_id: initial!.id },
+      }).then((res) => (res.data ?? []) as TaskReport[]),
+    enabled: !!initial && tab === 'reports' && !!wsId,
   })
 
   const addReport = useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post(`${wsPath}/tasks/${initial!.id}/reports`, data),
+    mutationFn: (data: Record<string, unknown>) =>
+      createTaskReportRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsPost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, task_id: initial!.id },
+        body: data as unknown as TaskReportCreate,
+      }).then((res) => res.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['task-reports', initial?.id] }); setReportForm({ report_date: new Date().toISOString().slice(0, 10), hours: '', description: '' }); setShowReportForm(false) },
   })
 
   const approveReport = useMutation({
     mutationFn: ({ reportId, is_approved }: { reportId: string; is_approved: boolean }) =>
-      api.patch<TaskReport>(`${wsPath}/tasks/${initial!.id}/reports/${reportId}/approve`, { is_approved }),
+      approveTaskReportRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsReportIdApprovePatch({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, task_id: initial!.id, report_id: reportId },
+        body: { is_approved } as TaskReportApprove,
+      }).then((res) => res.data as TaskReport),
     onSuccess: (updated) => {
       queryClient.setQueryData<TaskReport[]>(
         ['task-reports', initial?.id],
@@ -82,13 +106,21 @@ export function TaskForm({
   })
 
   const deleteReport = useMutation({
-    mutationFn: (reportId: string) => api.delete(`${wsPath}/tasks/${initial!.id}/reports/${reportId}`),
+    mutationFn: (reportId: string) =>
+      deleteTaskReportRouteApiV1WorkspacesWorkspaceIdTasksTaskIdReportsReportIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, task_id: initial!.id, report_id: reportId },
+      }).then((res) => res.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['task-reports', initial?.id] }),
   })
 
   const createObjective = useMutation({
     mutationFn: (objectiveTitle: string) =>
-      api.post<OPPMObjective>(`${wsPath}/projects/${projectId}/oppm/objectives`, { title: objectiveTitle }),
+      createObjectiveRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmObjectivesPost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId },
+        body: { title: objectiveTitle },
+      }).then((res) => res.data as OPPMObjective),
     onSuccess: (objective) => {
       const normalizedObjective: OPPMObjective = { ...objective, tasks: objective.tasks ?? [] }
       setCreatedObjectives((prev) =>

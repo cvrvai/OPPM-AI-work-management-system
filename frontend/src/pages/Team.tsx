@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listMembersApiV1WorkspacesWorkspaceIdMembersGet,
+  listSkillsRouteApiV1WorkspacesWorkspaceIdMembersMemberIdSkillsGet,
+  addSkillRouteApiV1WorkspacesWorkspaceIdMembersMemberIdSkillsPost,
+  deleteSkillRouteApiV1WorkspacesWorkspaceIdMembersMemberIdSkillsSkillIdDelete,
+} from '@/generated/workspace-api/sdk.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useAuthStore } from '@/stores/authStore'
 import type { WorkspaceMember, MemberSkill, SkillLevel } from '@/types'
@@ -45,12 +51,20 @@ function MemberCard({
 
   const { data: skills = [], isLoading: loadingSkills } = useQuery<MemberSkill[]>({
     queryKey: ['member-skills', member.id],
-    queryFn: () => api.get<MemberSkill[]>(`${wsPath}/members/${member.id}/skills`),
+    queryFn: () =>
+      listSkillsRouteApiV1WorkspacesWorkspaceIdMembersMemberIdSkillsGet({
+        client: workspaceClient,
+        path: { workspace_id: wsPath.split('/')[3], member_id: member.id },
+      }).then((res) => (res.data ?? []) as MemberSkill[]),
   })
 
   const addSkill = useMutation({
     mutationFn: (data: { skill_name: string; skill_level: SkillLevel }) =>
-      api.post<MemberSkill>(`${wsPath}/members/${member.id}/skills`, data),
+      addSkillRouteApiV1WorkspacesWorkspaceIdMembersMemberIdSkillsPost({
+        client: workspaceClient,
+        path: { workspace_id: wsPath.split('/')[3], member_id: member.id },
+        body: data,
+      }).then((res) => res.data as MemberSkill),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['member-skills', member.id] })
       setSkillName('')
@@ -60,7 +74,11 @@ function MemberCard({
   })
 
   const deleteSkill = useMutation({
-    mutationFn: (skillId: string) => api.delete(`${wsPath}/members/${member.id}/skills/${skillId}`),
+    mutationFn: (skillId: string) =>
+      deleteSkillRouteApiV1WorkspacesWorkspaceIdMembersMemberIdSkillsSkillIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: wsPath.split('/')[3], member_id: member.id, skill_id: skillId },
+      }).then((res) => res.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['member-skills', member.id] }),
   })
 
@@ -197,7 +215,11 @@ export function Team() {
 
   const { data: members = [], isLoading } = useQuery<WorkspaceMember[]>({
     queryKey: ['workspace-members', ws?.id],
-    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    queryFn: () =>
+      listMembersApiV1WorkspacesWorkspaceIdMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as WorkspaceMember[]),
     enabled: !!ws,
   })
 

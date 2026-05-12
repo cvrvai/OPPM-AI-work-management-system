@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listWorkspacesApiV1WorkspacesGet,
+  createWorkspaceRouteApiV1WorkspacesPost,
+  listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet,
+  dashboardStatsApiV1WorkspacesWorkspaceIdDashboardStatsGet,
+  listMembersApiV1WorkspacesWorkspaceIdMembersGet,
+} from '@/generated/workspace-api/sdk.gen'
 import { queryClient } from '@/lib/api/queryClient'
 import type { Workspace } from '@/types'
 
@@ -27,24 +34,35 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         set({ currentWorkspace: ws })
         // Warm the React Query cache for the new workspace so the first page
         // load feels instant instead of showing skeletons for 1–2 s.
-        const wsPath = `/v1/workspaces/${ws.id}`
         // Fire-and-forget prefetch calls — we don't await them
         queryClient.prefetchQuery({
           queryKey: ['projects', ws.id],
           queryFn: async () => {
-            const res = await api.get<{ items: unknown[]; total: number }>(`${wsPath}/projects`)
-            return res.items ?? []
+            const res = await listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet({
+              client: workspaceClient,
+              path: { workspace_id: ws.id },
+            })
+            const data = res.data as { items: unknown[]; total: number }
+            return data.items ?? []
           },
           staleTime: 30_000,
         })
         queryClient.prefetchQuery({
           queryKey: ['dashboard-stats', ws.id],
-          queryFn: () => api.get(`${wsPath}/dashboard/stats`),
+          queryFn: () =>
+            dashboardStatsApiV1WorkspacesWorkspaceIdDashboardStatsGet({
+              client: workspaceClient,
+              path: { workspace_id: ws.id },
+            }).then((res) => res.data),
           staleTime: 30_000,
         })
         queryClient.prefetchQuery({
           queryKey: ['members', ws.id],
-          queryFn: () => api.get(`${wsPath}/members`),
+          queryFn: () =>
+            listMembersApiV1WorkspacesWorkspaceIdMembersGet({
+              client: workspaceClient,
+              path: { workspace_id: ws.id },
+            }).then((res) => res.data),
           staleTime: 5 * 60 * 1000,
         })
       },
@@ -57,7 +75,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         }
         set({ loading: true })
         try {
-          const workspaces = await api.get<Workspace[]>('/v1/workspaces')
+          const res = await listWorkspacesApiV1WorkspacesGet({ client: workspaceClient })
+          const workspaces = (res.data ?? []) as Workspace[]
           // Always sync currentWorkspace with the fresh API object so that
           // current_user_role (and other fields) are never stale from localStorage.
           const current = get().currentWorkspace
@@ -70,7 +89,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       createWorkspace: async (name, slug, description = '') => {
-        const ws = await api.post<Workspace>('/v1/workspaces', { name, slug, description })
+        const res = await createWorkspaceRouteApiV1WorkspacesPost({
+          client: workspaceClient,
+          body: { name, slug, description },
+        })
+        const ws = res.data as Workspace
         const workspaces = [...get().workspaces, ws]
         set({ workspaces, currentWorkspace: ws })
         lastFetchAt = Date.now()

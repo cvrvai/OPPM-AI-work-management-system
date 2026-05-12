@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listMembersApiV1WorkspacesWorkspaceIdMembersGet,
+  listInvitesApiV1WorkspacesWorkspaceIdInvitesGet,
+  createInviteRouteApiV1WorkspacesWorkspaceIdInvitesPost,
+  updateMemberApiV1WorkspacesWorkspaceIdMembersMemberIdPut,
+  removeMemberRouteApiV1WorkspacesWorkspaceIdMembersMemberIdDelete,
+  revokeInviteRouteApiV1WorkspacesWorkspaceIdInvitesInviteIdDelete,
+  resendInviteRouteApiV1WorkspacesWorkspaceIdInvitesInviteIdResendPost,
+  lookupMemberRouteApiV1WorkspacesWorkspaceIdMembersLookupGet,
+} from '@/generated/workspace-api/sdk.gen'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspaceInvite, WorkspaceMember, WorkspaceRole } from '@/types'
@@ -71,12 +81,15 @@ export function WorkspaceMembersPanel() {
 
     debounceRef.current = setTimeout(async () => {
       try {
-        const result = await api.get<EmailLookup>(
-          `${wsPath}/members/lookup?email=${encodeURIComponent(trimmed)}`
-        )
-        setLookupData(result)
-        if (result.already_member) setLookupState('member')
-        else if (result.exists) setLookupState('found')
+        const result = await lookupMemberRouteApiV1WorkspacesWorkspaceIdMembersLookupGet({
+          client: workspaceClient,
+          path: { workspace_id: ws!.id },
+          query: { email: trimmed },
+        })
+        const data = result.data as EmailLookup
+        setLookupData(data)
+        if (data.already_member) setLookupState('member')
+        else if (data.exists) setLookupState('found')
         else setLookupState('not-found')
       } catch {
         setLookupState('idle')
@@ -87,18 +100,31 @@ export function WorkspaceMembersPanel() {
 
   const { data: members = [], isLoading: loadingMembers } = useQuery({
     queryKey: ['workspace-members', ws?.id],
-    queryFn: () => api.get<WorkspaceMember[]>(`${wsPath}/members`),
+    queryFn: () =>
+      listMembersApiV1WorkspacesWorkspaceIdMembersGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as WorkspaceMember[]),
     enabled: !!ws,
   })
 
   const { data: invites = [], isLoading: loadingInvites } = useQuery({
     queryKey: ['workspace-invites', ws?.id],
-    queryFn: () => api.get<WorkspaceInvite[]>(`${wsPath}/invites`),
+    queryFn: () =>
+      listInvitesApiV1WorkspacesWorkspaceIdInvitesGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as WorkspaceInvite[]),
     enabled: !!ws && isAdmin,
   })
 
   const sendInvite = useMutation({
-    mutationFn: (data: { email: string; role: string }) => api.post(`${wsPath}/invites`, data),
+    mutationFn: (data: { email: string; role: string }) =>
+      createInviteRouteApiV1WorkspacesWorkspaceIdInvitesPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+        body: data as { email: string; role: WorkspaceRole },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] })
       setInviteEmail('')
@@ -110,7 +136,11 @@ export function WorkspaceMembersPanel() {
 
   const updateRole = useMutation({
     mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
-      api.put(`${wsPath}/members/${memberId}`, { role }),
+      updateMemberApiV1WorkspacesWorkspaceIdMembersMemberIdPut({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, member_id: memberId },
+        body: { role: role as WorkspaceRole },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspace-members', ws?.id] })
       queryClient.invalidateQueries({ queryKey: ['workspaces'] })
@@ -118,7 +148,11 @@ export function WorkspaceMembersPanel() {
   })
 
   const removeMember = useMutation({
-    mutationFn: (memberId: string) => api.delete(`${wsPath}/members/${memberId}`),
+    mutationFn: (memberId: string) =>
+      removeMemberRouteApiV1WorkspacesWorkspaceIdMembersMemberIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, member_id: memberId },
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspace-members', ws?.id] })
       setConfirmRemove(null)
@@ -126,12 +160,20 @@ export function WorkspaceMembersPanel() {
   })
 
   const revokeInvite = useMutation({
-    mutationFn: (inviteId: string) => api.delete(`${wsPath}/invites/${inviteId}`),
+    mutationFn: (inviteId: string) =>
+      revokeInviteRouteApiV1WorkspacesWorkspaceIdInvitesInviteIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, invite_id: inviteId },
+      }).then((res) => res.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] }),
   })
 
   const resendInvite = useMutation({
-    mutationFn: (inviteId: string) => api.post(`${wsPath}/invites/${inviteId}/resend`, {}),
+    mutationFn: (inviteId: string) =>
+      resendInviteRouteApiV1WorkspacesWorkspaceIdInvitesInviteIdResendPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, invite_id: inviteId },
+      }).then((res) => res.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspace-invites', ws?.id] }),
   })
 

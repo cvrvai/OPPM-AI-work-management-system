@@ -12,6 +12,7 @@ from shared.models.notification import Notification, AuditLog
 from shared.models.embedding import DocumentEmbedding
 from shared.models.agile import Epic, UserStory, Sprint, Retrospective
 from shared.models.waterfall import ProjectPhase, PhaseDocument
+from shared.models.project_file import ProjectFile
 
 __all__ = [
     "User", "RefreshToken",
@@ -26,4 +27,5 @@ __all__ = [
     "DocumentEmbedding",
     "Epic", "UserStory", "Sprint", "Retrospective",
     "ProjectPhase", "PhaseDocument",
+    "ProjectFile",
 ]

@@ -3,7 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import { dashboardStatsApiV1WorkspacesWorkspaceIdDashboardStatsGet, listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet } from '@/generated/workspace-api/sdk.gen'
 import { queryClient } from '@/lib/api/queryClient'
 import { hasStoredSession } from '@/lib/api/sessionClient'
 import { lazyNamed } from '@/lib/utils/lazyNamed'
@@ -52,14 +53,22 @@ export default function App() {
     if (cachedWs && hasStoredSession()) {
       queryClient.prefetchQuery({
         queryKey: ['dashboard-stats', cachedWs.id],
-        queryFn: () => api.get(`/v1/workspaces/${cachedWs.id}/dashboard/stats`),
+        queryFn: () =>
+          dashboardStatsApiV1WorkspacesWorkspaceIdDashboardStatsGet({
+            client: workspaceClient,
+            path: { workspace_id: cachedWs.id },
+          }).then((res) => res.data),
         staleTime: 30_000,
       })
       queryClient.prefetchQuery({
         queryKey: ['projects', cachedWs.id],
         queryFn: async () => {
-          const res = await api.get<{ items: unknown[]; total: number }>(`/v1/workspaces/${cachedWs.id}/projects`)
-          return res.items ?? []
+          const res = await listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet({
+            client: workspaceClient,
+            path: { workspace_id: cachedWs.id },
+          })
+          const data = res.data as { items?: unknown[]; total?: number } | undefined
+          return data?.items ?? []
         },
         staleTime: 30_000,
       })

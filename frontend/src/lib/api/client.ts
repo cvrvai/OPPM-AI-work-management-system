@@ -1,4 +1,15 @@
 import { fetchWithSessionRetry } from '@/lib/api/sessionClient'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import { intelligenceClient } from '@/lib/api/intelligenceClient'
+import {
+  executeSheetActionsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetActionsPost,
+  getGoogleSheetSnapshotRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetSnapshotGet,
+  getOppmSheetPromptRouteApiV1WorkspacesWorkspaceIdAiConfigOppmSheetPromptGet,
+  upsertOppmSheetPromptRouteApiV1WorkspacesWorkspaceIdAiConfigOppmSheetPromptPut,
+  resetOppmSheetPromptRouteApiV1WorkspacesWorkspaceIdAiConfigOppmSheetPromptDelete,
+} from '@/generated/workspace-api/sdk.gen'
+import { parseFileRouteApiV1WorkspacesWorkspaceIdAiParseFilePost } from '@/generated/intelligence-api'
+import { formDataBodySerializer } from '@/generated/intelligence-api/client'
 import type { SheetAction, SheetActionsResponse } from '@/types'
 
 export class ApiError extends Error {
@@ -100,18 +111,15 @@ export interface FileParseResult {
 }
 
 export async function parseFile(workspaceId: string, file: File): Promise<FileParseResult> {
-  const form = new FormData()
-  form.append('file', file)
-  const response = await fetchWithSessionRetry(`/v1/workspaces/${workspaceId}/ai/parse-file`, {
-    method: 'POST',
-    body: form,
+  const res = await parseFileRouteApiV1WorkspacesWorkspaceIdAiParseFilePost({
+    client: intelligenceClient,
+    path: { workspace_id: workspaceId },
+    body: { file },
   })
-
-  if (!response.ok) {
-    throw await getApiError(response, 'File parse failed')
+  if (res.error) {
+    throw new ApiError(res.response?.status ?? 500, (res.error as { detail?: string })?.detail || 'File parse failed')
   }
-
-  return response.json()
+  return res.data as FileParseResult
 }
 
 export async function executeSheetActions(
@@ -119,18 +127,15 @@ export async function executeSheetActions(
   projectId: string,
   actions: SheetAction[],
 ): Promise<SheetActionsResponse> {
-  const response = await fetchWithSessionRetry(
-    `/v1/workspaces/${workspaceId}/projects/${projectId}/oppm/google-sheet/actions`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ actions }),
-    },
-  )
-  if (!response.ok) {
-    throw await getApiError(response, 'Failed to execute sheet actions')
+  const res = await executeSheetActionsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetActionsPost({
+    client: workspaceClient,
+    path: { workspace_id: workspaceId, project_id: projectId },
+    body: { actions: actions as unknown as import('@/generated/workspace-api/types.gen').SheetAction[] },
+  })
+  if (res.error) {
+    throw new ApiError(res.response?.status ?? 500, (res.error as { detail?: string })?.detail || 'Failed to execute sheet actions')
   }
-  return response.json()
+  return res.data as SheetActionsResponse
 }
 
 export async function getGoogleSheetSnapshot(
@@ -155,24 +160,59 @@ export async function getGoogleSheetSnapshot(
   }>
   cell_count: number
 }> {
-  return api.get(`/v1/workspaces/${workspaceId}/projects/${projectId}/oppm/google-sheet/snapshot`)
+  const res = await getGoogleSheetSnapshotRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetSnapshotGet({
+    client: workspaceClient,
+    path: { workspace_id: workspaceId, project_id: projectId },
+  })
+  return res.data as {
+    spreadsheet_id: string
+    sheet_title: string
+    max_row: number
+    max_col: number
+    merge_ranges: string[]
+    cells: Array<{
+      r: number
+      c: number
+      v?: string
+      n?: string
+      bg?: string
+      b?: string
+      bold?: boolean
+      fs?: number
+      fg?: string
+    }>
+    cell_count: number
+  }
 }
 
 export async function getOppmSheetPrompt(
   workspaceId: string,
 ): Promise<{ config_key: string; prompt: string; is_default: boolean }> {
-  return api.get(`/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`)
+  const res = await getOppmSheetPromptRouteApiV1WorkspacesWorkspaceIdAiConfigOppmSheetPromptGet({
+    client: workspaceClient,
+    path: { workspace_id: workspaceId },
+  })
+  return res.data as { config_key: string; prompt: string; is_default: boolean }
 }
 
 export async function updateOppmSheetPrompt(
   workspaceId: string,
   prompt: string,
 ): Promise<{ config_key: string; prompt: string; is_default: boolean }> {
-  return api.put(`/api/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`, { prompt })
+  const res = await upsertOppmSheetPromptRouteApiV1WorkspacesWorkspaceIdAiConfigOppmSheetPromptPut({
+    client: workspaceClient,
+    path: { workspace_id: workspaceId },
+    body: { prompt },
+  })
+  return res.data as { config_key: string; prompt: string; is_default: boolean }
 }
 
 export async function resetOppmSheetPrompt(
   workspaceId: string,
 ): Promise<{ config_key: string; prompt: string; is_default: boolean }> {
-  return api.delete(`/api/v1/workspaces/${workspaceId}/ai-config/oppm-sheet-prompt`)
+  const res = await resetOppmSheetPromptRouteApiV1WorkspacesWorkspaceIdAiConfigOppmSheetPromptDelete({
+    client: workspaceClient,
+    path: { workspace_id: workspaceId },
+  })
+  return res.data as { config_key: string; prompt: string; is_default: boolean }
 }

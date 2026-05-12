@@ -1,6 +1,17 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listAccountsRouteApiV1WorkspacesWorkspaceIdGithubAccountsGet,
+  createAccountRouteApiV1WorkspacesWorkspaceIdGithubAccountsPost,
+  deleteAccountRouteApiV1WorkspacesWorkspaceIdGithubAccountsAccountIdDelete,
+  listReposRouteApiV1WorkspacesWorkspaceIdGitReposGet,
+  createRepoRouteApiV1WorkspacesWorkspaceIdGitReposPost,
+  deleteRepoRouteApiV1WorkspacesWorkspaceIdGitReposConfigIdDelete,
+  updateRepoRouteApiV1WorkspacesWorkspaceIdGitReposConfigIdPatch,
+  listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet,
+} from '@/generated/workspace-api/sdk.gen'
+import type { GitAccountCreate, RepoConfigCreate, RepoConfigUpdate } from '@/generated/workspace-api/types.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { GitAccount, PaginatedResponse, Project, RepoConfig } from '@/types'
 import {
@@ -40,28 +51,44 @@ export function GitHubSettings() {
 
   const { data: accounts, isLoading: loadingAccounts } = useQuery({
     queryKey: ['github-accounts', ws?.id],
-    queryFn: () => api.get<GitAccount[]>(`${wsPath}/github-accounts`),
+    queryFn: () =>
+      listAccountsRouteApiV1WorkspacesWorkspaceIdGithubAccountsGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as GitAccount[]),
     enabled: !!ws,
   })
 
   const { data: repos, isLoading: loadingRepos } = useQuery({
     queryKey: ['repo-configs', ws?.id],
-    queryFn: () => api.get<RepoConfig[]>(`${wsPath}/git/repos`),
+    queryFn: () =>
+      listReposRouteApiV1WorkspacesWorkspaceIdGitReposGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => (res.data ?? []) as RepoConfig[]),
     enabled: !!ws,
   })
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
     queryFn: async () => {
-      const res = await api.get<PaginatedResponse<Project>>(`${wsPath}/projects`)
-      return res.items ?? []
+      const res = await listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      })
+      const data = res.data as PaginatedResponse<Project>
+      return data.items ?? []
     },
     enabled: !!ws,
   })
 
   const createAccount = useMutation({
     mutationFn: (data: { account_name: string; github_username: string; token: string }) =>
-      api.post(`${wsPath}/github-accounts`, data),
+      createAccountRouteApiV1WorkspacesWorkspaceIdGithubAccountsPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+        body: data as unknown as GitAccountCreate,
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['github-accounts'] })
       setShowAddAccount(false)
@@ -72,13 +99,21 @@ export function GitHubSettings() {
   })
 
   const deleteAccount = useMutation({
-    mutationFn: (id: string) => api.delete(`${wsPath}/github-accounts/${id}`),
+    mutationFn: (id: string) =>
+      deleteAccountRouteApiV1WorkspacesWorkspaceIdGithubAccountsAccountIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, account_id: id },
+      }).then((res) => res.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['github-accounts'] }),
   })
 
   const createRepo = useMutation({
     mutationFn: (data: { repo_name: string; project_id: string; github_account_id: string; webhook_secret: string }) =>
-      api.post(`${wsPath}/git/repos`, data),
+      createRepoRouteApiV1WorkspacesWorkspaceIdGitReposPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+        body: data as unknown as RepoConfigCreate,
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repo-configs'] })
       setShowAddRepo(false)
@@ -90,13 +125,21 @@ export function GitHubSettings() {
   })
 
   const deleteRepo = useMutation({
-    mutationFn: (id: string) => api.delete(`${wsPath}/git/repos/${id}`),
+    mutationFn: (id: string) =>
+      deleteRepoRouteApiV1WorkspacesWorkspaceIdGitReposConfigIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, config_id: id },
+      }).then((res) => res.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['repo-configs'] }),
   })
 
   const updateRepo = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
-      api.patch(`${wsPath}/git/repos/${id}`, data),
+      updateRepoRouteApiV1WorkspacesWorkspaceIdGitReposConfigIdPatch({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, config_id: id },
+        body: data as unknown as RepoConfigUpdate,
+      }).then((res) => res.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repo-configs'] })
       setEditingRepoId(null)

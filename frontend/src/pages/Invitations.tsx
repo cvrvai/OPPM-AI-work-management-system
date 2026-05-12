@@ -1,7 +1,12 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listMyInvitesRouteApiV1InvitesMyInvitesGet,
+  acceptInviteRouteApiV1InvitesAcceptPost,
+  declineInviteRouteApiV1InvitesInviteIdDeclinePost,
+} from '@/generated/workspace-api/sdk.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { MyInvite } from '@/types'
 import { Building2, UserCheck, Clock, CheckCircle2, X, Inbox } from 'lucide-react'
@@ -35,13 +40,19 @@ export function Invitations() {
 
   const { data: invites = [], isLoading } = useQuery({
     queryKey: ['my-invites'],
-    queryFn: () => api.get<MyInvite[]>('/v1/invites/my-invites'),
+    queryFn: () =>
+      listMyInvitesRouteApiV1InvitesMyInvitesGet({ client: workspaceClient }).then(
+        (res) => (res.data ?? []) as MyInvite[]
+      ),
     staleTime: 30_000,
   })
 
   const acceptMutation = useMutation({
     mutationFn: (invite: MyInvite) =>
-      api.post<{ workspace_id: string; workspace_name: string }>('/v1/invites/accept', { token: invite.token }),
+      acceptInviteRouteApiV1InvitesAcceptPost({
+        client: workspaceClient,
+        body: { token: invite.token },
+      }).then((res) => res.data as { workspace_id: string; workspace_name: string }),
     onSuccess: async (data, invite) => {
       setAccepted((prev) => new Set(prev).add(invite.id))
       qc.invalidateQueries({ queryKey: ['my-invites'] })
@@ -56,7 +67,11 @@ export function Invitations() {
   })
 
   const declineMutation = useMutation({
-    mutationFn: (inviteId: string) => api.post(`/v1/invites/${inviteId}/decline`, {}),
+    mutationFn: (inviteId: string) =>
+      declineInviteRouteApiV1InvitesInviteIdDeclinePost({
+        client: workspaceClient,
+        path: { invite_id: inviteId },
+      }).then((res) => res.data),
     onSuccess: (_data, inviteId) => {
       setDeclined((prev) => new Set(prev).add(inviteId))
       qc.invalidateQueries({ queryKey: ['my-invites'] })

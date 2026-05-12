@@ -1,7 +1,16 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listPhasesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesGet,
+  listPhaseDocumentsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdDocumentsGet,
+  updatePhaseRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdPut,
+  approvePhaseRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdApprovePost,
+  createPhaseDocumentRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdDocumentsPost,
+  deletePhaseDocumentRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdDocumentsDocIdDelete,
+} from '@/generated/workspace-api/sdk.gen'
+import type { PhaseUpdate, PhaseDocumentCreate } from '@/generated/workspace-api/types.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import type { ProjectPhase, PhaseDocument } from '@/types/waterfall'
@@ -64,12 +73,14 @@ export function WaterfallView() {
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
   const [showCreateDoc, setShowCreateDoc] = useState<string | null>(null)
 
-  const base = `/v1/workspaces/${wsId}/projects/${projectId}`
-
   // ── Phases Query ──
   const { data: phases, isLoading } = useQuery({
     queryKey: ['phases', wsId, projectId],
-    queryFn: () => api.get<ProjectPhase[]>(`${base}/phases`),
+    queryFn: () =>
+      listPhasesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesGet({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId! },
+      }).then((res) => (res.data ?? []) as ProjectPhase[]),
     enabled: !!wsId && !!projectId,
   })
 
@@ -78,7 +89,11 @@ export function WaterfallView() {
   // ── Phase Documents Query (per expanded phase) ──
   const { data: docsData } = useQuery({
     queryKey: ['phase-documents', wsId, projectId, expandedPhase],
-    queryFn: () => api.get<{ items: PhaseDocument[]; total: number }>(`${base}/phases/${expandedPhase}/documents`),
+    queryFn: () =>
+      listPhaseDocumentsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdDocumentsGet({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, phase_id: expandedPhase! },
+      }).then((res) => res.data as { items: PhaseDocument[]; total: number }),
     enabled: !!wsId && !!projectId && !!expandedPhase,
   })
 
@@ -94,24 +109,39 @@ export function WaterfallView() {
 
   const updatePhaseMut = useMutation({
     mutationFn: ({ phaseId, data }: { phaseId: string; data: Record<string, unknown> }) =>
-      api.put(`${base}/phases/${phaseId}`, data),
+      updatePhaseRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdPut({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, phase_id: phaseId },
+        body: data as unknown as PhaseUpdate,
+      }).then((res) => res.data),
     onSuccess: invalidate,
   })
 
   const approvePhaseMut = useMutation({
-    mutationFn: (phaseId: string) => api.post(`${base}/phases/${phaseId}/approve`, {}),
+    mutationFn: (phaseId: string) =>
+      approvePhaseRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdApprovePost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, phase_id: phaseId },
+      }).then((res) => res.data),
     onSuccess: invalidate,
   })
 
   const createDocMut = useMutation({
     mutationFn: ({ phaseId, data }: { phaseId: string; data: Record<string, unknown> }) =>
-      api.post(`${base}/phases/${phaseId}/documents`, data),
+      createPhaseDocumentRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdDocumentsPost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, phase_id: phaseId },
+        body: data as unknown as PhaseDocumentCreate,
+      }).then((res) => res.data),
     onSuccess: () => { invalidate(); setShowCreateDoc(null) },
   })
 
   const deleteDocMut = useMutation({
     mutationFn: ({ phaseId, docId }: { phaseId: string; docId: string }) =>
-      api.delete(`${base}/phases/${phaseId}/documents/${docId}`),
+      deletePhaseDocumentRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPhasesPhaseIdDocumentsDocIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, phase_id: phaseId, doc_id: docId },
+      }).then((res) => res.data),
     onSuccess: invalidate,
   })
 

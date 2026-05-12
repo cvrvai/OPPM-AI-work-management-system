@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  getGoogleSheetsSetupStatusRouteApiV1WorkspacesWorkspaceIdGoogleSheetsSetupStatusGet,
+  upsertGoogleSheetsSetupRouteApiV1WorkspacesWorkspaceIdGoogleSheetsSetupPut,
+  deleteGoogleSheetsSetupRouteApiV1WorkspacesWorkspaceIdGoogleSheetsSetupDelete,
+} from '@/generated/workspace-api/sdk.gen'
+import type { GoogleSheetsSetupUpsert } from '@/generated/workspace-api/types.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { Loader2, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -19,7 +25,11 @@ export function GoogleSheetsSetup() {
   const statusQuery = useQuery({
     queryKey: ['google-sheets-setup-status', ws?.id],
     enabled: !!ws?.id,
-    queryFn: () => api.get<SetupStatus>(`/v1/workspaces/${ws!.id}/google-sheets/setup-status`),
+    queryFn: () =>
+      getGoogleSheetsSetupStatusRouteApiV1WorkspacesWorkspaceIdGoogleSheetsSetupStatusGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => res.data as SetupStatus),
   })
 
   const status = statusQuery.data
@@ -32,7 +42,12 @@ export function GoogleSheetsSetup() {
         : 'Not configured'
 
   const saveMutation = useMutation({
-    mutationFn: (payload: { service_account_json: string }) => api.put(`/v1/workspaces/${ws!.id}/google-sheets/setup`, payload),
+    mutationFn: (payload: { service_account_json: string }) =>
+      upsertGoogleSheetsSetupRouteApiV1WorkspacesWorkspaceIdGoogleSheetsSetupPut({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+        body: payload as GoogleSheetsSetupUpsert,
+      }).then((res) => res.data),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['google-sheets-setup-status', ws?.id] })
       setFeedback({ type: 'success', message: 'Google Sheets credential saved to workspace.' })
@@ -43,7 +58,11 @@ export function GoogleSheetsSetup() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/v1/workspaces/${ws!.id}/google-sheets/setup`),
+    mutationFn: () =>
+      deleteGoogleSheetsSetupRouteApiV1WorkspacesWorkspaceIdGoogleSheetsSetupDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => res.data),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['google-sheets-setup-status', ws?.id] })
       setFeedback({ type: 'success', message: 'Stored workspace credential removed.' })

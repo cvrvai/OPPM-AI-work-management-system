@@ -25,10 +25,25 @@ import { Workbook } from '@fortune-sheet/react'
 import '@fortune-sheet/react/dist/index.css'
 import { useChatContext } from '@/hooks/useChatContext'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import { intelligenceClient } from '@/lib/api/intelligenceClient'
+import {
+  getProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdGet,
+  getGoogleSheetLinkRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetGet,
+  getBorderOverridesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmBorderOverridesGet,
+  getOppmScaffoldRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmScaffoldGet,
+  upsertGoogleSheetLinkRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetPut,
+  deleteGoogleSheetLinkRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetDelete,
+  pushGoogleSheetFillRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetPushPost,
+} from '@/generated/workspace-api/sdk.gen'
+import { oppmFillRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdAiOppmFillPost } from '@/generated/intelligence-api'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore } from '@/stores/chatStore'
 import { VirtualMemberManager } from '@/components/features/VirtualMemberManager'
+import { SubObjectiveEditor } from '@/components/features/SubObjectiveEditor'
+import { DeliverableEditor } from '@/components/features/DeliverableEditor'
+import { ForecastEditor } from '@/components/features/ForecastEditor'
+import { RiskEditor } from '@/components/features/RiskEditor'
 
 /* ── Types ── */
 
@@ -149,7 +164,11 @@ export function OPPMView() {
   const wsPath = ws ? `/v1/workspaces/${ws.id}` : ''
   const projectQuery = useQuery({
     queryKey: ['project', id, ws?.id],
-    queryFn: () => api.get<{ title: string }>(`${wsPath}/projects/${id}`),
+    queryFn: () =>
+      getProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => res.data as { title: string }),
     enabled: !!ws && !!id,
   })
 
@@ -170,21 +189,33 @@ export function OPPMView() {
 
   const googleSheetQuery = useQuery({
     queryKey: ['oppm-google-sheet', id, ws?.id],
-    queryFn: () => api.get<GoogleSheetLinkState>(`${wsPath}/projects/${id}/oppm/google-sheet`),
+    queryFn: () =>
+      getGoogleSheetLinkRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => res.data as GoogleSheetLinkState),
     enabled: !!ws && !!id,
   })
 
   // Fetch AI/user border overrides for the FortuneSheet
   const borderOverridesQuery = useQuery({
     queryKey: ['oppm-border-overrides', id, ws?.id],
-    queryFn: () => api.get<{ items: BorderOverride[] }>(`${wsPath}/projects/${id}/oppm/border-overrides`),
+    queryFn: () =>
+      getBorderOverridesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmBorderOverridesGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => res.data as { items: BorderOverride[] }),
     enabled: !!ws && !!id,
   })
 
   // Fetch FortuneSheet scaffold from backend (exact Google Sheet layout)
   const scaffoldQuery = useQuery({
     queryKey: ['oppm-scaffold', id, ws?.id],
-    queryFn: () => api.get<OppmScaffoldResponse>(`${wsPath}/projects/${id}/oppm/scaffold`),
+    queryFn: () =>
+      getOppmScaffoldRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmScaffoldGet({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => res.data as OppmScaffoldResponse),
     enabled: !!ws && !!id,
     staleTime: Infinity,
   })
@@ -200,9 +231,11 @@ export function OPPMView() {
       if (!value) {
         throw new Error('Enter a Google Sheet URL or spreadsheet ID first.')
       }
-      return api.put<GoogleSheetLinkState>(`${wsPath}/projects/${id}/oppm/google-sheet`, {
-        spreadsheet_url: value,
-      })
+      return upsertGoogleSheetLinkRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetPut({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+        body: { spreadsheet_url: value },
+      }).then((res) => res.data as GoogleSheetLinkState)
     },
     onSuccess: (data) => {
       setActionNotice(`Linked Google Sheet ${data.spreadsheet_id}.`)
@@ -213,7 +246,11 @@ export function OPPMView() {
   })
 
   const unlinkGoogleSheet = useMutation({
-    mutationFn: () => api.delete(`${wsPath}/projects/${id}/oppm/google-sheet`),
+    mutationFn: () =>
+      deleteGoogleSheetLinkRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+      }).then((res) => res.data),
     onSuccess: () => {
       setActionNotice('Removed the Google Sheet link for this project.')
       setSheetInput('')
@@ -227,8 +264,20 @@ export function OPPMView() {
 
   const pushToGoogleSheet = useMutation({
     mutationFn: async () => {
-      const fill = await api.post<Record<string, unknown>>(`${wsPath}/projects/${id}/ai/oppm-fill`, {})
-      return api.post<GoogleSheetPushResult>(`${wsPath}/projects/${id}/oppm/google-sheet/push`, fill)
+      const fillRes = await oppmFillRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdAiOppmFillPost({
+        client: intelligenceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+        body: {},
+      })
+      if (fillRes.error) {
+        throw new Error((fillRes.error as { detail?: string })?.detail || 'OPPM fill failed')
+      }
+      const fill = fillRes.data as Record<string, unknown>
+      return pushGoogleSheetFillRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmGoogleSheetPushPost({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id, project_id: id! },
+        body: fill as unknown as import('@/generated/workspace-api/types.gen').GoogleSheetPushRequest,
+      }).then((res) => res.data as GoogleSheetPushResult)
     },
     onSuccess: (data) => {
       const oppmWriteInfo = typeof data.rows_written.oppm === 'number' && data.rows_written.oppm > 0
@@ -412,6 +461,10 @@ export function OPPMView() {
             )}
 
             {editorMode === 'app' && id && <VirtualMemberManager projectId={id} />}
+            {editorMode === 'app' && id && <SubObjectiveEditor projectId={id} />}
+            {editorMode === 'app' && id && <DeliverableEditor projectId={id} />}
+            {editorMode === 'app' && id && <ForecastEditor projectId={id} />}
+            {editorMode === 'app' && id && <RiskEditor projectId={id} />}
 
             <div className="group relative inline-flex">
               <button

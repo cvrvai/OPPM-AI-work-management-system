@@ -11,8 +11,8 @@ Close the gaps between the existing database schema and what the OPPM sheet actu
 |---|---|
 | Phase 1: Audit & Gap Analysis | ✅ Completed |
 | Phase 2: Virtual Members Schema + API | ✅ Completed |
-| Phase 3: Real Sub-Objectives in Scaffold | 🔄 Not Started |
-| Phase 4: Real Deliverables / Forecasts / Risks in Scaffold | 🔄 Not Started |
+| Phase 3: Real Sub-Objectives in Scaffold | ✅ Completed |
+| Phase 4: Real Deliverables / Forecasts / Risks in Scaffold | ✅ Completed |
 | Phase 5: Task Owner Grid in Scaffold | 🔄 Not Started |
 | Phase 6: Sub-Objective Checkmarks in Scaffold | 🔄 Not Started |
 | Phase 7: End-to-End Integration Test | 🔄 Not Started |
@@ -167,54 +167,122 @@ Close the gaps between the existing database schema and what the OPPM sheet actu
 ---
 
 ## Phase 3: Real Sub-Objectives in Scaffold
-**Priority: P0 | Estimated: 2-3 hours**
+**Priority: P0 | Estimated: 2-3 hours | Completed: May 11, 2026**
 
-### Backend Tasks
-1. Update `get_oppm_scaffold()` in `domains/oppm/service.py`:
-   ```python
-   sub_objectives = await oppm_repo.find_sub_objectives(project_id)
-   params["sub_objectives"] = [s.label for s in sub_objectives]  # length 0-6
-   ```
-2. Update `scaffold.py` `_build_scaffold_actions()` to accept `sub_objectives` param and replace placeholder "Sub Obj N" text
+### ✅ Completed Tasks
 
-### Frontend Tasks
-1. Add sub-objective editor in OPPM settings (6 text inputs, position 1-6)
-2. Ensure API saves to `oppm_sub_objectives` table
+#### 1. Backend — `domains/oppm/service.py`
+- Updated `get_oppm_scaffold()` to fetch real sub-objectives:
+  ```python
+  sub_obj_repo = SubObjectiveRepository(session)
+  sub_objectives = await sub_obj_repo.find_project_sub_objectives(project_id)
+  sub_obj_labels = [so.label for so in sub_objectives]
+  params["sub_objectives"] = sub_obj_labels
+  ```
+
+#### 2. Backend — `domains/oppm/sheet_executor/scaffold.py`
+- Updated `_build_scaffold_actions()` to accept `sub_objectives` param:
+  ```python
+  sub_obj_labels = params.get("sub_objectives") or []
+  while len(sub_obj_labels) < 6:
+      sub_obj_labels.append(f"Sub Obj {len(sub_obj_labels) + 1}")
+  ```
+- Same pattern applied to `scaffold_oppm_form()` (Google Sheets path)
+
+#### 3. Frontend — `SubObjectiveEditor.tsx` (new component)
+- 6 text inputs for positions 1-6
+- Fetches existing sub-objectives via `listSubObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmSubObjectivesGet`
+- Create via `createSubObjectiveRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmSubObjectivesPost`
+- Update via `updateSubObjectiveRouteApiV1WorkspacesWorkspaceIdOppmSubObjectivesSubObjIdPut`
+- Delete via `deleteSubObjectiveRouteApiV1WorkspacesWorkspaceIdOppmSubObjectivesSubObjIdDelete`
+- Invalidates both `['oppm-sub-objectives']` and `['oppm-scaffold']` queries on mutation
+
+#### 4. Frontend — `OPPMView.tsx`
+- Added `<SubObjectiveEditor projectId={id} />` next to `<VirtualMemberManager />` in the control panel
+
+### Files Modified
+- `services/workspace/domains/oppm/service.py`
+- `services/workspace/domains/oppm/sheet_executor/scaffold.py`
+- `frontend/src/components/features/SubObjectiveEditor.tsx` (new)
+- `frontend/src/pages/OPPMView.tsx`
 
 ### Verification
+- [x] Backend Python syntax passes `py_compile`
+- [x] Frontend TypeScript compilation passes (`npx tsc --noEmit`)
 - [ ] Set sub-objective 1 = "Backend API" → sheet shows "Backend API" instead of "Sub Obj 1"
 - [ ] Leave position 3 empty → sheet shows "Sub Obj 3" as fallback
-- [ ] Build passes
+
+### Next Steps
+- Move to Phase 4: Real Deliverables / Forecasts / Risks in Scaffold
 
 ---
 
 ## Phase 4: Real Deliverables / Forecasts / Risks in Scaffold
-**Priority: P1 | Estimated: 3-4 hours**
+**Priority: P1 | Estimated: 3-4 hours | Completed: May 12, 2026**
 
-### Backend Tasks
-1. Update `get_oppm_scaffold()` to fetch:
-   ```python
-   deliverables = await oppm_repo.find_deliverables(project_id)
-   forecasts = await oppm_repo.find_forecasts(project_id)
-   risks = await oppm_repo.find_risks(project_id)
-   params["deliverables"] = [d.description for d in deliverables]
-   params["forecasts"] = [f.description for f in forecasts]
-   params["risks"] = [(r.description, r.rag) for r in risks]
-   ```
-2. Update `scaffold.py` summary section to use real data instead of placeholders
+### ✅ Completed Tasks
 
-### Frontend Tasks
-1. Add text list editors for deliverables, forecasts, risks in OPPM settings
-2. Support RAG color selection for risks
+#### 1. Backend — `domains/oppm/service.py`
+- Updated `get_oppm_scaffold()` to fetch real deliverables, forecasts, and risks:
+  ```python
+  deliv_repo = DeliverableRepository(session)
+  forecast_repo = ForecastRepository(session)
+  risk_repo = RiskRepository(session)
+  deliverables = await deliv_repo.find_project_deliverables(project_id)
+  forecasts = await forecast_repo.find_project_forecasts(project_id)
+  risks = await risk_repo.find_project_risks(project_id)
+  params["deliverables"] = [{"description": d.description, "item_number": d.item_number} for d in deliverables]
+  params["forecasts"] = [{"description": f.description, "item_number": f.item_number} for f in forecasts]
+  params["risks"] = [{"description": r.description, "rag": r.rag, "item_number": r.item_number} for r in risks]
+  ```
+
+#### 2. Backend — `domains/oppm/sheet_executor/scaffold.py`
+- Replaced placeholder loops in Summary/Forecast/Risk section with real data loops:
+  - Deliverables: up to 4 items from `params["deliverables"]`, fallback to placeholder
+  - Forecasts: up to 4 items from `params["forecasts"]`, fallback to placeholder
+  - Risks: up to 4 items from `params["risks"]`, fallback to placeholder
+  - Added RAG color indicators for risks:
+    - `red` → `#FF6B6B` background
+    - `amber` → `#FFD93D` background
+    - `green` → `#6BCB77` background
+
+#### 3. Frontend — `DeliverableEditor.tsx` (new component)
+- 4 text inputs for item numbers 1-4
+- Fetches existing deliverables via `listDeliverablesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmDeliverablesGet`
+- Create via `createDeliverableRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmDeliverablesPost`
+- Update via `updateDeliverableRouteApiV1WorkspacesWorkspaceIdOppmDeliverablesItemIdPut`
+- Delete via `deleteDeliverableRouteApiV1WorkspacesWorkspaceIdOppmDeliverablesItemIdDelete`
+
+#### 4. Frontend — `ForecastEditor.tsx` (new component)
+- Same pattern as DeliverableEditor for forecasts
+- Uses `listForecastsRoute`, `createForecastRoute`, `updateForecastRoute`, `deleteForecastRoute`
+
+#### 5. Frontend — `RiskEditor.tsx` (new component)
+- Same pattern with added RAG color dropdown (green/amber/red)
+- Uses `listRisksRoute`, `createRiskRoute`, `updateRiskRoute`, `deleteRiskRoute`
+- RAG selection via `<select>` with immediate save for existing items
+
+#### 6. Frontend — `OPPMView.tsx`
+- Added `<DeliverableEditor projectId={id} />`, `<ForecastEditor projectId={id} />`, `<RiskEditor projectId={id} />` in the control panel alongside existing editors
+
+### Files Modified
+- `services/workspace/domains/oppm/service.py`
+- `services/workspace/domains/oppm/sheet_executor/scaffold.py`
+- `frontend/src/components/features/DeliverableEditor.tsx` (new)
+- `frontend/src/components/features/ForecastEditor.tsx` (new)
+- `frontend/src/components/features/RiskEditor.tsx` (new)
+- `frontend/src/pages/OPPMView.tsx`
+- `frontend/src/generated/intelligence-api/sdk.gen.ts` (fixed `HealthHealthGetErrors` → `never`)
 
 ### Verification
+- [x] Backend Python syntax passes `py_compile`
+- [x] Frontend TypeScript compilation passes (`tsc -b && vite build`)
 - [ ] Add deliverable "API v1" → sheet shows "API v1"
 - [ ] Add risk "Vendor delay" with RAG=red → sheet shows red indicator
 - [ ] Build passes
 
----
-
-## Phase 5: Task Owner Grid in Scaffold
+### Next Steps
+- Move to Phase 5: Task Owner Grid in Scaffold
 **Priority: P1 | Estimated: 3-4 hours**
 
 ### Backend Tasks

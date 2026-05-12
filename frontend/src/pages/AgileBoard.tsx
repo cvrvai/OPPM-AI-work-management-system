@@ -1,7 +1,19 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import {
+  listEpicsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdEpicsGet,
+  createEpicRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdEpicsPost,
+  listUserStoriesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdUserStoriesGet,
+  createUserStoryRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdUserStoriesPost,
+  updateUserStoryRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdUserStoriesStoryIdPut,
+  listSprintsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsGet,
+  createSprintRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsPost,
+  startSprintRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsSprintIdStartPost,
+  completeSprintRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsSprintIdCompletePost,
+} from '@/generated/workspace-api/sdk.gen'
+import type { EpicCreate, SprintCreate, UserStoryCreate, UserStoryUpdate } from '@/generated/workspace-api/types.gen'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useWorkspaceNavGuard } from '@/hooks/useWorkspaceNavGuard'
 import type { Epic, UserStory, Sprint, Retrospective, BurndownData } from '@/types/agile'
@@ -51,23 +63,33 @@ export function AgileBoard() {
   const [showCreateEpic, setShowCreateEpic] = useState(false)
 
   // ── Queries ──
-  const base = `/v1/workspaces/${wsId}/projects/${projectId}`
-
   const { data: epicsData } = useQuery({
     queryKey: ['epics', wsId, projectId],
-    queryFn: () => api.get<{ items: Epic[]; total: number }>(`${base}/epics`),
+    queryFn: () =>
+      listEpicsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdEpicsGet({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId! },
+      }).then((res) => res.data as { items: Epic[]; total: number }),
     enabled: !!wsId && !!projectId,
   })
 
   const { data: storiesData, isLoading: storiesLoading } = useQuery({
     queryKey: ['user-stories', wsId, projectId],
-    queryFn: () => api.get<{ items: UserStory[]; total: number }>(`${base}/user-stories`),
+    queryFn: () =>
+      listUserStoriesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdUserStoriesGet({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId! },
+      }).then((res) => res.data as { items: UserStory[]; total: number }),
     enabled: !!wsId && !!projectId,
   })
 
   const { data: sprintsData } = useQuery({
     queryKey: ['sprints', wsId, projectId],
-    queryFn: () => api.get<{ items: Sprint[]; total: number }>(`${base}/sprints`),
+    queryFn: () =>
+      listSprintsRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsGet({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId! },
+      }).then((res) => res.data as { items: Sprint[]; total: number }),
     enabled: !!wsId && !!projectId,
   })
 
@@ -84,33 +106,60 @@ export function AgileBoard() {
   }
 
   const createStoryMut = useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post(`${base}/user-stories`, data),
+    mutationFn: (data: Record<string, unknown>) =>
+      createUserStoryRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdUserStoriesPost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId! },
+        body: data as unknown as UserStoryCreate,
+      }).then((res) => res.data),
     onSuccess: () => { invalidate(); setShowCreateStory(false) },
   })
 
   const createSprintMut = useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post(`${base}/sprints`, data),
+    mutationFn: (data: Record<string, unknown>) =>
+      createSprintRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsPost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId! },
+        body: data as unknown as SprintCreate,
+      }).then((res) => res.data),
     onSuccess: () => { invalidate(); setShowCreateSprint(false) },
   })
 
   const createEpicMut = useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post(`${base}/epics`, data),
+    mutationFn: (data: Record<string, unknown>) =>
+      createEpicRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdEpicsPost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId! },
+        body: data as unknown as EpicCreate,
+      }).then((res) => res.data),
     onSuccess: () => { invalidate(); setShowCreateEpic(false) },
   })
 
   const startSprintMut = useMutation({
-    mutationFn: (sprintId: string) => api.post(`${base}/sprints/${sprintId}/start`, {}),
+    mutationFn: (sprintId: string) =>
+      startSprintRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsSprintIdStartPost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, sprint_id: sprintId },
+      }).then((res) => res.data),
     onSuccess: invalidate,
   })
 
   const completeSprintMut = useMutation({
-    mutationFn: (sprintId: string) => api.post(`${base}/sprints/${sprintId}/complete`, {}),
+    mutationFn: (sprintId: string) =>
+      completeSprintRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdSprintsSprintIdCompletePost({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, sprint_id: sprintId },
+      }).then((res) => res.data),
     onSuccess: invalidate,
   })
 
   const updateStoryMut = useMutation({
     mutationFn: ({ storyId, data }: { storyId: string; data: Record<string, unknown> }) =>
-      api.put(`${base}/user-stories/${storyId}`, data),
+      updateUserStoryRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdUserStoriesStoryIdPut({
+        client: workspaceClient,
+        path: { workspace_id: wsId!, project_id: projectId!, story_id: storyId },
+        body: data as unknown as UserStoryUpdate,
+      }).then((res) => res.data),
     onSuccess: invalidate,
   })
 

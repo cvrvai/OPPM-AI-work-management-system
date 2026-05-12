@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/lib/api'
+import { workspaceClient } from '@/lib/api/workspaceClient'
+import { deleteWorkspaceRouteApiV1WorkspacesWorkspaceIdDelete } from '@/generated/workspace-api/sdk.gen'
 import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { AlertTriangle, Loader2 } from 'lucide-react'
@@ -23,7 +24,11 @@ export function WorkspaceSettings() {
   }
 
   const deleteWorkspaceMutation = useMutation({
-    mutationFn: () => api.delete(`/v1/workspaces/${ws!.id}`),
+    mutationFn: () =>
+      deleteWorkspaceRouteApiV1WorkspacesWorkspaceIdDelete({
+        client: workspaceClient,
+        path: { workspace_id: ws!.id },
+      }).then((res) => res.data),
     onSuccess: async () => {
       resetDeleteState()
       await fetchWorkspaces()
