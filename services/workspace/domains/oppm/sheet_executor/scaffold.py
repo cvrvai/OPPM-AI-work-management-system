@@ -156,10 +156,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "set_value", "params": {"range": f"I{6 + i}", "value": task_name}})
 
     # ── 4. Bottom matrix content ──
-    # 4a. Sub-objective numbers 1..6 in the matrix header row A:F (row 42)
+    # 4a. Sub-objective numbers 1..6 in the matrix header row B:G (row 42)
     for col_idx in range(2, 8):
         col_letter = _col_index_to_letters(col_idx)
-        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": str(col_idx)}})
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": str(col_idx - 1)}})
     # 4a-ii. Sub-objective labels in the matrix body — each column A-F is merged vertically
     sub_obj_labels = params.get("sub_objectives") or []
     # Pad to 6 with fallback placeholders
