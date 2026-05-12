@@ -15,6 +15,7 @@ import type { ProjectCreate, ProjectUpdate } from '@/generated/workspace-api/typ
 import { updateEntityInCache } from '@/lib/utils/queryNormalizer'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore } from '@/stores/chatStore'
+import { useToastStore } from '@/stores/toastStore'
 import { useChatContext } from '@/hooks/useChatContext'
 import type { PaginatedResponse, Project, Priority, Methodology, WorkspaceMember } from '@/types'
 import { cn, getStatusColor, formatDate } from '@/lib/utils'
@@ -70,6 +71,7 @@ export function Projects() {
   const [showCreate, setShowCreate] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
+  const [optimisticDeletingId, setOptimisticDeletingId] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
@@ -112,7 +114,6 @@ export function Projects() {
         body: data as unknown as ProjectCreate,
       })
       const project = res.data as Project
-      // Add selected members to the project (best-effort, parallel)
       if (memberAssignments.length > 0) {
         await Promise.allSettled(
           memberAssignments.map(({ userId, role }) =>
@@ -129,6 +130,10 @@ export function Projects() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       setShowCreate(false)
+      addToast('Project created successfully', 'success')
+    },
+    onError: () => {
+      addToast('Failed to create project. Please try again.', 'error')
     },
   })
 
@@ -143,8 +148,14 @@ export function Projects() {
       updateEntityInCache(queryClient, updatedProject, [['projects']])
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       setEditingProject(null)
+      addToast('Project updated successfully', 'success')
+    },
+    onError: () => {
+      addToast('Failed to update project. Please try again.', 'error')
     },
   })
+
+  const addToast = useToastStore((s) => s.addToast)
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) =>
@@ -152,9 +163,27 @@ export function Projects() {
         client: workspaceClient,
         path: { workspace_id: ws!.id, project_id: id },
       }).then((res) => res.data),
+    onMutate: async (deletedId) => {
+      setOptimisticDeletingId(deletedId)
+      await queryClient.cancelQueries({ queryKey: ['projects', ws?.id] })
+      const previous = queryClient.getQueryData<Project[]>(['projects', ws?.id])
+      queryClient.setQueryData(['projects', ws?.id], (old: Project[] | undefined) =>
+        old?.filter((p) => p.id !== deletedId)
+      )
+      return { previous }
+    },
+    onError: (_err, _deletedId, context) => {
+      setOptimisticDeletingId(null)
+      if (context?.previous) {
+        queryClient.setQueryData(['projects', ws?.id], context.previous)
+      }
+      addToast('Failed to delete project. Please try again.', 'error')
+    },
     onSuccess: () => {
+      setOptimisticDeletingId(null)
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       setDeletingProject(null)
+      addToast('Project deleted successfully', 'success')
     },
   })
 
@@ -216,7 +245,10 @@ export function Projects() {
         {filtered.map((project) => (
           <div
             key={project.id}
-            className="group relative rounded-lg border border-border bg-white hover:bg-surface-alt/40 transition-colors"
+            className={cn(
+              'group relative rounded-lg border border-border bg-white hover:bg-surface-alt/40 transition-all duration-300',
+              optimisticDeletingId === project.id && 'opacity-50 scale-95 pointer-events-none'
+            )}
           >
             <Link to={`/projects/${project.id}`} className="block p-4">
               <div className="flex items-start justify-between mb-2">

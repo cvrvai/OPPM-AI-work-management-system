@@ -97,6 +97,12 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     R_RISK_END = R_RISK_START + 3               # 4 risk rows
     R_FORM_BOTTOM = R_RISK_END                   # last form row
 
+    # ── Legend rows (Priority + Project Identity Symbol) ──
+    R_LEGEND_GAP = 15                           # 15 empty rows between risk and legend for clear visual separation
+    R_LEGEND_START = R_FORM_BOTTOM + R_LEGEND_GAP + 1  # first legend row
+    R_LEGEND_END = R_LEGEND_START + 5            # 6 legend rows total (0-5)
+    R_FORM_BOTTOM = R_LEGEND_END                 # update form bottom to include legend
+
     # ── Dynamic column counts ──
     # Scale up/down based on actual data; minimum 4 columns as fallback
     week_col_count = max(4, len(weeks_data)) if weeks_data and isinstance(weeks_data, list) else 4
@@ -245,6 +251,33 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         elif rag == "green":
             a.append({"action": "set_background", "params": {"range": f"I{R_RISK_START + i}", "color": "#6BCB77"}})
 
+    # ── 6b. Legend section (Priority + Project Identity Symbol) ──
+    # Row 1: Priority header
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START}", "value": "Priority"}})
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START}:D{R_LEGEND_START}"}})
+    # Row 2: A / B / C labels
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 1}", "value": "A"}})
+    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 1}", "value": "B"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 1}", "value": "C"}})
+    # Row 3: descriptions
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 2}", "value": "Primary/Owner"}})
+    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 2}", "value": "Primary Helper"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 2}", "value": "Secondary Helper"}})
+    # Row 4: Project Identity Symbol header
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 3}", "value": "Project Identity Symbol"}})
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 3}:D{R_LEGEND_START + 3}"}})
+    # Row 5: symbols and status
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 4}", "value": "◻ Start"}})
+    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 4}", "value": "⚫ In Progress"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 4}", "value": "◼ Complete"}})
+    # Row 6: RAG colors
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 5}", "value": "Green: Good"}})
+    a.append({"action": "set_background", "params": {"range": f"B{R_LEGEND_START + 5}", "color": "#6BCB77"}})
+    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 5}", "value": "Yellow: Average"}})
+    a.append({"action": "set_background", "params": {"range": f"C{R_LEGEND_START + 5}", "color": "#FFD93D"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 5}", "value": "Red: Bad"}})
+    a.append({"action": "set_background", "params": {"range": f"D{R_LEGEND_START + 5}", "color": "#FF6B6B"}})
+
     # ── 7. Merges ──
     # Row 2: logo | project leader | project name (each standalone row)
     a.append({"action": "merge_cells", "params": {"range": "B2:G2"}})
@@ -268,10 +301,10 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "merge_cells", "params": {"range": f"I{r}:M{r}"}})
     # Big white image area: one rectangle spanning G42:L54 (combines header row G:L + body G column + X-pattern)
     a.append({"action": "merge_cells", "params": {"range": f"H{R_MATRIX_HEADER}:M{R_MATRIX_BOTTOM}"}})
-    # Sub-objective body merges: each column A-F merged vertically from row 43 to row 66 (bottom of risk section)
+    # Sub-objective body merges: each column B-G merged vertically from row 43 to row 76 (bottom of risk section, NOT into legend gap)
     for col_idx in range(2, 8):
         col_letter = _col_index_to_letters(col_idx)
-        a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_FORM_BOTTOM}"}})
+        a.append({"action": "merge_cells", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}:{col_letter}{R_RISK_END}"}})
     # Timeline date header columns and owner columns: each column merged vertically rows 42-48
     # so the rotated labels occupy a taller area; grid cells start at row 49
     R_DATE_HEADER_END = R_MATRIX_HEADER + 6  # = 48
@@ -300,8 +333,24 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_row_height", "params": {"start_index": X_TOP, "end_index": R_MATRIX_BOTTOM, "height": 21}})
     # Identity rows (A-F, one per row) — same height as task rows
     a.append({"action": "set_row_height", "params": {"start_index": R_IDENTITY_START, "end_index": R_IDENTITY_END, "height": _SCAFFOLD_TASK_ROW_HEIGHT}})
-    # Summary/Forecast/Risk rows: taller so text fills the merged area
-    a.append({"action": "set_row_height", "params": {"start_index": R_SUMMARY_START, "end_index": R_RISK_END, "height": 40}})
+    # Summary/Forecast/Risk rows: scale height based on content length
+    deliverables = params.get("deliverables") or []
+    forecasts = params.get("forecasts") or []
+    risks = params.get("risks") or []
+    def _content_height(items: list, base: int = 25) -> int:
+        """Scale row height based on longest description."""
+        if not items:
+            return base
+        max_len = max(len(str(it.get("description", ""))) for it in items) if items else 0
+        # Add 8px per 50 chars over 100
+        extra = max(0, (max_len - 100) // 50) * 8
+        return base + extra
+    deliv_height = _content_height(deliverables)
+    forecast_height = _content_height(forecasts)
+    risk_height = _content_height(risks)
+    a.append({"action": "set_row_height", "params": {"start_index": R_SUMMARY_START, "end_index": R_SUMMARY_DELIV_END, "height": deliv_height}})
+    a.append({"action": "set_row_height", "params": {"start_index": R_FORECAST_START, "end_index": R_FORECAST_END, "height": forecast_height}})
+    a.append({"action": "set_row_height", "params": {"start_index": R_RISK_START, "end_index": R_RISK_END, "height": risk_height}})
     # Column H wider so identity letters and task numbers are clearly visible
     a.append({"action": "set_column_width", "params": {"start_index": 7, "end_index": 7, "width": 50}})
     # Columns B-G compact width (30px) for sub-objective check columns
@@ -536,19 +585,19 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_border", "params": {"range": f"{L_WEEK_END}{R_DATE_HEADER_END}:{L_OWNER_END}{R_DATE_HEADER_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
     # Restore the outer left/right edges after interior grids so task-row gray borders
-    # do not override the full-form frame.
+    # do not override the full-form frame. Stop at risk end — legend has its own frame.
     a.append({"action": "set_border", "params": {
-        "range": f"B1:B{R_FORM_BOTTOM}",
+        "range": f"B1:B{R_RISK_END}",
         "style": "NONE",
         "left_style": "SOLID", "left_color": _SCAFFOLD_HEADER_BLACK, "left_width": 1,
     }})
     a.append({"action": "set_border", "params": {
-        "range": f"{L_OWNER_END}1:{L_OWNER_END}{R_FORM_BOTTOM}",
+        "range": f"{L_OWNER_END}1:{L_OWNER_END}{R_RISK_END}",
         "style": "NONE",
         "right_style": "SOLID", "right_color": _SCAFFOLD_HEADER_BLACK, "right_width": 1,
     }})
-    # Bottom border at the end of the form (row 67 for 10 tasks)
-    a.append({"action": "set_border", "params": {"range": f"B{R_FORM_BOTTOM}:G{R_FORM_BOTTOM}", "style": "NONE",
+    # Bottom border at the end of the main form (risk section), not the legend
+    a.append({"action": "set_border", "params": {"range": f"B{R_RISK_END}:G{R_RISK_END}", "style": "NONE",
                                                   "bottom_style": "SOLID", "bottom_color": _SCAFFOLD_HEADER_BLACK, "bottom_width": 1}})
 
     # ── 11. Fonts, alignment, rotation ──
@@ -600,7 +649,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_alignment", "params": {"range": f"H{R_MATRIX_HEADER}:M{R_MATRIX_BOTTOM}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_font_size", "params": {"range": f"H{R_MATRIX_HEADER}:M{R_MATRIX_BOTTOM}", "size": 10}})
     a.append({"action": "set_bold", "params": {"range": f"H{R_MATRIX_HEADER}:M{R_MATRIX_BOTTOM}", "bold": True}})
-    # Summary section labels: rotated in column G only (single cell per row)
+    # Summary section labels: rotated in column H (vertical text, centered)
     a.append({"action": "set_text_rotation", "params": {"range": f"H{R_SUMMARY_START}:H{R_RISK_END}", "angle": 90}})
     a.append({"action": "set_alignment", "params": {"range": f"H{R_SUMMARY_START}:H{R_RISK_END}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     a.append({"action": "set_bold", "params": {"range": f"H{R_SUMMARY_START}:H{R_RISK_END}", "bold": True}})
@@ -787,6 +836,10 @@ def _exec_scaffold_oppm_form(
     R_MATRIX_BOTTOM = R_MATRIX_TOP + 12
     R_SUMMARY_START = R_MATRIX_BOTTOM + 1
     R_SUMMARY_END = R_SUMMARY_START + 11
+    R_LEGEND_GAP = 15                           # 15 empty rows between risk and legend for clear visual separation
+    R_LEGEND_START = R_SUMMARY_END + R_LEGEND_GAP + 1
+    R_LEGEND_END = R_LEGEND_START + 5
+    R_FORM_BOTTOM = R_LEGEND_END
 
     # ── Dynamic column computation (mirrors _build_scaffold_actions) ──
     weeks_data = params.get("weeks") or []
@@ -894,6 +947,28 @@ def _exec_scaffold_oppm_form(
         {"range": f"'{sq}'!G{R_SUMMARY_START + 8}", "values": [["Risk"]]},
     ]
 
+    # ── Legend section values ──
+    # Priority header
+    value_data.append({"range": f"'{sq}'!B{R_LEGEND_START}", "values": [["Priority"]]})
+    # A/B/C labels
+    value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 1}", "values": [["A"]]})
+    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 1}", "values": [["B"]]})
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 1}", "values": [["C"]]})
+    # Descriptions
+    value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 2}", "values": [["Primary/Owner"]]})
+    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 2}", "values": [["Primary Helper"]]})
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 2}", "values": [["Secondary Helper"]]})
+    # Project Identity Symbol header
+    value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 3}", "values": [["Project Identity Symbol"]]})
+    # Symbols
+    value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 4}", "values": [["◻ Start"]]})
+    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 4}", "values": [["⚫ In Progress"]]})
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 4}", "values": [["◼ Complete"]]})
+    # RAG colors
+    value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 5}", "values": [["Green: Good"]]})
+    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 5}", "values": [["Yellow: Average"]]})
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 5}", "values": [["Red: Bad"]]})
+
     service.spreadsheets().values().batchUpdate(
         spreadsheetId=spreadsheet_id,
         body={"valueInputOption": "USER_ENTERED", "data": value_data},
@@ -957,6 +1032,9 @@ def _exec_scaffold_oppm_form(
         f"G{R_SUMMARY_START}:G{R_SUMMARY_START + 3}",
         f"G{R_SUMMARY_START + 4}:G{R_SUMMARY_START + 7}",
         f"G{R_SUMMARY_START + 8}:G{R_SUMMARY_START + 11}",
+        # Legend merges
+        f"B{R_LEGEND_START}:D{R_LEGEND_START}",      # Priority header
+        f"B{R_LEGEND_START + 3}:D{R_LEGEND_START + 3}",  # Project Identity Symbol header
     ]
     # Task title cells H:L per task row
     for i in range(1, task_count + 1):
@@ -964,10 +1042,10 @@ def _exec_scaffold_oppm_form(
     # Identity rows H:L per row
     for r in range(R_IDENTITY_START, R_IDENTITY_END + 1):
         merge_list.append(f"I{r}:M{r}")
-    # Sub-obj columns A-F merged vertically through matrix + summary
+    # Sub-obj columns A-F merged vertically through matrix + risk (stop at risk end, not legend)
     for col_i in range(6):
         col = chr(ord("A") + col_i)
-        merge_list.append(f"{col}{R_MATRIX_TOP + 1}:{col}{R_SUMMARY_END}")
+        merge_list.append(f"{col}{R_MATRIX_TOP + 1}:{col}{R_RISK_END}")
     # Timeline/owner header columns merged vertically (rotated labels)
     for col_1based in range(C_WEEK_START + 1, C_OWNER_END + 2):
         col = _col_index_to_letters(col_1based)
@@ -992,7 +1070,7 @@ def _exec_scaffold_oppm_form(
         row_height(R_IDENTITY_START, R_IDENTITY_END, 21),   # identity rows
         row_height(R_MATRIX_TOP, R_MATRIX_TOP, 21),           # matrix header row
         row_height(R_MATRIX_TOP + 1, R_MATRIX_BOTTOM, 21),    # matrix body rows
-        row_height(R_SUMMARY_START, R_SUMMARY_END, 40),       # summary rows (taller for text)
+        row_height(R_SUMMARY_START, R_SUMMARY_END, 25),       # summary rows (compact)
         col_width(1, 6, 22),               # A-F: narrow sub-obj check columns
         col_width(7, 7, 30),               # G:  identity/task-number column
         col_width(8, 12, 90),              # H-L: task title area
@@ -1038,8 +1116,11 @@ def _exec_scaffold_oppm_form(
     requests.append(outer_border(f"G{R_MATRIX_TOP}:L{R_MATRIX_BOTTOM}"))
     # Summary section: black grid
     requests.append(full_grid(f"A{R_SUMMARY_START}:{LAST_COL_LETTER}{R_SUMMARY_END}"))
-    # Outer frame for the entire form
-    requests.append(outer_border(f"A1:{LAST_COL_LETTER}{R_SUMMARY_END}"))
+    # Legend section: black grid with its own outer border (separate from main form)
+    requests.append(full_grid(f"B{R_LEGEND_START}:D{R_LEGEND_END}"))
+    requests.append(outer_border(f"B{R_LEGEND_START}:D{R_LEGEND_END}"))
+    # Outer frame for the main form only (stops at risk end, not legend)
+    requests.append(outer_border(f"A1:{LAST_COL_LETTER}{R_RISK_END}"))
 
     # ── Text alignment + formatting ───────────────────────────────────────────
     CENTER_MIDDLE = {
@@ -1095,6 +1176,17 @@ def _exec_scaffold_oppm_form(
         "textFormat": {"bold": True, "fontSize": 8},
     }, "userEnteredFormat.textRotation,userEnteredFormat.horizontalAlignment,"
        "userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat"))
+
+    # Legend section: center + bold for headers, center for content
+    requests.append(rc(f"B{R_LEGEND_START}:D{R_LEGEND_START}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 1}:D{R_LEGEND_START + 1}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 2}:D{R_LEGEND_START + 2}", CENTER_MIDDLE, CENTER_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 3}:D{R_LEGEND_START + 3}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 4}:D{R_LEGEND_START + 4}", CENTER_MIDDLE, CENTER_FIELDS))
+    # RAG color backgrounds for legend
+    requests.append(rc(f"B{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#6BCB77")}, "userEnteredFormat.backgroundColor"))
+    requests.append(rc(f"C{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#FFD93D")}, "userEnteredFormat.backgroundColor"))
+    requests.append(rc(f"D{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#FF6B6B")}, "userEnteredFormat.backgroundColor"))
 
     # ── Fire in 200-request chunks ────────────────────────────────────────────
     CHUNK = 200
