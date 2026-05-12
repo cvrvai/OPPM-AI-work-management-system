@@ -351,10 +351,14 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_row_height", "params": {"start_index": R_SUMMARY_START, "end_index": R_SUMMARY_DELIV_END, "height": deliv_height}})
     a.append({"action": "set_row_height", "params": {"start_index": R_FORECAST_START, "end_index": R_FORECAST_END, "height": forecast_height}})
     a.append({"action": "set_row_height", "params": {"start_index": R_RISK_START, "end_index": R_RISK_END, "height": risk_height}})
+    # Legend rows: taller for better visibility
+    a.append({"action": "set_row_height", "params": {"start_index": R_LEGEND_START, "end_index": R_LEGEND_END, "height": 35}})
     # Column H wider so identity letters and task numbers are clearly visible
     a.append({"action": "set_column_width", "params": {"start_index": 7, "end_index": 7, "width": 50}})
     # Columns B-G compact width (30px) for sub-objective check columns
     a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 6, "width": 30}})
+    # Legend columns B-D: wider for readability
+    a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 3, "width": 80}})
     # Column I (task title): wide for long task descriptions
     a.append({"action": "set_column_width", "params": {"start_index": 8, "end_index": 8, "width": 280}})
     # Timeline grid columns: week_col_count columns at 25px each
@@ -1071,7 +1075,9 @@ def _exec_scaffold_oppm_form(
         row_height(R_MATRIX_TOP, R_MATRIX_TOP, 21),           # matrix header row
         row_height(R_MATRIX_TOP + 1, R_MATRIX_BOTTOM, 21),    # matrix body rows
         row_height(R_SUMMARY_START, R_SUMMARY_END, 25),       # summary rows (compact)
+        row_height(R_LEGEND_START, R_LEGEND_END, 35),         # legend rows taller
         col_width(1, 6, 22),               # A-F: narrow sub-obj check columns
+        col_width(2, 4, 80),               # B-D: wider for legend readability
         col_width(7, 7, 30),               # G:  identity/task-number column
         col_width(8, 12, 90),              # H-L: task title area
         col_width(13, C_WEEK_END + 1, 25),             # M..L_WEEK_END: weekly timeline columns
