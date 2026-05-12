@@ -500,13 +500,18 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     task_repo = TaskRepository(session)
     project_tasks = await task_repo.find_project_tasks(project_id, limit=1000)
     task_count = len(project_tasks)
+    tl_repo = TimelineRepository(session)
+    timeline_entries = await tl_repo.find_project_timeline(project_id)
 
     # Build task list for scaffold
     tasks = []
     for t in project_tasks:
         tasks.append({
+            "id": str(t.id),
             "name": t.title or "",
             "title": t.title or "",
+            "due_date": str(t.due_date) if t.due_date else None,
+            "status": t.status,
         })
 
     # Fetch sub-objectives for scaffold labels
@@ -533,6 +538,14 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
         "task_count": task_count,
         "tasks": tasks,
         "weeks": weeks,
+        "timeline_entries": [
+            {
+                "task_id": str(entry.task_id),
+                "week_start": entry.week_start.isoformat() if entry.week_start else None,
+                "status": entry.status,
+            }
+            for entry in timeline_entries
+        ],
         "members": member_names,
         "sub_objectives": sub_obj_labels,
         "deliverables": [{"description": d.description, "item_number": d.item_number} for d in deliverables],

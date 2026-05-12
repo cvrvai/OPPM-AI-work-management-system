@@ -1,3 +1,4 @@
+from datetime import date as _date
 from typing import Any
 import logging
 from .utils import (
@@ -31,6 +32,184 @@ _SCAFFOLD_MATRIX_HEIGHT_ROWS = 13      # header(1) + body(12); the identity stri
 _SCAFFOLD_WEEK_DATE_COLS = 17           # M..AC (17 weekly date columns)
 _SCAFFOLD_OWNER_COLS = 6                # AE..AJ (6 owner columns)
 _SCAFFOLD_LAST_COL = "AJ"               # rightmost column of the form
+_SCAFFOLD_DEFAULT_TASK_NAMES = [
+    "Finalize product requirements and release scope",
+    "Ship authentication and SSO onboarding flow",
+    "Implement workspace dashboard and KPI widgets",
+    "Launch AI copilot for project planning",
+    "Integrate GitHub webhook and commit analysis",
+    "Deliver executive reporting and export center",
+    "Enable mobile sync API and offline caching",
+    "Harden billing, roles, and audit logging",
+]
+_SCAFFOLD_DEFAULT_MEMBER_NAMES = [
+    "Alicia Gomez",
+    "Marcus Lee",
+    "Priya Nair",
+    "Daniel Kim",
+    "Fatima Hassan",
+    "Jonas Muller",
+]
+_SCAFFOLD_DEFAULT_SUB_OBJECTIVES = [
+    "User Authentication & SSO",
+    "Project Dashboard & Kanban",
+    "AI Assistant & Chatbot",
+    "Reporting & Analytics",
+    "Mobile API & Sync",
+    "Admin & Billing Portal",
+]
+_SCAFFOLD_DEFAULT_DELIVERABLES = [
+    "Q1: MVP with auth, basic dashboard, and task management",
+    "Q2: AI assistant integration, reporting module, and mobile API",
+    "Q3: Advanced analytics, billing portal, and performance optimization",
+    "Q4: Enterprise SSO, audit logs, and compliance certifications",
+]
+_SCAFFOLD_DEFAULT_FORECASTS = [
+    "Revenue: $120K MRR by Q3 with 150 enterprise customers",
+    "Users: 5,000 active teams by end of Q2",
+    "Uptime: 99.9% SLA with <200ms API response time",
+    "Churn: <5% monthly through proactive AI health alerts",
+]
+_SCAFFOLD_DEFAULT_RISKS = [
+    "Integration complexity with legacy ERP systems (Mitigation: dedicated onboarding team)",
+    "AI model latency under high concurrency (Mitigation: edge caching + model quantization)",
+    "Third-party API rate limits (Mitigation: request batching + fallback providers)",
+    "Regulatory compliance in EU markets (Mitigation: GDPR legal review + DPO hire)",
+]
+
+
+def _scaffold_task_name(task: Any, index: int) -> str:
+    fallback = (
+        _SCAFFOLD_DEFAULT_TASK_NAMES[index]
+        if index < len(_SCAFFOLD_DEFAULT_TASK_NAMES)
+        else f"Phase {index + 1} rollout milestone"
+    )
+    if isinstance(task, dict):
+        return str(task.get("name") or task.get("title") or fallback)
+    if task:
+        return str(task)
+    return fallback
+
+
+def _scaffold_member_name(member: Any, index: int) -> str:
+    fallback = (
+        _SCAFFOLD_DEFAULT_MEMBER_NAMES[index]
+        if index < len(_SCAFFOLD_DEFAULT_MEMBER_NAMES)
+        else f"Team Member {index + 1}"
+    )
+    if isinstance(member, dict):
+        return str(
+            member.get("name")
+            or member.get("full_name")
+            or member.get("display_name")
+            or fallback
+        )
+    if member:
+        return str(member)
+    return fallback
+
+
+def _scaffold_description(item: Any, fallback: str) -> str:
+    if isinstance(item, dict):
+        return str(item.get("description") or fallback)
+    if item:
+        return str(item)
+    return fallback
+
+
+def _scaffold_task_due_date(task: Any) -> _date | None:
+    if not isinstance(task, dict):
+        return None
+    raw_value = task.get("due_date") or task.get("deadline") or task.get("deadline_text")
+    if not raw_value:
+        return None
+    try:
+        return _date.fromisoformat(str(raw_value)[:10])
+    except ValueError:
+        return None
+
+
+def _scaffold_week_start(week: Any) -> _date | None:
+    if isinstance(week, dict):
+        raw_value = week.get("start") or week.get("date") or week.get("label")
+    else:
+        raw_value = week
+    if not raw_value:
+        return None
+    try:
+        return _date.fromisoformat(str(raw_value)[:10])
+    except ValueError:
+        return None
+
+
+def _scaffold_timeline_entries_by_task(entries: Any) -> dict[str, dict[str, str]]:
+    timeline_by_task: dict[str, dict[str, str]] = {}
+    if not isinstance(entries, list):
+        return timeline_by_task
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        task_id = str(entry.get("task_id") or "")
+        week_start = str(entry.get("week_start") or "")[:10]
+        status = str(entry.get("status") or "").lower()
+        if not task_id or not week_start or not status:
+            continue
+        timeline_by_task.setdefault(task_id, {})[week_start] = status
+    return timeline_by_task
+
+
+def _scaffold_timeline_symbol(status: str) -> str | None:
+    normalized = str(status or "").lower()
+    if normalized in {"planned", "todo"}:
+        return "◻"
+    if normalized == "completed":
+        return "◼"
+    if normalized in {"in_progress", "at_risk", "blocked"}:
+        return "⚫"
+    return None
+
+
+def _nearest_week_index(target: _date, week_starts: list[_date | None]) -> int | None:
+    best_index: int | None = None
+    best_diff: int | None = None
+    for index, week_start in enumerate(week_starts):
+        if week_start is None:
+            continue
+        diff = abs((week_start - target).days)
+        if best_diff is None or diff < best_diff:
+            best_diff = diff
+            best_index = index
+    return best_index
+
+
+def _scaffold_timeline_marks(
+    tasks: list[Any],
+    weeks_data: list[Any],
+    timeline_entries: Any,
+) -> list[tuple[int, int, str]]:
+    week_starts = [_scaffold_week_start(week) for week in weeks_data]
+    timeline_by_task = _scaffold_timeline_entries_by_task(timeline_entries)
+    marks: list[tuple[int, int, str]] = []
+    for task_index, task in enumerate(tasks):
+        row = 7 + task_index
+        task_id = str(task.get("id") or "") if isinstance(task, dict) else ""
+        task_timeline = timeline_by_task.get(task_id, {})
+        if task_timeline:
+            for week_index, week_start in enumerate(week_starts):
+                if week_start is None:
+                    continue
+                symbol = _scaffold_timeline_symbol(task_timeline.get(week_start.isoformat(), ""))
+                if symbol:
+                    marks.append((row, week_index, symbol))
+            continue
+        due_date = _scaffold_task_due_date(task)
+        if due_date is None:
+            continue
+        week_index = _nearest_week_index(due_date, week_starts)
+        if week_index is None:
+            continue
+        marks.append((row, week_index, "⚫"))
+    return marks
 
 
 def _build_scaffold_actions(params: dict) -> list[dict]:
@@ -41,8 +220,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
       Row 1            empty (spacer)
       Rows 2-3         merged: Logo (B:G) | "Project Leader: ..." (H:K) | "Project Name: ..." (L:AJ)
       Rows 4-5         MERGED H4:AJ5 — multi-line block: Objective + Deliverable + Start + Deadline
-      Row 6            sub-headers: "Sub objective" (B:G) | "Major Tasks (Deadline)" (H:M)
-                       | "Project Completed By: ..." (N:AD) | "Owner / Priority" (AE:AJ)
+    Row 6            sub-headers: "Sub objective" (B:G) | "Major Tasks (Deadline)" (H:M)
+                 | "Project Identity Symbol: ..." (N:AD) | "Owner / Priority" (AE:AJ)
     Rows 7 .. 6+N    task rows, numbered 1..N in column I (default N=24)
     Identity strip (A..F) starts immediately after the last task row in column H
     R_MATRIX         13-row bottom matrix immediately below the identity strip:
@@ -58,18 +237,19 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     """
     from datetime import date as _d, timedelta as _td
 
-    title = str(params.get("title") or "[Project Name]")
-    leader = str(params.get("leader") or "[Leader Name]")
-    objective = str(params.get("objective") or "[Project Objective]")
-    deliverable = str(params.get("deliverable") or "[Deliverable Output]")
-    start_date = str(params.get("start_date") or "[Start Date]")
-    deadline = str(params.get("deadline") or "[Deadline]")
+    title = str(params.get("title") or "AI Work Management System v2.0")
+    leader = str(params.get("leader") or "Sarah Chen")
+    objective = str(params.get("objective") or "Deliver an AI-powered project management platform with real-time collaboration, automated reporting, and predictive analytics for enterprise teams")
+    deliverable = str(params.get("deliverable") or "Production-ready SaaS platform with web app, mobile API, admin dashboard, and integrated AI assistant module")
+    start_date = str(params.get("start_date") or "2026-01-15")
+    deadline = str(params.get("deadline") or "2026-06-30")
     weeks = params.get("completed_by_weeks")
-    weeks_label = f"{int(weeks)} weeks" if weeks else "N weeks"
+    weeks_label = f"{int(weeks)} weeks" if weeks else "24 weeks"
     task_count = max(1, int(params.get("task_count") or _SCAFFOLD_DEFAULT_TASK_COUNT))
     tasks = params.get("tasks") or []
     weeks_data = params.get("weeks") or []
     members = params.get("members") or []
+    timeline_entries = params.get("timeline_entries") or []
     # Optional public image URL for the X-pattern matrix center (replaces the
     # five text labels Major Tasks / Target Dates / Sub Objectives / Costs /
     # Summary & Forecast with an embedded image). Must be publicly fetchable
@@ -98,7 +278,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     R_FORM_BOTTOM = R_RISK_END                   # last form row
 
     # ── Legend rows (Priority + Project Identity Symbol) ──
-    R_LEGEND_GAP = 15                           # 15 empty rows between risk and legend for clear visual separation
+    R_LEGEND_GAP = 5                            # 5 empty rows between risk and legend (moved up 10 rows)
     R_LEGEND_START = R_FORM_BOTTOM + R_LEGEND_GAP + 1  # first legend row
     R_LEGEND_END = R_LEGEND_START + 5            # 6 legend rows total (0-5)
     R_FORM_BOTTOM = R_LEGEND_END                 # update form bottom to include legend
@@ -126,7 +306,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
 
     # Try to compute real week-date labels if start_date is parseable
     start_dt: _d | None = None
-    if start_date and start_date != "[Start Date]":
+    if start_date:
         try:
             start_dt = _d.fromisoformat(start_date)
         except ValueError:
@@ -149,17 +329,23 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Row 6: 4 sub-headers
     a.append({"action": "set_value", "params": {"range": "B6", "value": "Sub objective"}})
     a.append({"action": "set_value", "params": {"range": "H6", "value": "Major Tasks (Deadline)"}})
-    a.append({"action": "set_value", "params": {"range": f"{L_WEEK_START}6", "value": f"Project Completed By: {weeks_label}"}})
+    a.append({"action": "set_value", "params": {"range": f"{L_WEEK_START}6", "value": f"Project Identity Symbol: {weeks_label}"}})
     a.append({"action": "set_value", "params": {"range": f"{L_OWNER_START}6", "value": "Owner / Priority"}})
 
     # ── 3. Task numbers 1..N in column G (G:H merged per row) + task names in I:M ──
     for i in range(1, task_count + 1):
         a.append({"action": "set_value", "params": {"range": f"H{6 + i}", "value": str(i)}})
-        task_name = ""
-        if i <= len(tasks):
-            t = tasks[i - 1]
-            task_name = str(t.get("name") or t.get("title") or "")
+        task = tasks[i - 1] if i <= len(tasks) else None
+        task_name = _scaffold_task_name(task, i - 1)
+        due_date = _scaffold_task_due_date(task)
+        if due_date is not None:
+            task_name = f"{task_name} ({due_date.isoformat()})"
         a.append({"action": "set_value", "params": {"range": f"I{6 + i}", "value": task_name}})
+
+    # ── 3b. Project Identity Symbol marks in task rows ──
+    for row, week_index, symbol in _scaffold_timeline_marks(tasks, weeks_data[:week_col_count], timeline_entries):
+        col_letter = _col_index_to_letters(C_WEEK_START + week_index)
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{row}", "value": symbol}})
 
     # ── 4. Bottom matrix content ──
     # 4a. Sub-objective numbers 1..6 in the matrix header row B:G (row 42)
@@ -168,9 +354,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": str(col_idx - 1)}})
     # 4a-ii. Sub-objective labels in the matrix body — each column A-F is merged vertically
     sub_obj_labels = params.get("sub_objectives") or []
-    # Pad to 6 with fallback placeholders
     while len(sub_obj_labels) < 6:
-        sub_obj_labels.append(f"Sub Obj {len(sub_obj_labels) + 1}")
+        sub_obj_labels.append(_SCAFFOLD_DEFAULT_SUB_OBJECTIVES[len(sub_obj_labels)])
     for col_idx, label in enumerate(sub_obj_labels, start=2):
         col_letter = _col_index_to_letters(col_idx)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER + 1}", "value": label}})
@@ -214,9 +399,9 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     owner_labels = ["Project Leader"]
     for i in range(owner_col_count - 1):
         if i < len(members):
-            owner_labels.append(members[i])
+            owner_labels.append(_scaffold_member_name(members[i], i))
         else:
-            owner_labels.append(f"Member {i + 1}")
+            owner_labels.append(_scaffold_member_name(None, i))
     for col_idx, label in enumerate(owner_labels):
         col_letter = _col_index_to_letters(C_OWNER_START + col_idx)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": label}})
@@ -232,15 +417,15 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     risks = params.get("risks") or []
     for i in range(4):
         d = deliverables[i] if i < len(deliverables) else None
-        val = d["description"] if d and d.get("description") else f"Deliverable item {i + 1}: ..."
+        val = _scaffold_description(d, _SCAFFOLD_DEFAULT_DELIVERABLES[i])
         a.append({"action": "set_value", "params": {"range": f"I{R_SUMMARY_START + i}", "value": val}})
     for i in range(4):
         f = forecasts[i] if i < len(forecasts) else None
-        val = f["description"] if f and f.get("description") else f"Forecast: ..."
+        val = _scaffold_description(f, _SCAFFOLD_DEFAULT_FORECASTS[i])
         a.append({"action": "set_value", "params": {"range": f"I{R_FORECAST_START + i}", "value": val}})
     for i in range(4):
         r = risks[i] if i < len(risks) else None
-        val = r["description"] if r and r.get("description") else f"Risk: ..."
+        val = _scaffold_description(r, _SCAFFOLD_DEFAULT_RISKS[i])
         a.append({"action": "set_value", "params": {"range": f"I{R_RISK_START + i}", "value": val}})
         # RAG color indicator for risk rows
         rag = (r.get("rag") or "").lower() if r else ""
@@ -252,31 +437,46 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
             a.append({"action": "set_background", "params": {"range": f"I{R_RISK_START + i}", "color": "#6BCB77"}})
 
     # ── 6b. Legend section (Priority + Project Identity Symbol) ──
-    # Row 1: Priority header
+    # Row 1: Priority header (merged B-H)
     a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START}", "value": "Priority"}})
-    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START}:D{R_LEGEND_START}"}})
-    # Row 2: A / B / C labels
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START}:H{R_LEGEND_START}"}})
+    # Row 2: A / B / C labels (B-C merged for A, D-E for B, F-H for C)
     a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 1}", "value": "A"}})
-    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 1}", "value": "B"}})
-    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 1}", "value": "C"}})
-    # Row 3: descriptions
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 1}:C{R_LEGEND_START + 1}"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 1}", "value": "B"}})
+    a.append({"action": "merge_cells", "params": {"range": f"D{R_LEGEND_START + 1}:E{R_LEGEND_START + 1}"}})
+    a.append({"action": "set_value", "params": {"range": f"F{R_LEGEND_START + 1}", "value": "C"}})
+    a.append({"action": "merge_cells", "params": {"range": f"F{R_LEGEND_START + 1}:H{R_LEGEND_START + 1}"}})
+    # Row 3: descriptions (B-C merged for Primary/Owner, D-E for Primary Helper, F-H for Secondary Helper)
     a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 2}", "value": "Primary/Owner"}})
-    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 2}", "value": "Primary Helper"}})
-    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 2}", "value": "Secondary Helper"}})
-    # Row 4: Project Identity Symbol header
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 2}:C{R_LEGEND_START + 2}"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 2}", "value": "Primary Helper"}})
+    a.append({"action": "merge_cells", "params": {"range": f"D{R_LEGEND_START + 2}:E{R_LEGEND_START + 2}"}})
+    a.append({"action": "set_value", "params": {"range": f"F{R_LEGEND_START + 2}", "value": "Secondary Helper"}})
+    a.append({"action": "merge_cells", "params": {"range": f"F{R_LEGEND_START + 2}:H{R_LEGEND_START + 2}"}})
+    # Row 4: Project Identity Symbol header (merged B-H)
     a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 3}", "value": "Project Identity Symbol"}})
-    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 3}:D{R_LEGEND_START + 3}"}})
-    # Row 5: symbols and status
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 3}:H{R_LEGEND_START + 3}"}})
+    # Row 5: symbols and status (B-C merged for Start, D-E for In Progress, F-H for Complete)
     a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 4}", "value": "◻ Start"}})
-    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 4}", "value": "⚫ In Progress"}})
-    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 4}", "value": "◼ Complete"}})
-    # Row 6: RAG colors
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 4}:C{R_LEGEND_START + 4}"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 4}", "value": "⚫ In Progress"}})
+    a.append({"action": "merge_cells", "params": {"range": f"D{R_LEGEND_START + 4}:E{R_LEGEND_START + 4}"}})
+    a.append({"action": "set_value", "params": {"range": f"F{R_LEGEND_START + 4}", "value": "◼ Complete"}})
+    a.append({"action": "merge_cells", "params": {"range": f"F{R_LEGEND_START + 4}:H{R_LEGEND_START + 4}"}})
+    # Row 6: RAG colors (B-C merged for Green, D-E for Yellow, F-H for Red)
     a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 5}", "value": "Green: Good"}})
-    a.append({"action": "set_background", "params": {"range": f"B{R_LEGEND_START + 5}", "color": "#6BCB77"}})
-    a.append({"action": "set_value", "params": {"range": f"C{R_LEGEND_START + 5}", "value": "Yellow: Average"}})
-    a.append({"action": "set_background", "params": {"range": f"C{R_LEGEND_START + 5}", "color": "#FFD93D"}})
-    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 5}", "value": "Red: Bad"}})
-    a.append({"action": "set_background", "params": {"range": f"D{R_LEGEND_START + 5}", "color": "#FF6B6B"}})
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 5}:C{R_LEGEND_START + 5}"}})
+    a.append({"action": "set_background", "params": {"range": f"B{R_LEGEND_START + 5}:C{R_LEGEND_START + 5}", "color": "#6BCB77"}})
+    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 5}", "value": "Yellow: Average"}})
+    a.append({"action": "merge_cells", "params": {"range": f"D{R_LEGEND_START + 5}:E{R_LEGEND_START + 5}"}})
+    a.append({"action": "set_background", "params": {"range": f"D{R_LEGEND_START + 5}:E{R_LEGEND_START + 5}", "color": "#FFD93D"}})
+    a.append({"action": "set_value", "params": {"range": f"F{R_LEGEND_START + 5}", "value": "Red: Bad"}})
+    a.append({"action": "merge_cells", "params": {"range": f"F{R_LEGEND_START + 5}:H{R_LEGEND_START + 5}"}})
+    a.append({"action": "set_background", "params": {"range": f"F{R_LEGEND_START + 5}:H{R_LEGEND_START + 5}", "color": "#FF6B6B"}})
+    # Legend columns B-H: 120px each for legend rows only
+    for r in range(R_LEGEND_START, R_LEGEND_END + 1):
+        a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 7, "width": 120}})
 
     # ── 7. Merges ──
     # Row 2: logo | project leader | project name (each standalone row)
@@ -357,8 +557,6 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_column_width", "params": {"start_index": 7, "end_index": 7, "width": 50}})
     # Columns B-G compact width (30px) for sub-objective check columns
     a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 6, "width": 30}})
-    # Legend columns B-D: wider for readability
-    a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 3, "width": 80}})
     # Column I (task title): wide for long task descriptions
     a.append({"action": "set_column_width", "params": {"start_index": 8, "end_index": 8, "width": 280}})
     # Timeline grid columns: week_col_count columns at 25px each
@@ -438,7 +636,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         a.append({"action": "set_border", "params": {"range": f"I8:M{LAST_TASK}", "style": "SOLID", "color": _SCAFFOLD_TASK_GRAY, "width": 1}})
     # 10b-iii. Remove borders from timeline area (N:AD) in task rows
     a.append({"action": "set_border", "params": {"range": f"{L_WEEK_START}7:{L_WEEK_END}{LAST_TASK}", "style": "NONE"}})
-    # Restore the right divider at the edge of the Project Completed By area.
+    # Restore the right divider at the edge of the Project Identity Symbol area.
     a.append({"action": "set_border", "params": {
         "range": f"{L_WEEK_END}7:{L_WEEK_END}{LAST_TASK}",
         "style": "NONE",
@@ -626,6 +824,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_text_wrap", "params": {"range": f"I7:M{LAST_TASK}", "mode": "CLIP"}})
     # Sub-objective check columns (A-F) and owner columns (AD-AI)
     a.append({"action": "set_alignment", "params": {"range": f"B7:G{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_alignment", "params": {"range": f"{L_WEEK_START}7:{L_WEEK_END}{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
+    a.append({"action": "set_font_size", "params": {"range": f"{L_WEEK_START}7:{L_WEEK_END}{LAST_TASK}", "size": 10}})
     a.append({"action": "set_alignment", "params": {"range": f"{L_OWNER_START}7:{L_OWNER_END}{LAST_TASK}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
     # Bottom matrix sub-objective header row numbers (A:F, row 42): horizontal, centered, small, bold
     a.append({"action": "set_alignment", "params": {"range": f"B{R_MATRIX_HEADER}:G{R_MATRIX_HEADER}", "horizontal": "CENTER", "vertical": "MIDDLE"}})
@@ -824,12 +1024,14 @@ def _exec_scaffold_oppm_form(
       Rows 43-54  : Matrix body — sub-obj cols A:F merged, image area, timeline/owner dots
       Rows 55-66  : Summary / Forecast / Risk — G label (rotated), H:AI text
     """
-    title = str(params.get("title") or "[Project Name]")
-    leader = str(params.get("leader") or "[Leader Name]")
-    objective = str(params.get("objective") or "[Project Objective]")
-    deliverable = str(params.get("deliverable") or "[Deliverable Output]")
-    start_date = str(params.get("start_date") or "[Start Date]")
-    deadline = str(params.get("deadline") or "[Deadline]")
+    title = str(params.get("title") or "AI Work Management System v2.0")
+    leader = str(params.get("leader") or "Sarah Chen")
+    objective = str(params.get("objective") or "Deliver an AI-powered project management platform with real-time collaboration, automated reporting, and predictive analytics for enterprise teams")
+    deliverable = str(params.get("deliverable") or "Production-ready SaaS platform with web app, mobile API, admin dashboard, and integrated AI assistant module")
+    start_date = str(params.get("start_date") or "2026-01-15")
+    deadline = str(params.get("deadline") or "2026-06-30")
+    weeks = params.get("completed_by_weeks")
+    weeks_label = f"{int(weeks)} weeks" if weeks else "24 weeks"
     task_count = max(1, int(params.get("task_count") or 24))
 
     sq = sheet_title.replace("'", "''")  # escape single quotes for A1 range notation
@@ -840,7 +1042,7 @@ def _exec_scaffold_oppm_form(
     R_MATRIX_BOTTOM = R_MATRIX_TOP + 12
     R_SUMMARY_START = R_MATRIX_BOTTOM + 1
     R_SUMMARY_END = R_SUMMARY_START + 11
-    R_LEGEND_GAP = 15                           # 15 empty rows between risk and legend for clear visual separation
+    R_LEGEND_GAP = 5                            # 5 empty rows between risk and legend (moved up 10 rows)
     R_LEGEND_START = R_SUMMARY_END + R_LEGEND_GAP + 1
     R_LEGEND_END = R_LEGEND_START + 5
     R_FORM_BOTTOM = R_LEGEND_END
@@ -896,11 +1098,25 @@ def _exec_scaffold_oppm_form(
     )
 
     # _col_index_to_letters is 1-based: 1=A, 13=M, 29=AC, 30=AD, 35=AI
-    week_headers  = [f"W{i}" for i in range(1, week_col_count + 1)]
-    owner_headers = ["Project Leader"] + [f"Owner {i}" for i in range(1, owner_col_count)]
+    week_headers: list[str] = []
+    if weeks_data and isinstance(weeks_data, list):
+        for week in weeks_data[:week_col_count]:
+            if isinstance(week, dict):
+                week_headers.append(str(week.get("label") or week.get("date") or ""))
+            else:
+                week_headers.append(str(week))
+    while len(week_headers) < week_col_count:
+        week_headers.append(f"Week {len(week_headers) + 1}")
+    owner_headers = ["Project Leader"]
+    for i in range(owner_col_count - 1):
+        owner_headers.append(_scaffold_member_name(members[i] if i < len(members) else None, i))
     sub_obj_labels = params.get("sub_objectives") or []
     while len(sub_obj_labels) < 6:
-        sub_obj_labels.append(f"Sub Obj {len(sub_obj_labels) + 1}")
+        sub_obj_labels.append(_SCAFFOLD_DEFAULT_SUB_OBJECTIVES[len(sub_obj_labels)])
+    deliverables = params.get("deliverables") or []
+    forecasts = params.get("forecasts") or []
+    risks = params.get("risks") or []
+    risk_row_colors: list[tuple[int, str]] = []
 
     value_data: list[dict] = [
         # ── Header rows 1-2 ──────────────────────────────────────────────────
@@ -912,7 +1128,7 @@ def _exec_scaffold_oppm_form(
         # ── Sub-header row 5 ─────────────────────────────────────────────────
         {"range": f"'{sq}'!A5",  "values": [["Sub objective"]]},
         {"range": f"'{sq}'!G5",  "values": [["Major Tasks (Deadline)"]]},
-        {"range": f"'{sq}'!{L_WEEK_START}5",  "values": [["Project Completed By:"]]},
+        {"range": f"'{sq}'!{L_WEEK_START}5",  "values": [[f"Project Identity Symbol: {weeks_label}"]]},
         {"range": f"'{sq}'!{L_OWNER_START}5", "values": [["Owner / Priority"]]},
     ]
 
@@ -950,28 +1166,52 @@ def _exec_scaffold_oppm_form(
         {"range": f"'{sq}'!G{R_SUMMARY_START + 4}", "values": [["Forecast"]]},
         {"range": f"'{sq}'!G{R_SUMMARY_START + 8}", "values": [["Risk"]]},
     ]
+    for i in range(4):
+        value_data.append({
+            "range": f"'{sq}'!I{R_SUMMARY_START + i}",
+            "values": [[_scaffold_description(deliverables[i] if i < len(deliverables) else None, _SCAFFOLD_DEFAULT_DELIVERABLES[i])]],
+        })
+    for i in range(4):
+        value_data.append({
+            "range": f"'{sq}'!I{R_SUMMARY_START + 4 + i}",
+            "values": [[_scaffold_description(forecasts[i] if i < len(forecasts) else None, _SCAFFOLD_DEFAULT_FORECASTS[i])]],
+        })
+    for i in range(4):
+        risk_item = risks[i] if i < len(risks) else None
+        risk_row = R_SUMMARY_START + 8 + i
+        value_data.append({
+            "range": f"'{sq}'!I{risk_row}",
+            "values": [[_scaffold_description(risk_item, _SCAFFOLD_DEFAULT_RISKS[i])]],
+        })
+        rag = (risk_item.get("rag") or "").lower() if isinstance(risk_item, dict) else ""
+        if rag == "red":
+            risk_row_colors.append((risk_row, "#FF6B6B"))
+        elif rag == "amber":
+            risk_row_colors.append((risk_row, "#FFD93D"))
+        elif rag == "green":
+            risk_row_colors.append((risk_row, "#6BCB77"))
 
     # ── Legend section values ──
-    # Priority header
+    # Priority header (merged B-H)
     value_data.append({"range": f"'{sq}'!B{R_LEGEND_START}", "values": [["Priority"]]})
-    # A/B/C labels
+    # A/B/C labels (B-C for A, D-E for B, F-H for C)
     value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 1}", "values": [["A"]]})
-    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 1}", "values": [["B"]]})
-    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 1}", "values": [["C"]]})
-    # Descriptions
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 1}", "values": [["B"]]})
+    value_data.append({"range": f"'{sq}'!F{R_LEGEND_START + 1}", "values": [["C"]]})
+    # Descriptions (B-C for Primary/Owner, D-E for Primary Helper, F-H for Secondary Helper)
     value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 2}", "values": [["Primary/Owner"]]})
-    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 2}", "values": [["Primary Helper"]]})
-    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 2}", "values": [["Secondary Helper"]]})
-    # Project Identity Symbol header
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 2}", "values": [["Primary Helper"]]})
+    value_data.append({"range": f"'{sq}'!F{R_LEGEND_START + 2}", "values": [["Secondary Helper"]]})
+    # Project Identity Symbol header (merged B-H)
     value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 3}", "values": [["Project Identity Symbol"]]})
-    # Symbols
+    # Symbols (B-C for Start, D-E for In Progress, F-H for Complete)
     value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 4}", "values": [["◻ Start"]]})
-    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 4}", "values": [["⚫ In Progress"]]})
-    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 4}", "values": [["◼ Complete"]]})
-    # RAG colors
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 4}", "values": [["⚫ In Progress"]]})
+    value_data.append({"range": f"'{sq}'!F{R_LEGEND_START + 4}", "values": [["◼ Complete"]]})
+    # RAG colors (B-C for Green, D-E for Yellow, F-H for Red)
     value_data.append({"range": f"'{sq}'!B{R_LEGEND_START + 5}", "values": [["Green: Good"]]})
-    value_data.append({"range": f"'{sq}'!C{R_LEGEND_START + 5}", "values": [["Yellow: Average"]]})
-    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 5}", "values": [["Red: Bad"]]})
+    value_data.append({"range": f"'{sq}'!D{R_LEGEND_START + 5}", "values": [["Yellow: Average"]]})
+    value_data.append({"range": f"'{sq}'!F{R_LEGEND_START + 5}", "values": [["Red: Bad"]]})
 
     service.spreadsheets().values().batchUpdate(
         spreadsheetId=spreadsheet_id,
@@ -1036,9 +1276,21 @@ def _exec_scaffold_oppm_form(
         f"G{R_SUMMARY_START}:G{R_SUMMARY_START + 3}",
         f"G{R_SUMMARY_START + 4}:G{R_SUMMARY_START + 7}",
         f"G{R_SUMMARY_START + 8}:G{R_SUMMARY_START + 11}",
-        # Legend merges
-        f"B{R_LEGEND_START}:D{R_LEGEND_START}",      # Priority header
-        f"B{R_LEGEND_START + 3}:D{R_LEGEND_START + 3}",  # Project Identity Symbol header
+        # Legend merges (B-H layout)
+        f"B{R_LEGEND_START}:H{R_LEGEND_START}",      # Priority header
+        f"B{R_LEGEND_START + 1}:C{R_LEGEND_START + 1}",  # A label
+        f"D{R_LEGEND_START + 1}:E{R_LEGEND_START + 1}",  # B label
+        f"F{R_LEGEND_START + 1}:H{R_LEGEND_START + 1}",  # C label
+        f"B{R_LEGEND_START + 2}:C{R_LEGEND_START + 2}",  # Primary/Owner
+        f"D{R_LEGEND_START + 2}:E{R_LEGEND_START + 2}",  # Primary Helper
+        f"F{R_LEGEND_START + 2}:H{R_LEGEND_START + 2}",  # Secondary Helper
+        f"B{R_LEGEND_START + 3}:H{R_LEGEND_START + 3}",  # Project Identity Symbol header
+        f"B{R_LEGEND_START + 4}:C{R_LEGEND_START + 4}",  # Start
+        f"D{R_LEGEND_START + 4}:E{R_LEGEND_START + 4}",  # In Progress
+        f"F{R_LEGEND_START + 4}:H{R_LEGEND_START + 4}",  # Complete
+        f"B{R_LEGEND_START + 5}:C{R_LEGEND_START + 5}",  # Green
+        f"D{R_LEGEND_START + 5}:E{R_LEGEND_START + 5}",  # Yellow
+        f"F{R_LEGEND_START + 5}:H{R_LEGEND_START + 5}",  # Red
     ]
     # Task title cells H:L per task row
     for i in range(1, task_count + 1):
@@ -1077,11 +1329,11 @@ def _exec_scaffold_oppm_form(
         row_height(R_SUMMARY_START, R_SUMMARY_END, 25),       # summary rows (compact)
         row_height(R_LEGEND_START, R_LEGEND_END, 35),         # legend rows taller
         col_width(1, 6, 22),               # A-F: narrow sub-obj check columns
-        col_width(2, 4, 80),               # B-D: wider for legend readability
         col_width(7, 7, 30),               # G:  identity/task-number column
         col_width(8, 12, 90),              # H-L: task title area
         col_width(13, C_WEEK_END + 1, 25),             # M..L_WEEK_END: weekly timeline columns
         col_width(C_OWNER_START + 1, C_OWNER_END + 1, 35),  # owner columns
+        col_width(2, 8, 120),              # B-H: legend columns wider
     ]
 
     # ── Freeze rows 1-5 ──────────────────────────────────────────────────────
@@ -1123,8 +1375,8 @@ def _exec_scaffold_oppm_form(
     # Summary section: black grid
     requests.append(full_grid(f"A{R_SUMMARY_START}:{LAST_COL_LETTER}{R_SUMMARY_END}"))
     # Legend section: black grid with its own outer border (separate from main form)
-    requests.append(full_grid(f"B{R_LEGEND_START}:D{R_LEGEND_END}"))
-    requests.append(outer_border(f"B{R_LEGEND_START}:D{R_LEGEND_END}"))
+    requests.append(full_grid(f"B{R_LEGEND_START}:H{R_LEGEND_END}"))
+    requests.append(outer_border(f"B{R_LEGEND_START}:H{R_LEGEND_END}"))
     # Outer frame for the main form only (stops at risk end, not legend)
     requests.append(outer_border(f"A1:{LAST_COL_LETTER}{R_RISK_END}"))
 
@@ -1182,17 +1434,29 @@ def _exec_scaffold_oppm_form(
         "textFormat": {"bold": True, "fontSize": 8},
     }, "userEnteredFormat.textRotation,userEnteredFormat.horizontalAlignment,"
        "userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat"))
+    for row, color in risk_row_colors:
+        requests.append(rc(
+            f"I{row}:{L_OWNER_END}{row}",
+            {"backgroundColor": _hex_to_rgb(color)},
+            "userEnteredFormat.backgroundColor",
+        ))
 
     # Legend section: center + bold for headers, center for content
-    requests.append(rc(f"B{R_LEGEND_START}:D{R_LEGEND_START}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
-    requests.append(rc(f"B{R_LEGEND_START + 1}:D{R_LEGEND_START + 1}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
-    requests.append(rc(f"B{R_LEGEND_START + 2}:D{R_LEGEND_START + 2}", CENTER_MIDDLE, CENTER_FIELDS))
-    requests.append(rc(f"B{R_LEGEND_START + 3}:D{R_LEGEND_START + 3}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
-    requests.append(rc(f"B{R_LEGEND_START + 4}:D{R_LEGEND_START + 4}", CENTER_MIDDLE, CENTER_FIELDS))
-    # RAG color backgrounds for legend
-    requests.append(rc(f"B{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#6BCB77")}, "userEnteredFormat.backgroundColor"))
-    requests.append(rc(f"C{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#FFD93D")}, "userEnteredFormat.backgroundColor"))
-    requests.append(rc(f"D{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#FF6B6B")}, "userEnteredFormat.backgroundColor"))
+    requests.append(rc(f"B{R_LEGEND_START}:H{R_LEGEND_START}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 1}:C{R_LEGEND_START + 1}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"D{R_LEGEND_START + 1}:E{R_LEGEND_START + 1}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"F{R_LEGEND_START + 1}:H{R_LEGEND_START + 1}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 2}:C{R_LEGEND_START + 2}", CENTER_MIDDLE, CENTER_FIELDS))
+    requests.append(rc(f"D{R_LEGEND_START + 2}:E{R_LEGEND_START + 2}", CENTER_MIDDLE, CENTER_FIELDS))
+    requests.append(rc(f"F{R_LEGEND_START + 2}:H{R_LEGEND_START + 2}", CENTER_MIDDLE, CENTER_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 3}:H{R_LEGEND_START + 3}", {**CENTER_MIDDLE, **BOLD}, CM_BOLD_FIELDS))
+    requests.append(rc(f"B{R_LEGEND_START + 4}:C{R_LEGEND_START + 4}", CENTER_MIDDLE, CENTER_FIELDS))
+    requests.append(rc(f"D{R_LEGEND_START + 4}:E{R_LEGEND_START + 4}", CENTER_MIDDLE, CENTER_FIELDS))
+    requests.append(rc(f"F{R_LEGEND_START + 4}:H{R_LEGEND_START + 4}", CENTER_MIDDLE, CENTER_FIELDS))
+    # RAG color backgrounds for legend (B-C Green, D-E Yellow, F-H Red)
+    requests.append(rc(f"B{R_LEGEND_START + 5}:C{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#6BCB77")}, "userEnteredFormat.backgroundColor"))
+    requests.append(rc(f"D{R_LEGEND_START + 5}:E{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#FFD93D")}, "userEnteredFormat.backgroundColor"))
+    requests.append(rc(f"F{R_LEGEND_START + 5}:H{R_LEGEND_START + 5}", {"backgroundColor": _hex_to_rgb("#FF6B6B")}, "userEnteredFormat.backgroundColor"))
 
     # ── Fire in 200-request chunks ────────────────────────────────────────────
     CHUNK = 200

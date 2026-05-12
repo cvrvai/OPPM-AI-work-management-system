@@ -13,7 +13,7 @@ Close the gaps between the existing database schema and what the OPPM sheet actu
 | Phase 2: Virtual Members Schema + API | ✅ Completed |
 | Phase 3: Real Sub-Objectives in Scaffold | ✅ Completed |
 | Phase 4: Real Deliverables / Forecasts / Risks in Scaffold | ✅ Completed |
-| Phase 5: Task Owner Grid in Scaffold | 🔄 Not Started |
+| Phase 5: Task Row Symbols + Owner Grid | 🔄 In Progress |
 | Phase 6: Sub-Objective Checkmarks in Scaffold | 🔄 Not Started |
 | Phase 7: End-to-End Integration Test | 🔄 Not Started |
 
@@ -217,6 +217,29 @@ Close the gaps between the existing database schema and what the OPPM sheet actu
 
 ---
 
+## Phase 5: Task Row Symbols + Owner Grid
+**Priority: P1 | Estimated: 3-4 hours | In Progress: May 12, 2026**
+
+### Current Work
+
+#### 1. Backend scaffold render path
+- Updated `get_oppm_scaffold()` to pass task ids, due dates, status, and timeline entries into the scaffold params.
+- Task-row `Project Identity Symbol` cells now render status markers in the live FortuneSheet payload instead of staying blank.
+
+#### 2. Backend — `domains/oppm/sheet_executor/scaffold.py`
+- Added task-row symbol placement logic for the `Project Identity Symbol` band using real timeline entries.
+- Added deadline-based fallback placement so each major-task row can still receive a marker when explicit timeline rows are missing.
+
+### Verification
+- [x] Scaffold generator emits task-row symbols for NHRS in the `Project Identity Symbol` area
+- [x] Live scaffold API returns task-row symbols for NHRS
+- [ ] Owner priority letters still need to be rendered in the owner columns for the same task rows
+
+### Next Steps
+- Complete owner priority rendering in the owner columns for the same task rows
+
+---
+
 ## Phase 4: Real Deliverables / Forecasts / Risks in Scaffold
 **Priority: P1 | Estimated: 3-4 hours | Completed: May 12, 2026**
 
@@ -245,6 +268,9 @@ Close the gaps between the existing database schema and what the OPPM sheet actu
     - `red` → `#FF6B6B` background
     - `amber` → `#FFD93D` background
     - `green` → `#6BCB77` background
+- Follow-up scaffold polish aligned both render paths:
+  - Renamed `Project Completed By` to `Project Identity Symbol`
+  - Replaced generic scaffold defaults with production-style sample content for headers, sub-objectives, and summary rows
 
 #### 3. Frontend — `DeliverableEditor.tsx` (new component)
 - 4 text inputs for item numbers 1-4
