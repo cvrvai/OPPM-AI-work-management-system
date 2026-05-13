@@ -12,6 +12,7 @@ from domains.oppm.repository import (
     SubObjectiveRepository, TaskOwnerRepository,
     DeliverableRepository, ForecastRepository, RiskRepository,
     OPPMHeaderRepository, OPPMTaskItemRepository,
+    ProjectAllMemberRepository,
     _row_to_dict,
 )
 from domains.project.repository import ProjectRepository, ProjectMemberRepository
@@ -236,6 +237,9 @@ async def set_task_sub_objectives(session: AsyncSession, project_id: str, task_i
 
 async def set_task_owner(session: AsyncSession, project_id: str, task_id: str, member_id: str, priority: str, workspace_id: str) -> dict:
     await _verify_project_workspace(session, project_id, workspace_id)
+    all_members = await ProjectAllMemberRepository(session).find_project_all_members(project_id)
+    if not any(str(member.get("id")) == member_id for member in all_members):
+        raise HTTPException(status_code=404, detail="Project member not found")
     repo = TaskOwnerRepository(session)
     return await repo.set_owner(task_id, member_id, priority)
 
@@ -489,16 +493,34 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     weeks = _compute_weeks(start_date, deadline)
 
     # Fetch unified project members (real + virtual) for owner columns
-    from domains.oppm.repository import ProjectAllMemberRepository
     all_member_repo = ProjectAllMemberRepository(session)
     all_members = await all_member_repo.find_project_all_members(project_id)
-    member_names = [m["name"] for m in all_members if m.get("name")]
-    # Ensure at least placeholders if no members
-    if not member_names:
-        member_names = ["Member 1", "Member 2", "Member 3", "Member 4", "Member 5"]
+    leader_member = next((member for member in all_members if member.get("is_leader")), None)
+    ordered_members = []
+    if leader_member is not None:
+        ordered_members.append(leader_member)
+        ordered_members.extend(
+            member for member in all_members
+            if member.get("id") != leader_member.get("id")
+        )
+    else:
+        ordered_members = list(all_members)
+
+    all_member_id_by_workspace_member_id = {
+        str(member.get("member_id")): str(member.get("id"))
+        for member in ordered_members
+        if member.get("source") == "workspace" and member.get("member_id") and member.get("id")
+    }
+    workspace_member_by_user_id = {
+        str(member.get("user_id")): str(member.get("id"))
+        for member in ws_members
+        if member.get("user_id") and member.get("id")
+    }
 
     task_repo = TaskRepository(session)
     project_tasks = await task_repo.find_project_tasks(project_id, limit=1000)
+    task_ids = [str(task.id) for task in project_tasks]
+    owners_by_task = await task_repo.get_owners_for_tasks(task_ids)
     task_count = len(project_tasks)
     tl_repo = TimelineRepository(session)
     timeline_entries = await tl_repo.find_project_timeline(project_id)
@@ -512,6 +534,10 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
             "title": t.title or "",
             "due_date": str(t.due_date) if t.due_date else None,
             "status": t.status,
+            "owners": owners_by_task.get(str(t.id), []),
+            "assignee_member_id": all_member_id_by_workspace_member_id.get(
+                workspace_member_by_user_id.get(str(t.assignee_id), "")
+            ) if t.assignee_id else None,
         })
 
     # Fetch sub-objectives for scaffold labels
@@ -546,7 +572,7 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
             }
             for entry in timeline_entries
         ],
-        "members": member_names,
+        "members": ordered_members,
         "sub_objectives": sub_obj_labels,
         "deliverables": [{"description": d.description, "item_number": d.item_number} for d in deliverables],
         "forecasts": [{"description": f.description, "item_number": f.item_number} for f in forecasts],

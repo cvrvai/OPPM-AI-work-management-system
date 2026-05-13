@@ -55,8 +55,13 @@ def _report_to_dict(report) -> dict:
     }
 
 
-def _task_to_dict(task, depends_on: list[str] | None = None, virtual_assignees: list[dict] | None = None) -> dict:
-    """Convert a Task ORM object to a dict, adding the depends_on and virtual_assignees fields."""
+def _task_to_dict(
+    task,
+    depends_on: list[str] | None = None,
+    virtual_assignees: list[dict] | None = None,
+    owners: list[dict] | None = None,
+) -> dict:
+    """Convert a Task ORM object to a dict, adding related task metadata fields."""
     d = {
         "id": str(task.id),
         "title": task.title,
@@ -77,6 +82,7 @@ def _task_to_dict(task, depends_on: list[str] | None = None, virtual_assignees: 
         "updated_at": task.updated_at.isoformat(),
         "depends_on": depends_on if depends_on is not None else [],
         "virtual_assignees": virtual_assignees if virtual_assignees is not None else [],
+        "owners": owners if owners is not None else [],
     }
     return d
 
@@ -97,7 +103,16 @@ async def list_tasks(
     task_ids = [str(t.id) for t in tasks]
     deps_map = await task_repo.get_dependencies_for_tasks(task_ids)
     vmap = await task_repo.get_virtual_assignees_for_tasks(task_ids)
-    return [_task_to_dict(t, deps_map.get(str(t.id), []), vmap.get(str(t.id), [])) for t in tasks]
+    owners_map = await task_repo.get_owners_for_tasks(task_ids)
+    return [
+        _task_to_dict(
+            t,
+            deps_map.get(str(t.id), []),
+            vmap.get(str(t.id), []),
+            owners_map.get(str(t.id), []),
+        )
+        for t in tasks
+    ]
 
 
 async def get_task(session: AsyncSession, task_id: str, workspace_id: str) -> dict:
@@ -112,7 +127,8 @@ async def get_task(session: AsyncSession, task_id: str, workspace_id: str) -> di
         raise HTTPException(status_code=404, detail="Task not found")
     depends_on = await task_repo.get_dependencies(task_id)
     virtual_assignees = await task_repo.get_virtual_assignees(task_id)
-    return _task_to_dict(task, depends_on, virtual_assignees)
+    owners = await task_repo.get_owners(task_id)
+    return _task_to_dict(task, depends_on, virtual_assignees, owners)
 
 
 async def create_task(session: AsyncSession, data: dict, workspace_id: str, user_id: str, member_id: str | None = None) -> dict:
@@ -138,7 +154,7 @@ async def create_task(session: AsyncSession, data: dict, workspace_id: str, user
     await _recalculate_project_progress(session, str(task.project_id))
     await audit_repo.log(workspace_id, user_id, "create", "task", str(task.id), new_data=audit_data)
     asyncio.create_task(index_task(task, workspace_id))
-    return _task_to_dict(task, depends_on, virtual_assignees)
+    return _task_to_dict(task, depends_on, virtual_assignees, [])
 
 
 async def update_task(session: AsyncSession, task_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
@@ -160,10 +176,11 @@ async def update_task(session: AsyncSession, task_id: str, data: dict, workspace
         await task_repo.set_virtual_assignees(task_id, virtual_assignees)
     else:
         virtual_assignees = await task_repo.get_virtual_assignees(task_id)
+    owners = await task_repo.get_owners(task_id)
     await _recalculate_project_progress(session, str(result.project_id))
     await audit_repo.log(workspace_id, user_id, "update", "task", task_id, new_data=audit_data)
     asyncio.create_task(index_task(result, workspace_id))
-    return _task_to_dict(result, depends_on, virtual_assignees)
+    return _task_to_dict(result, depends_on, virtual_assignees, owners)
 
 
 async def delete_task(session: AsyncSession, task_id: str, workspace_id: str, user_id: str) -> bool:

@@ -13,9 +13,10 @@ from shared.models.oppm import (
     OPPMDeliverable, OPPMForecast, OPPMRisk,
     OPPMTemplate, OPPMHeader, OPPMTaskItem,
     OPPMBorderOverride,
-    OPPMVirtualMember,
+    OPPMProjectAllMember, OPPMVirtualMember,
 )
 from shared.models.task import Task, TaskAssignee, TaskOwner
+from shared.models.user import User
 from shared.models.workspace import WorkspaceMember
 
 
@@ -75,15 +76,28 @@ class ObjectiveRepository(BaseRepository):
             owners_map: dict[str, list[dict]] = {str(tid): [] for tid in task_ids}
             if task_ids:
                 owner_stmt = (
-                    select(TaskOwner.task_id, TaskOwner.member_id, TaskOwner.priority, WorkspaceMember.display_name)
-                    .join(WorkspaceMember, WorkspaceMember.id == TaskOwner.member_id)
+                    select(
+                        TaskOwner.task_id,
+                        TaskOwner.member_id,
+                        TaskOwner.priority,
+                        WorkspaceMember.display_name,
+                        User.full_name,
+                        User.email,
+                        OPPMVirtualMember.name.label("virtual_name"),
+                    )
+                    .join(OPPMProjectAllMember, OPPMProjectAllMember.id == TaskOwner.member_id)
+                    .outerjoin(WorkspaceMember, WorkspaceMember.id == OPPMProjectAllMember.workspace_member_id)
+                    .outerjoin(User, User.id == WorkspaceMember.user_id)
+                    .outerjoin(OPPMVirtualMember, OPPMVirtualMember.id == OPPMProjectAllMember.virtual_member_id)
                     .where(TaskOwner.task_id.in_(task_ids))
                 )
                 owner_result = await self.session.execute(owner_stmt)
                 for row in owner_result.all():
+                    email = row.email or ""
+                    fallback_name = email.split("@")[0] if email else None
                     owners_map[str(row.task_id)].append({
                         "member_id": str(row.member_id),
-                        "display_name": row.display_name,
+                        "display_name": row.display_name or row.full_name or fallback_name or row.virtual_name,
                         "priority": row.priority,
                     })
 
@@ -226,15 +240,31 @@ class TaskOwnerRepository:
 
     async def find_task_owners(self, task_id: str) -> list[dict]:
         stmt = (
-            select(TaskOwner.member_id, TaskOwner.priority, WorkspaceMember.display_name)
-            .join(WorkspaceMember, WorkspaceMember.id == TaskOwner.member_id)
+            select(
+                TaskOwner.member_id,
+                TaskOwner.priority,
+                WorkspaceMember.display_name,
+                User.full_name,
+                User.email,
+                OPPMVirtualMember.name.label("virtual_name"),
+            )
+            .join(OPPMProjectAllMember, OPPMProjectAllMember.id == TaskOwner.member_id)
+            .outerjoin(WorkspaceMember, WorkspaceMember.id == OPPMProjectAllMember.workspace_member_id)
+            .outerjoin(User, User.id == WorkspaceMember.user_id)
+            .outerjoin(OPPMVirtualMember, OPPMVirtualMember.id == OPPMProjectAllMember.virtual_member_id)
             .where(TaskOwner.task_id == task_id)
         )
         result = await self.session.execute(stmt)
-        return [
-            {"member_id": str(r.member_id), "display_name": r.display_name, "priority": r.priority}
-            for r in result.all()
-        ]
+        owners: list[dict] = []
+        for row in result.all():
+            email = row.email or ""
+            fallback_name = email.split("@")[0] if email else None
+            owners.append({
+                "member_id": str(row.member_id),
+                "display_name": row.display_name or row.full_name or fallback_name or row.virtual_name,
+                "priority": row.priority,
+            })
+        return owners
 
 
 # ─── Deliverables ─────────────────────────────────────────────

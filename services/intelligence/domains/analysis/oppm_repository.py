@@ -10,9 +10,10 @@ from shared.models.oppm import (
     OPPMObjective, OPPMSubObjective, TaskSubObjective,
     OPPMTimelineEntry, ProjectCost,
     OPPMDeliverable, OPPMForecast, OPPMRisk,
-    OPPMHeader, OPPMBorderOverride,
+    OPPMHeader, OPPMBorderOverride, OPPMProjectAllMember, OPPMVirtualMember,
 )
 from shared.models.task import Task, TaskAssignee, TaskDependency, TaskOwner
+from shared.models.user import User
 from shared.models.workspace import WorkspaceMember
 
 
@@ -180,8 +181,18 @@ class TaskDetailRepository(BaseRepository):
     async def find_owners(self, project_id: str) -> dict[str, list[dict]]:
         """Return {task_id: [{name, priority}, ...]}."""
         stmt = (
-            select(TaskOwner.task_id, TaskOwner.priority, WorkspaceMember.display_name)
-            .join(WorkspaceMember, WorkspaceMember.id == TaskOwner.member_id)
+            select(
+                TaskOwner.task_id,
+                TaskOwner.priority,
+                WorkspaceMember.display_name,
+                User.full_name,
+                User.email,
+                OPPMVirtualMember.name.label("virtual_name"),
+            )
+            .join(OPPMProjectAllMember, OPPMProjectAllMember.id == TaskOwner.member_id)
+            .outerjoin(WorkspaceMember, WorkspaceMember.id == OPPMProjectAllMember.workspace_member_id)
+            .outerjoin(User, User.id == WorkspaceMember.user_id)
+            .outerjoin(OPPMVirtualMember, OPPMVirtualMember.id == OPPMProjectAllMember.virtual_member_id)
             .join(Task, Task.id == TaskOwner.task_id)
             .where(Task.project_id == project_id)
         )
@@ -189,8 +200,10 @@ class TaskDetailRepository(BaseRepository):
         mapping: dict[str, list[dict]] = {}
         for row in result.all():
             tid = str(row.task_id)
+            email = row.email or ""
+            fallback_name = email.split("@")[0] if email else None
             mapping.setdefault(tid, []).append({
-                "name": row.display_name or "unnamed",
+                "name": row.display_name or row.full_name or fallback_name or row.virtual_name or "unnamed",
                 "priority": row.priority,
             })
         return mapping

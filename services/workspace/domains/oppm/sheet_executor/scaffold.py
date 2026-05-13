@@ -212,6 +212,73 @@ def _scaffold_timeline_marks(
     return marks
 
 
+def _scaffold_owner_slots(members: Any, owner_col_count: int) -> tuple[list[Any], bool]:
+    if not isinstance(members, list) or owner_col_count <= 0:
+        return [], False
+    leader_member = next(
+        (member for member in members if isinstance(member, dict) and member.get("is_leader")),
+        None,
+    )
+    if leader_member is None:
+        return list(members)[:owner_col_count], False
+    ordered_members = [leader_member]
+    ordered_members.extend(member for member in members if member is not leader_member)
+    return ordered_members[:owner_col_count], True
+
+
+def _scaffold_owner_labels(owner_slots: list[Any], owner_col_count: int, has_leader_slot: bool) -> list[str]:
+    labels: list[str] = []
+    for slot_index in range(owner_col_count):
+        if has_leader_slot and slot_index == 0:
+            labels.append("Project Leader")
+            continue
+        member = owner_slots[slot_index] if slot_index < len(owner_slots) else None
+        fallback_index = slot_index - 1 if has_leader_slot else slot_index
+        labels.append(_scaffold_member_name(member, fallback_index))
+    return labels
+
+
+def _scaffold_owner_column_map(owner_slots: list[Any], owner_start_col: int) -> dict[str, int]:
+    column_map: dict[str, int] = {}
+    for slot_index, member in enumerate(owner_slots):
+        if not isinstance(member, dict):
+            continue
+        member_id = str(member.get("id") or "")
+        if not member_id:
+            continue
+        column_map[member_id] = owner_start_col + slot_index
+    return column_map
+
+
+def _scaffold_owner_marks(
+    tasks: list[Any],
+    owner_slots: list[Any],
+    owner_start_col: int,
+) -> list[tuple[int, int, str]]:
+    column_map = _scaffold_owner_column_map(owner_slots, owner_start_col)
+    marks: list[tuple[int, int, str]] = []
+    for task_index, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        row = 7 + task_index
+        explicit_owners = [owner for owner in (task.get("owners") or []) if isinstance(owner, dict)]
+        if explicit_owners:
+            for owner in explicit_owners:
+                member_id = str(owner.get("member_id") or "")
+                priority = str(owner.get("priority") or "").upper()
+                col_index = column_map.get(member_id)
+                if col_index is None or priority not in {"A", "B", "C"}:
+                    continue
+                marks.append((row, col_index, priority))
+            continue
+        assignee_member_id = str(task.get("assignee_member_id") or "")
+        fallback_col_index = column_map.get(assignee_member_id)
+        if fallback_col_index is None:
+            continue
+        marks.append((row, fallback_col_index, "A"))
+    return marks
+
+
 def _build_scaffold_actions(params: dict) -> list[dict]:
     """Build the deterministic action list for a full OPPM form scaffold.
 
@@ -287,6 +354,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Scale up/down based on actual data; minimum 4 columns as fallback
     week_col_count = max(4, len(weeks_data)) if weeks_data and isinstance(weeks_data, list) else 4
     owner_col_count = max(4, len(members)) if members and isinstance(members, list) else 4
+    owner_slots, has_leader_slot = _scaffold_owner_slots(members, owner_col_count)
 
     # Column indices (0-based) for dynamic ranges
     COL_OFFSET = 1                              # leave 1 empty column on left
@@ -347,6 +415,11 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
         col_letter = _col_index_to_letters(C_WEEK_START + week_index)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{row}", "value": symbol}})
 
+    # ── 3c. Owner / Priority letters in task rows ──
+    for row, col_index, priority in _scaffold_owner_marks(tasks, owner_slots, C_OWNER_START):
+        col_letter = _col_index_to_letters(col_index)
+        a.append({"action": "set_value", "params": {"range": f"{col_letter}{row}", "value": priority}})
+
     # ── 4. Bottom matrix content ──
     # 4a. Sub-objective numbers 1..6 in the matrix header row B:G (row 42)
     for col_idx in range(2, 8):
@@ -396,12 +469,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
 
     # 5d. Owner-name rotated headers in AD:AI (6 owner columns) — on matrix header row
     # Use real member names if available
-    owner_labels = ["Project Leader"]
-    for i in range(owner_col_count - 1):
-        if i < len(members):
-            owner_labels.append(_scaffold_member_name(members[i], i))
-        else:
-            owner_labels.append(_scaffold_member_name(None, i))
+    owner_labels = _scaffold_owner_labels(owner_slots, owner_col_count, has_leader_slot)
     for col_idx, label in enumerate(owner_labels):
         col_letter = _col_index_to_letters(C_OWNER_START + col_idx)
         a.append({"action": "set_value", "params": {"range": f"{col_letter}{R_MATRIX_HEADER}", "value": label}})

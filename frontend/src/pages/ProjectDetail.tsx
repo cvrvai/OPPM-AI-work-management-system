@@ -12,6 +12,8 @@ import {
   listSubObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmSubObjectivesGet,
   listMembersApiV1WorkspacesWorkspaceIdMembersGet,
   listAllMembersRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmAllMembersGet,
+  setTaskOwnerRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmTasksTaskIdOwnersPut,
+  removeTaskOwnerRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmTasksTaskIdOwnersMemberIdDelete,
   setTaskSubObjectivesRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmTasksTaskIdSubObjectivesPut,
 } from '@/generated/workspace-api/sdk.gen'
 import type { TaskCreate, TaskUpdate } from '@/generated/workspace-api/types.gen'
@@ -59,6 +61,27 @@ import { TableView } from './project-detail/TableView'
 import { TaskForm } from './project-detail/TaskForm'
 import { PRIORITY_COLORS, PRIORITY_BORDER, STATUS_ACCENT, STATUS_LABEL, STATUS_BADGE, STATUS_ICONS, NEXT_STATUS } from './project-detail/constants'
 
+
+type OppmOwnerAssignment = { member_id: string; priority: 'A' | 'B' | 'C' }
+
+function normalizeOwnerAssignments(value: unknown): OppmOwnerAssignment[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const nextAssignments = value
+    .filter((item): item is { member_id?: unknown; priority?: unknown } => !!item && typeof item === 'object')
+    .map((item) => ({
+      member_id: String(item.member_id || ''),
+      priority: String(item.priority || '').toUpperCase(),
+    }))
+    .filter((item): item is OppmOwnerAssignment => !!item.member_id && (item.priority === 'A' || item.priority === 'B' || item.priority === 'C'))
+
+  const byPriority = new Map<OppmOwnerAssignment['priority'], OppmOwnerAssignment>()
+  for (const assignment of nextAssignments) {
+    byPriority.set(assignment.priority, assignment)
+  }
+  return Array.from(byPriority.values()).sort((left, right) => left.priority.localeCompare(right.priority))
+}
 
 
 // -- Main component --
@@ -149,11 +172,48 @@ export function ProjectDetail() {
     placeholderData: (previousData) => previousData,
   })
 
+  const syncTaskOwners = async (
+    taskId: string,
+    nextAssignments: OppmOwnerAssignment[],
+    previousOwners: Task['owners'] = [],
+  ) => {
+    const nextMemberIds = new Set(nextAssignments.map((assignment) => assignment.member_id))
+    const previousMemberIds = new Set((previousOwners ?? []).map((owner) => owner.member_id))
+
+    await Promise.all(
+      (previousOwners ?? [])
+        .filter((owner) => !nextMemberIds.has(owner.member_id))
+        .map((owner) =>
+          removeTaskOwnerRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmTasksTaskIdOwnersMemberIdDelete({
+            client: workspaceClient,
+            path: { workspace_id: ws!.id, project_id: id!, task_id: taskId, member_id: owner.member_id },
+          }),
+        ),
+    )
+
+    await Promise.all(
+      nextAssignments.map((assignment) =>
+        setTaskOwnerRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdOppmTasksTaskIdOwnersPut({
+          client: workspaceClient,
+          path: { workspace_id: ws!.id, project_id: id!, task_id: taskId },
+          body: assignment,
+        }),
+      ),
+    )
+
+    const orphanedMemberIds = Array.from(previousMemberIds).filter((memberId) => !nextMemberIds.has(memberId))
+    if (orphanedMemberIds.length === 0) {
+      return
+    }
+  }
+
   const createTask = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
       const subObjIds = data.sub_objective_ids as string[] | undefined
-      const { sub_objective_ids: _removed, ...rest } = data
+      const ownerAssignments = normalizeOwnerAssignments((data as { oppm_owner_assignments?: unknown }).oppm_owner_assignments)
+      const { sub_objective_ids: _removed, oppm_owner_assignments: _ownerAssignments, ...rest } = data
       void _removed
+      void _ownerAssignments
       const payload = { ...rest, project_id: id } as unknown as TaskCreate
       const res = await createTaskRouteApiV1WorkspacesWorkspaceIdTasksPost({
         client: workspaceClient,
@@ -168,23 +228,34 @@ export function ProjectDetail() {
           body: { sub_objective_ids: subObjIds },
         })
       }
+      if (ownerAssignments.length > 0 && task?.id) {
+        await syncTaskOwners(task.id, ownerAssignments, [])
+      }
       return task
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', id] })
       queryClient.invalidateQueries({ queryKey: ['project', id] })
       queryClient.invalidateQueries({ queryKey: ['oppm-objectives', id] })
+      queryClient.invalidateQueries({ queryKey: ['oppm-scaffold', id, ws?.id] })
       setShowCreate(false)
     },
   })
 
   const updateTask = useMutation({
-    mutationFn: ({ taskId, data }: { taskId: string; data: Record<string, unknown> }) =>
-      updateTaskRouteApiV1WorkspacesWorkspaceIdTasksTaskIdPut({
+    mutationFn: async ({ taskId, data }: { taskId: string; data: Record<string, unknown> }) => {
+      const ownerAssignments = normalizeOwnerAssignments((data as { oppm_owner_assignments?: unknown }).oppm_owner_assignments)
+      const previousOwners = taskList.find((task) => task.id === taskId)?.owners ?? []
+      const { oppm_owner_assignments: _ownerAssignments, ...rest } = data
+      void _ownerAssignments
+      const response = await updateTaskRouteApiV1WorkspacesWorkspaceIdTasksTaskIdPut({
         client: workspaceClient,
         path: { workspace_id: ws!.id, task_id: taskId },
-        body: data as unknown as TaskUpdate,
-      }).then((res) => res.data),
+        body: rest as unknown as TaskUpdate,
+      }).then((res) => res.data)
+      await syncTaskOwners(taskId, ownerAssignments, previousOwners)
+      return response
+    },
     onMutate: async ({ taskId, data }) => {
       await queryClient.cancelQueries({ queryKey: ['tasks', id] })
       const previous = optimisticUpdateInList<Task>(queryClient, ['tasks', id], {
@@ -199,6 +270,7 @@ export function ProjectDetail() {
     onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks', id] })
       queryClient.invalidateQueries({ queryKey: ['project', id] })
+      queryClient.invalidateQueries({ queryKey: ['oppm-scaffold', id, ws?.id] })
       // Also update the task in any project list caches
       if (variables.data && typeof variables.data === 'object') {
         updateEntityInCache(queryClient, { id: variables.taskId, ...variables.data } as Task, [['projects']])

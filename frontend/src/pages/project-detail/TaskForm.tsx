@@ -12,6 +12,7 @@ import type { TaskReportCreate, TaskReportApprove } from '@/generated/workspace-
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { Task, TaskReport, OPPMObjective, OPPMSubObjective, WorkspaceMember, Priority, TaskStatus } from '@/types'
 import { cn } from '@/lib/utils'
+import { TaskOwnerEditor, type TaskOwnerAssignment } from '@/components/features/TaskOwnerEditor'
 import {
   Loader2,
   Plus,
@@ -150,6 +151,20 @@ export function TaskForm({
   const [dependsOn, setDependsOn] = useState<string[]>(initial?.depends_on ?? [])
   const [subObjIds, setSubObjIds] = useState<string[]>((initial as unknown as Record<string, unknown>)?.sub_objective_ids as string[] ?? [])
   const [virtualAssignees, setVirtualAssignees] = useState<string[]>(initial?.virtual_assignees?.map((v) => v.virtual_member_id) ?? [])
+  const [ownerAssignments, setOwnerAssignments] = useState<TaskOwnerAssignment[]>(
+    (initial?.owners ?? [])
+      .filter((owner): owner is TaskOwnerAssignment => owner.priority === 'A' || owner.priority === 'B' || owner.priority === 'C')
+      .map((owner) => ({ member_id: owner.member_id, priority: owner.priority })),
+  )
+
+  const workspaceMemberById = new Map(members.map((member) => [member.id, member]))
+  const workspaceMemberByUserId = new Map(members.map((member) => [member.user_id, member]))
+  const projectAllMemberById = new Map(allMembers.map((member) => [member.id, member]))
+  const projectAllMemberByWorkspaceMemberId = new Map(
+    allMembers
+      .filter((member) => member.source === 'workspace')
+      .map((member) => [member.member_id, member]),
+  )
 
   const toggleDependency = (taskId: string) => {
     setDependsOn((prev) => prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId])
@@ -163,6 +178,23 @@ export function TaskForm({
     setVirtualAssignees((prev) => prev.includes(vmId) ? prev.filter((id) => id !== vmId) : [...prev, vmId])
   }
 
+  const handleOwnerAssignmentsChange = (nextAssignments: TaskOwnerAssignment[]) => {
+    setOwnerAssignments(nextAssignments)
+    const primaryOwner = nextAssignments.find((assignment) => assignment.priority === 'A')
+    if (!primaryOwner) {
+      return
+    }
+    const projectAllMember = projectAllMemberById.get(primaryOwner.member_id)
+    if (!projectAllMember || projectAllMember.source !== 'workspace') {
+      return
+    }
+    const workspaceMember = workspaceMemberById.get(projectAllMember.member_id)
+    if (!workspaceMember) {
+      return
+    }
+    setForm((current) => ({ ...current, assignee_id: workspaceMember.user_id }))
+  }
+
   const availableObjectives = [
     ...objectives,
     ...createdObjectives.filter((created) => !objectives.some((objective) => objective.id === created.id)),
@@ -171,7 +203,13 @@ export function TaskForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim()) return
-    const data: Record<string, unknown> = { ...form, depends_on: dependsOn, sub_objective_ids: subObjIds, virtual_assignees: virtualAssignees }
+    const data: Record<string, unknown> = {
+      ...form,
+      depends_on: dependsOn,
+      sub_objective_ids: subObjIds,
+      virtual_assignees: virtualAssignees,
+      oppm_owner_assignments: ownerAssignments,
+    }
     if (!data.start_date) delete data.start_date
     if (!data.due_date) delete data.due_date
     if (!data.oppm_objective_id) delete data.oppm_objective_id
@@ -489,7 +527,26 @@ export function TaskForm({
                   <label className={fieldLabelClass}>Owner</label>
                   {members.length > 0 ? (
                     <>
-                      <select value={form.assignee_id} onChange={(e) => setForm((f) => ({ ...f, assignee_id: e.target.value }))} className={selectClass}>
+                      <select
+                        value={form.assignee_id}
+                        onChange={(e) => {
+                          const userId = e.target.value
+                          setForm((f) => ({ ...f, assignee_id: userId }))
+                          const workspaceMember = workspaceMemberByUserId.get(userId)
+                          const projectAllMember = workspaceMember
+                            ? projectAllMemberByWorkspaceMemberId.get(workspaceMember.id)
+                            : undefined
+                          const hasPrimaryOwner = ownerAssignments.some((assignment) => assignment.priority === 'A')
+                          if (!workspaceMember || !projectAllMember || !hasPrimaryOwner) {
+                            return
+                          }
+                          handleOwnerAssignmentsChange([
+                            ...ownerAssignments.filter((assignment) => assignment.priority !== 'A' && assignment.member_id !== projectAllMember.id),
+                            { member_id: projectAllMember.id, priority: 'A' },
+                          ])
+                        }}
+                        className={selectClass}
+                      >
                         <option value="">Unassigned</option>
                         {members.map((m) => (
                           <option key={m.id} value={m.user_id}>
@@ -499,6 +556,18 @@ export function TaskForm({
                         ))}
                       </select>
                       <p className="mt-2 text-xs text-text-secondary">{selectedOwner ? `Primary owner: ${selectedOwner.display_name || selectedOwner.email || 'Assigned member'}.` : 'Assign an owner to keep accountability clear.'}</p>
+                      <div className="mt-3">
+                        <TaskOwnerEditor
+                          members={allMembers}
+                          assignments={ownerAssignments}
+                          onChange={handleOwnerAssignmentsChange}
+                        />
+                      </div>
+                      <p className="mt-2 text-xs text-text-secondary">
+                        {initial
+                          ? 'A/B/C ownership is saved with this task update and refreshes the OPPM owner grid.'
+                          : 'A/B/C ownership will be saved right after the task is created.'}
+                      </p>
                     </>
                   ) : (
                     <p className="rounded-xl border border-dashed border-gray-200 px-4 py-3 text-sm italic text-text-secondary">No workspace members found.</p>

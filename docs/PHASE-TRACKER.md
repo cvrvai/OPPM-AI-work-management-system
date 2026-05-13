@@ -225,18 +225,31 @@ Close the gaps between the existing database schema and what the OPPM sheet actu
 #### 1. Backend scaffold render path
 - Updated `get_oppm_scaffold()` to pass task ids, due dates, status, and timeline entries into the scaffold params.
 - Task-row `Project Identity Symbol` cells now render status markers in the live FortuneSheet payload instead of staying blank.
+- Added task-owner hydration to task payloads and scaffold params so saved A/B/C assignments can flow from the database into both the task API and the OPPM scaffold.
 
 #### 2. Backend — `domains/oppm/sheet_executor/scaffold.py`
 - Added task-row symbol placement logic for the `Project Identity Symbol` band using real timeline entries.
 - Added deadline-based fallback placement so each major-task row can still receive a marker when explicit timeline rows are missing.
+- Added dynamic owner-column mapping and owner-letter rendering so A/B/C marks now land in the correct member columns instead of fixed legacy columns.
+
+#### 3. Frontend — task owner assignment flow
+- Added a dedicated A/B/C owner editor in the task form for workspace-backed project members.
+- Wired create and update task flows to persist owner assignments through the existing OPPM task-owner routes.
+- Added task and scaffold query invalidation so owner updates refresh the Project Detail task list and OPPM view immediately after save.
 
 ### Verification
 - [x] Scaffold generator emits task-row symbols for NHRS in the `Project Identity Symbol` area
 - [x] Live scaffold API returns task-row symbols for NHRS
-- [ ] Owner priority letters still need to be rendered in the owner columns for the same task rows
+- [x] Backend Python syntax passes `py_compile` for the modified task and scaffold files
+- [x] Frontend production build passes (`frontend: npm run build`)
+- [ ] Targeted `services/workspace/tests/test_google_sheets_mapping.py` remains blocked by unrelated pre-existing Google Sheets test-double and credential fixture failures
+- [x] Code now stores task owners against unified `oppm_project_all_members` ids so virtual members can participate in the owner grid
+- [x] Live database migration `009-task-owner-all-members.sql` applied successfully to the local PostgreSQL instance
+- [x] NHRS now has persisted primary owner rows for all 39 task rows, and the scaffold emits 39 `A` markers across rows 7-45
+- [ ] NHRS secondary owner letters (`B` / `C`) still need an explicit mapping for Lyhour / Parinha / Sothea before live data can be seeded safely
 
 ### Next Steps
-- Complete owner priority rendering in the owner columns for the same task rows
+- Confirm the desired `B` / `C` mapping for NHRS virtual members, then seed those owner rows through the task-owner API
 
 ---
 

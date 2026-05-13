@@ -4,8 +4,11 @@ from sqlalchemy import select, delete, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.workspace.base_repository import BaseRepository
-from shared.models.task import Task, TaskReport, TaskDependency, TaskVirtualAssignee
+from shared.models.oppm import OPPMProjectAllMember, OPPMVirtualMember
+from shared.models.task import Task, TaskReport, TaskDependency, TaskVirtualAssignee, TaskOwner
 from shared.models.project import Project
+from shared.models.user import User
+from shared.models.workspace import WorkspaceMember
 
 
 class TaskRepository(BaseRepository):
@@ -145,6 +148,50 @@ class TaskRepository(BaseRepository):
                 "virtual_member_id": str(row.virtual_member_id),
                 "assigned_at": row.assigned_at.isoformat() if row.assigned_at else None,
             })
+        return out
+
+    # ── OPPM owners ───────────────────────────────────────────────────────
+
+    async def get_owners(self, task_id: str) -> list[dict]:
+        """Return ordered A/B/C owner records for a task."""
+        owners_by_task = await self.get_owners_for_tasks([task_id])
+        return owners_by_task.get(task_id, [])
+
+    async def get_owners_for_tasks(self, task_ids: list[str]) -> dict[str, list[dict]]:
+        """Return {task_id: [owner_dict, ...]} for multiple tasks."""
+        if not task_ids:
+            return {}
+        stmt = (
+            select(
+                TaskOwner.task_id,
+                TaskOwner.member_id,
+                TaskOwner.priority,
+                OPPMProjectAllMember.workspace_member_id,
+                OPPMProjectAllMember.virtual_member_id,
+                WorkspaceMember.display_name,
+                User.full_name,
+                User.email,
+                OPPMVirtualMember.name.label('virtual_name'),
+            )
+            .join(OPPMProjectAllMember, OPPMProjectAllMember.id == TaskOwner.member_id)
+            .outerjoin(WorkspaceMember, WorkspaceMember.id == OPPMProjectAllMember.workspace_member_id)
+            .outerjoin(User, User.id == WorkspaceMember.user_id)
+            .outerjoin(OPPMVirtualMember, OPPMVirtualMember.id == OPPMProjectAllMember.virtual_member_id)
+            .where(TaskOwner.task_id.in_(task_ids))
+        )
+        result = await self.session.execute(stmt)
+        out: dict[str, list[dict]] = {tid: [] for tid in task_ids}
+        priority_order = {"A": 0, "B": 1, "C": 2}
+        for row in result.all():
+            email = row.email or ""
+            fallback_name = email.split("@")[0] if email else None
+            out[str(row.task_id)].append({
+                "member_id": str(row.member_id),
+                "display_name": row.display_name or row.full_name or fallback_name or row.virtual_name,
+                "priority": row.priority,
+            })
+        for owners in out.values():
+            owners.sort(key=lambda owner: priority_order.get(str(owner.get("priority") or "").upper(), 99))
         return out
 
 

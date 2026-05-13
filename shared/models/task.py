@@ -97,7 +97,7 @@ class TaskOwner(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspace_members.id", ondelete="CASCADE"), nullable=False, index=True)
+    member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_project_all_members.id", ondelete="CASCADE"), nullable=False, index=True)
     priority: Mapped[str] = mapped_column(String(1), nullable=False)
 
     __table_args__ = (
