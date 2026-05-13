@@ -11,4 +11,6 @@ COPY . .
 
 EXPOSE 5173
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Run vite directly so API_PROXY_BASE from docker-compose env is respected
+# (npm run dev overrides it with cross-env API_PROXY_BASE=)
+CMD ["npx", "vite", "--host", "0.0.0.0"]

@@ -7,14 +7,14 @@ COPY shared/ /shared/
 RUN pip install --no-cache-dir /shared
 
 # Install service dependencies
-COPY services/ai/requirements.txt .
+COPY services/intelligence/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # PYTHONPATH allows 'import shared' to resolve /shared/ at runtime
 ENV PYTHONPATH=/
 
 # Copy service code
-COPY services/ai/ .
+COPY services/intelligence/ .
 
 EXPOSE 8001
 

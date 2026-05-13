@@ -7,14 +7,14 @@ COPY shared/ /shared/
 RUN pip install --no-cache-dir /shared
 
 # Install service dependencies
-COPY services/core/requirements.txt .
+COPY services/workspace/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # PYTHONPATH allows 'import shared' to resolve /shared/ at runtime
 ENV PYTHONPATH=/
 
 # Copy service code
-COPY services/core/ .
+COPY services/workspace/ .
 
 EXPOSE 8000
 

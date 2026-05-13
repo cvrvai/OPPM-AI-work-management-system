@@ -16,7 +16,9 @@ services:
     volumes:
       - ./shared:/shared
       - ./services/workspace:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    # --reload disabled in Docker to prevent watchfiles CPU burn;
+    # restart container after code changes, or run locally with start.ps1 for hot reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
 
@@ -24,7 +26,8 @@ services:
     volumes:
       - ./shared:/shared
       - ./services/intelligence:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    # --reload disabled in Docker to prevent watchfiles CPU burn
+    command: uvicorn main:app --host 0.0.0.0 --port 8001
     ports:
       - "8001:8001"
 
