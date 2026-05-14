@@ -3,10 +3,14 @@ Authentication and workspace authorization middleware.
 Validates JWT tokens locally via python-jose HS256 and checks workspace membership.
 """
 
+import hashlib
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass
+import bcrypt
+import httpx
 from fastapi import Depends, Header, HTTPException, Request, status, Path
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
@@ -14,11 +18,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.config import get_settings
 from shared.database import get_session
+from shared.models.user import User
 from shared.models.workspace import WorkspaceMember
 from shared.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
+_SUPABASE_TOKEN_CACHE_TTL = 60
+_SUPABASE_PROVIDER = "supabase"
+_supabase_token_cache: dict[str, tuple[dict, float]] = {}
 
 
 # ── Auth ──
@@ -32,9 +40,221 @@ class CurrentUser:
     role: str = "authenticated"
 
 
+def _decode_local_access_token(token: str, settings) -> CurrentUser:
+    payload = jwt.decode(
+        token,
+        settings.jwt_secret_key,
+        algorithms=[settings.jwt_algorithm],
+    )
+    user_id: str | None = payload.get("sub")
+    email: str | None = payload.get("email")
+    if not user_id:
+        raise JWTError("Missing sub claim")
+
+    return CurrentUser(
+        id=user_id,
+        email=email or "",
+        role=payload.get("role", "authenticated"),
+    )
+
+
+def _is_supabase_auth_enabled(settings) -> bool:
+    return bool(settings.supabase_url and (settings.supabase_anon_key or settings.supabase_service_role_key))
+
+
+def _build_supabase_token_cache_key(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _build_external_password_placeholder() -> str:
+    random_secret = secrets.token_urlsafe(32)
+    return bcrypt.hashpw(random_secret.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+async def _find_user_by_external_subject(session: AsyncSession, provider: str, external_subject: str) -> User | None:
+    if not external_subject:
+        return None
+
+    result = await session.execute(
+        select(User)
+        .where(
+            User.auth_provider == provider,
+            User.external_subject == external_subject,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _fetch_supabase_identity(token: str, settings) -> dict:
+    cache_key = _build_supabase_token_cache_key(token)
+    now = time.time()
+    cached = _supabase_token_cache.get(cache_key)
+    if cached and now < cached[1]:
+        return cached[0]
+
+    api_key = settings.supabase_service_role_key or settings.supabase_anon_key
+    if not api_key:
+        raise JWTError("Supabase auth bridge is missing an API key")
+
+    userinfo_url = f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
+    try:
+        async with httpx.AsyncClient(timeout=settings.supabase_auth_timeout_seconds) as client:
+            response = await client.get(
+                userinfo_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "apikey": api_key,
+                },
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("Supabase auth lookup failed: %s", exc)
+        raise JWTError("Supabase auth lookup failed") from exc
+
+    if response.status_code != status.HTTP_200_OK:
+        raise JWTError("Invalid or expired Supabase token")
+
+    payload = response.json()
+    email = payload.get("email")
+    if not isinstance(email, str) or not email:
+        raise JWTError("Supabase token did not include an email")
+
+    user_metadata = payload.get("user_metadata") or {}
+    full_name_value = user_metadata.get("full_name") or user_metadata.get("name")
+    avatar_url_value = user_metadata.get("avatar_url")
+    identity = {
+        "provider": _SUPABASE_PROVIDER,
+        "external_subject": payload.get("id") or payload.get("sub") or "",
+        "external_id": payload.get("id") or payload.get("sub") or "",
+        "email": email.lower(),
+        "full_name": full_name_value if isinstance(full_name_value, str) and full_name_value else None,
+        "avatar_url": avatar_url_value if isinstance(avatar_url_value, str) and avatar_url_value else None,
+    }
+    _supabase_token_cache[cache_key] = (identity, now + _SUPABASE_TOKEN_CACHE_TTL)
+    return identity
+
+
+async def _ensure_supabase_bridge_membership(session: AsyncSession, user: User, identity: dict, settings) -> None:
+    if not settings.supabase_bridge_workspace_id:
+        return
+
+    result = await session.execute(
+        select(WorkspaceMember.id)
+        .where(
+            WorkspaceMember.workspace_id == settings.supabase_bridge_workspace_id,
+            WorkspaceMember.user_id == user.id,
+        )
+        .limit(1)
+    )
+    if result.first():
+        return
+
+    session.add(
+        WorkspaceMember(
+            workspace_id=settings.supabase_bridge_workspace_id,
+            user_id=user.id,
+            role=settings.supabase_bridge_role,
+            display_name=identity.get("full_name"),
+            avatar_url=identity.get("avatar_url"),
+        )
+    )
+    await session.flush()
+
+
+def _apply_supabase_identity_to_user(user: User, identity: dict) -> None:
+    if identity.get("full_name") and not user.full_name:
+        user.full_name = identity["full_name"]
+    if identity.get("avatar_url") and not user.avatar_url:
+        user.avatar_url = identity["avatar_url"]
+
+    external_subject = identity.get("external_subject") or identity.get("external_id") or ""
+    if external_subject and user.external_subject != external_subject:
+        user.external_subject = external_subject
+    if user.auth_provider != _SUPABASE_PROVIDER:
+        user.auth_provider = _SUPABASE_PROVIDER
+
+
+async def _get_or_provision_supabase_user(session: AsyncSession, identity: dict, settings) -> User:
+    external_subject = identity.get("external_subject") or identity.get("external_id") or ""
+    user = await _find_user_by_external_subject(session, _SUPABASE_PROVIDER, external_subject)
+
+    if not user:
+        result = await session.execute(select(User).where(User.email == identity["email"]).limit(1))
+        user = result.scalar_one_or_none()
+
+    if not user:
+        if not settings.supabase_auto_provision_users:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Supabase account is not linked to an OPPM user",
+            )
+
+        user = User(
+            email=identity["email"],
+            hashed_password=_build_external_password_placeholder(),
+            auth_provider=_SUPABASE_PROVIDER,
+            external_subject=external_subject or None,
+            full_name=identity.get("full_name"),
+            is_active=True,
+            is_verified=True,
+            avatar_url=identity.get("avatar_url"),
+        )
+        session.add(user)
+        await session.flush()
+    else:
+        _apply_supabase_identity_to_user(user, identity)
+
+    return user
+
+
+async def _resolve_supabase_current_user(session: AsyncSession, identity: dict, settings) -> CurrentUser:
+    user = await _get_or_provision_supabase_user(session, identity, settings)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is disabled",
+        )
+
+    await _ensure_supabase_bridge_membership(session, user, identity, settings)
+    await session.flush()
+
+    return CurrentUser(id=str(user.id), email=user.email, role="authenticated")
+
+
+async def resolve_supabase_user_from_token(session: AsyncSession, token: str, settings=None) -> User:
+    settings = settings or get_settings()
+    if not _is_supabase_auth_enabled(settings):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase auth bridge is not configured",
+        )
+
+    try:
+        identity = await _fetch_supabase_identity(token, settings)
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    user = await _get_or_provision_supabase_user(session, identity, settings)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is disabled",
+        )
+
+    await _ensure_supabase_bridge_membership(session, user, identity, settings)
+    await session.flush()
+    return user
+
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    session: AsyncSession = Depends(get_session),
 ) -> CurrentUser:
     """
     Validates JWT locally using HS256.
@@ -58,22 +278,19 @@ async def get_current_user(
 
     settings = get_settings()
     try:
-        payload = jwt.decode(
-            token,
-            settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
-        )
-        user_id: str | None = payload.get("sub")
-        email: str | None = payload.get("email")
-        if not user_id:
-            raise JWTError("Missing sub claim")
-        return CurrentUser(
-            id=user_id,
-            email=email or "",
-            role=payload.get("role", "authenticated"),
-        )
-    except JWTError as e:
-        logger.warning("Token validation failed: %s", e)
+        return _decode_local_access_token(token, settings)
+    except JWTError as local_error:
+        if _is_supabase_auth_enabled(settings):
+            try:
+                identity = await _fetch_supabase_identity(token, settings)
+                return await _resolve_supabase_current_user(session, identity, settings)
+            except HTTPException:
+                raise
+            except JWTError as supabase_error:
+                logger.warning("Token validation failed: local=%s supabase=%s", local_error, supabase_error)
+        else:
+            logger.warning("Token validation failed: %s", local_error)
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -84,6 +301,7 @@ async def get_current_user(
 async def get_optional_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    session: AsyncSession = Depends(get_session),
 ) -> CurrentUser | None:
     """
     Optional auth — returns None instead of raising 401.
@@ -92,7 +310,7 @@ async def get_optional_user(
     if not credentials:
         return None
     try:
-        return await get_current_user(request, credentials)
+        return await get_current_user(request, credentials, session)
     except HTTPException:
         return None
 

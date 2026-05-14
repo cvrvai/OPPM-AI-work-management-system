@@ -409,6 +409,67 @@ async def list_my_invites(session: AsyncSession, user_email: str) -> list[dict]:
     return result
 
 
+async def sync_members_to_workspace(session: AsyncSession, workspace_id: str, members_data: list[dict]) -> list[dict]:
+    """Upsert Supabase team members into workspace_members by email lookup.
+
+    For each entry: find the OPPM user by email, then create a workspace_member
+    row if one does not already exist.  Members whose email is not yet in the
+    OPPM users table (they haven't logged in yet) are returned with synced=False.
+    """
+    member_repo = WorkspaceMemberRepository(session)
+    results = []
+
+    for item in members_data:
+        email = (item.get("email") or "").strip().lower()
+        if not email:
+            continue
+
+        display_name = item.get("display_name") or None
+        role = item.get("role") or "member"
+
+        # Look up user by email in the OPPM users table
+        user_result = await session.execute(select(User).where(User.email == email).limit(1))
+        user = user_result.scalar_one_or_none()
+
+        if not user:
+            # Auto-create a stub user record so Supabase-sourced members can be
+            # added to workspaces/projects/tasks even before they ever log in
+            # to OPPM. They cannot authenticate locally (placeholder password);
+            # if they log in via Supabase SSO, the OPPM auth flow should match
+            # them by email or by (auth_provider, external_subject).
+            user = User(
+                email=email,
+                hashed_password="!supabase-stub",  # disabled local password
+                auth_provider="supabase",
+                full_name=display_name,
+                is_active=True,
+                is_verified=False,
+            )
+            session.add(user)
+            await session.flush()  # populate user.id
+
+        # Already a workspace member?
+        existing = await member_repo.find_by_user_and_workspace(str(user.id), workspace_id)
+        if existing:
+            wm_id = str(existing.id) if hasattr(existing, "id") else str(existing["id"])
+            results.append({"email": email, "workspace_member_id": wm_id, "synced": True, "reason": "already_member"})
+            continue
+
+        # Add to workspace — normalize role to a valid workspace role value
+        _VALID_ROLES = {"owner", "admin", "member", "viewer"}
+        ws_role = role if role in _VALID_ROLES else "member"
+        new_member = await member_repo.create({
+            "workspace_id": workspace_id,
+            "user_id": str(user.id),
+            "role": ws_role,
+            "display_name": display_name or user.full_name,
+            "avatar_url": user.avatar_url,
+        })
+        results.append({"email": email, "workspace_member_id": str(new_member.id), "synced": True, "reason": "added"})
+
+    return results
+
+
 async def decline_invite(session: AsyncSession, invite_id: str, user_email: str) -> None:
     """Decline (delete) a pending invite. User may only decline their own invites."""
     invite_repo = WorkspaceInviteRepository(session)

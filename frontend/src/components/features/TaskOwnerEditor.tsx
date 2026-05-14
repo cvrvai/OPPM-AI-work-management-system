@@ -48,12 +48,12 @@ export function TaskOwnerEditor({ members, assignments, onChange }: TaskOwnerEdi
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-surface-alt/40 p-3.5">
+    <div className="space-y-2.5 rounded-xl border border-border bg-surface-alt/40 p-3">
       {PRIORITY_ROWS.map((row) => {
         const selectedMemberId = selectedByPriority.get(row.priority) ?? ''
         return (
-          <div key={row.priority} className="grid grid-cols-1 gap-2 rounded-xl border border-border bg-white p-3 sm:grid-cols-[auto,1fr] sm:items-center">
-            <div className="space-y-1 sm:w-36">
+          <div key={row.priority} className="grid grid-cols-1 gap-2 rounded-xl border border-border bg-white p-2.5 sm:grid-cols-[auto,1fr] sm:items-center">
+            <div className="space-y-1 sm:w-32">
               <span className={cn(
                 'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.12em]',
                 row.priority === 'A' ? 'bg-emerald-100 text-emerald-700' : row.priority === 'B' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700',
@@ -66,7 +66,7 @@ export function TaskOwnerEditor({ members, assignments, onChange }: TaskOwnerEdi
             <select
               value={selectedMemberId}
               onChange={(event) => handlePriorityChange(row.priority, event.target.value)}
-              className="w-full rounded-xl border border-border bg-white px-4 py-3 text-sm text-text outline-none transition-colors focus:border-primary focus:ring-4 focus:ring-primary/10"
+              className="w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm text-text outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/10"
             >
               <option value="">None</option>
               {members.map((member) => {

@@ -67,3 +67,13 @@ class InvitePreviewResponse(BaseModel):
 class MemberSkillCreate(BaseModel):
     skill_name: str = Field(min_length=1, max_length=100)
     skill_level: Literal['beginner', 'intermediate', 'expert']
+
+
+class MemberSyncItem(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    display_name: Optional[str] = None
+    role: str = "member"
+
+
+class SyncMembersRequest(BaseModel):
+    members: list[MemberSyncItem]

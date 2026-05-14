@@ -1,6 +1,6 @@
 # API Reference
 
-Last updated: 2026-04-09
+Last updated: 2026-05-13
 
 ## Purpose
 
@@ -176,11 +176,11 @@ The response contract now includes these fields:
 |---|---|---|---|---|
 | `GET` | `/api/v1/workspaces/{workspace_id}/projects` | Yes | Member | Query params: `page`, `page_size`, optional `status`. Returns `{ items, total }`. |
 | `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}` | Yes | Member | Returns one project. |
-| `POST` | `/api/v1/workspaces/{workspace_id}/projects` | Yes | Write | Creates a project and automatically adds the creator's workspace membership as project `lead`. |
-| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}` | Yes | Write | Updates project metadata. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects` | Yes | Write | Creates a project, validates schedule chronology, and honors `lead_id` when provided. The creator still remains on the project membership set. |
+| `PUT` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}` | Yes | Write | Updates project metadata and validates merged schedule chronology plus workspace-scoped lead ownership. |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}` | Yes | Write | Deletes the project. |
 | `GET` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/members` | Yes | Member | Lists project members joined with workspace member info. |
-| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/members` | Yes | Write | Adds a project member. See contract note below. |
+| `POST` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/members` | Yes | Write | Adds a project member. Values must belong to the same workspace. Adding a `lead` updates `projects.lead_id` and a second lead is rejected. See contract note below. |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}/projects/{project_id}/members/{member_id}` | Yes | Write | Removes a project member. Path parameter is the stored `project_members.member_id` value. |
 
 ### Project Fields Used In The Current Product
@@ -191,6 +191,8 @@ Important fields on create and update:
 - `description`
 - `project_code`
 - `objective_summary`
+- `deliverable_output`
+- `methodology`
 - `priority`
 - `status`
 - `budget`
@@ -199,6 +201,11 @@ Important fields on create and update:
 - `deadline`
 - `end_date`
 - `lead_id`
+
+Additional contract notes:
+
+- `lead_id` must be a `workspace_members.id` value, not a `users.id` value.
+- Invalid date order is rejected when `start_date > deadline`, `deadline > end_date`, or `start_date > end_date`.
 
 ### Contract Note: Project Member Add Payload
 
@@ -216,6 +223,7 @@ Current implementation detail:
 - the field is named `user_id`
 - the frontend project wizard actually uses `workspace_member.id`
 - the backend forwards that value into `project_members.member_id`
+- the public default role is now `contributor`; lead assignment is better handled through `lead_id` during create or update
 
 Treat this field as a workspace member identifier, even though the public field name says `user_id`.
 
@@ -241,6 +249,7 @@ Treat this field as a workspace member identifier, even though the public field 
   "description": "...",
   "project_id": "uuid",
   "priority": "high",
+  "project_contribution": 25,
   "oppm_objective_id": "uuid",
   "assignee_id": "uuid",
   "parent_task_id": "uuid",
@@ -253,6 +262,7 @@ Treat this field as a workspace member identifier, even though the public field 
 
 - active task statuses are `todo`, `in_progress`, `completed`
 - the live product uses `tasks.assignee_id` for single-owner assignment
+- create and update payloads accept `project_contribution` for weighted project progress roll-up
 - `parent_task_id` creates a main-task / sub-task hierarchy (OPPM style)
   - tasks with `parent_task_id = null` are **main tasks**
   - tasks with `parent_task_id = <uuid>` are **sub-tasks** nested under the parent

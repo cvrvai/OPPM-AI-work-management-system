@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from shared.auth import CurrentUser, get_current_user, WorkspaceContext, get_workspace_context, require_admin, require_owner
+from shared.auth import CurrentUser, get_current_user, WorkspaceContext, get_workspace_context, require_admin, require_owner, require_write
 from shared.database import get_session
-from domains.workspace.schemas import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept, DisplayNameUpdate, MemberSkillCreate
+from domains.workspace.schemas import WorkspaceCreate, WorkspaceUpdate, MemberUpdate, InviteCreate, InviteAccept, DisplayNameUpdate, MemberSkillCreate, SyncMembersRequest
 from shared.schemas.common import SuccessResponse
 from domains.workspace.service import (
     create_workspace,
@@ -28,6 +28,7 @@ from domains.workspace.service import (
     delete_member_skill,
     list_my_invites,
     decline_invite,
+    sync_members_to_workspace,
 )
 
 router = APIRouter()
@@ -110,6 +111,16 @@ async def revoke_invite_route(invite_id: str, ws: WorkspaceContext = Depends(req
 @router.post("/workspaces/{workspace_id}/invites/{invite_id}/resend", status_code=200)
 async def resend_invite_route(invite_id: str, ws: WorkspaceContext = Depends(require_admin), session: AsyncSession = Depends(get_session)):
     return await resend_invite(session, ws.workspace_id, invite_id, ws.user.id)
+
+
+@router.post("/workspaces/{workspace_id}/members/sync")
+async def sync_members_route(data: SyncMembersRequest, ws: WorkspaceContext = Depends(require_write), session: AsyncSession = Depends(get_session)):
+    """Upsert Supabase members into the OPPM workspace_members table by email.
+    Returns per-member sync status including the resolved workspace_member_id.
+    Allowed for any workspace writer (owner/admin/member) — this only adds users
+    by email and is idempotent.
+    """
+    return await sync_members_to_workspace(session, ws.workspace_id, [m.model_dump() for m in data.members])
 
 
 @router.get("/workspaces/{workspace_id}/members/lookup")

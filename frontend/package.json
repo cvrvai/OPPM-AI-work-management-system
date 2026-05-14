@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "cross-env API_PROXY_BASE= vite",
+    "dev": "cross-env API_PROXY_BASE=http://127.0.0.1:80 vite --port 5174",
     "dev:docker": "cross-env API_PROXY_BASE=http://127.0.0.1:80 vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

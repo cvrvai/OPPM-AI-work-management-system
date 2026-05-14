@@ -34,6 +34,31 @@ class ProjectRepository(BaseRepository):
 class ProjectMemberRepository(BaseRepository):
     model = ProjectMember
 
+    async def find_project_member(self, project_id: str, member_id: str) -> ProjectMember | None:
+        stmt = (
+            select(ProjectMember)
+            .where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.member_id == member_id,
+            )
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def find_lead_member(self, project_id: str) -> ProjectMember | None:
+        stmt = (
+            select(ProjectMember)
+            .where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.role == "lead",
+            )
+            .order_by(ProjectMember.joined_at.asc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def find_project_members(self, project_id: str) -> list[dict]:
         stmt = (
             select(ProjectMember, WorkspaceMember)

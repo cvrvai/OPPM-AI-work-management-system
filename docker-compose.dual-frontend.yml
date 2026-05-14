@@ -1,0 +1,32 @@
+# Dual-Frontend Development Compose Override
+# Usage: docker compose -f docker-compose.microservices.yml -f docker-compose.dual-frontend.yml up -d
+#
+# This adds the One-utilities-PM frontend as a static mount under /one/
+# and serves it through the shared gateway.
+
+services:
+  gateway:
+    volumes:
+      # Mount the built One-utilities-PM frontend dist folder
+      # The nginx config serves this at /one/ via the alias directive
+      - ../One-utilities-PM/frontend/dist:/usr/share/nginx/html/one:ro
+    # Override the default gateway config to use dual-frontend nginx.conf
+    # Note: The Dockerfile.dual copies nginx-dual-frontend.conf to /etc/nginx/nginx.conf
+    # For dev, we can just mount the config file directly:
+    # - ./gateway/nginx-dual-frontend.conf:/etc/nginx/nginx.conf:ro
+
+  # Optional: One-utilities-PM dev server (for hot-reload development)
+  # Uncomment this if you want to run the One frontend in dev mode
+  # and proxy through the gateway instead of serving static files.
+  # one-frontend-dev:
+  #   image: node:20-alpine
+  #   working_dir: /app
+  #   volumes:
+  #     - ../../One-utilities-PM/frontend:/app
+  #   command: sh -c "npm install && npm run dev -- --host"
+  #   environment:
+  #     - VITE_PLATFORM_GATEWAY_URL=http://localhost:80
+  #   ports:
+  #     - "5175:5173"
+  #   networks:
+  #     - default

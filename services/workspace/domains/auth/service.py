@@ -13,6 +13,7 @@ from jose import jwt
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.auth import resolve_supabase_user_from_token
 from shared.config import get_settings
 from shared.models.user import User, RefreshToken
 from shared.redis_client import get_redis
@@ -49,6 +50,20 @@ def _create_refresh_token() -> str:
     return secrets.token_urlsafe(64)
 
 
+def _build_auth_response(user: User, access_token: str, refresh_token: str) -> dict:
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": get_settings().access_token_expire_minutes * 60,
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+        },
+    }
+
+
 async def register(session: AsyncSession, email: str, password: str, full_name: str | None = None) -> dict:
     """Register a new user."""
     result = await session.execute(select(User).where(User.email == email).limit(1))
@@ -75,17 +90,7 @@ async def register(session: AsyncSession, email: str, password: str, full_name: 
     session.add(refresh)
     await session.commit()
 
-    return {
-        "access_token": access_token,
-        "refresh_token": raw_refresh,
-        "token_type": "bearer",
-        "expires_in": get_settings().access_token_expire_minutes * 60,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "full_name": user.full_name,
-        },
-    }
+    return _build_auth_response(user, access_token, raw_refresh)
 
 
 async def login(session: AsyncSession, email: str, password: str) -> dict:
@@ -109,17 +114,7 @@ async def login(session: AsyncSession, email: str, password: str) -> dict:
     session.add(refresh)
     await session.commit()
 
-    return {
-        "access_token": access_token,
-        "refresh_token": raw_refresh,
-        "token_type": "bearer",
-        "expires_in": get_settings().access_token_expire_minutes * 60,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "full_name": user.full_name,
-        },
-    }
+    return _build_auth_response(user, access_token, raw_refresh)
 
 
 async def refresh_tokens(session: AsyncSession, raw_refresh_token: str) -> dict:
@@ -156,17 +151,24 @@ async def refresh_tokens(session: AsyncSession, raw_refresh_token: str) -> dict:
     session.add(new_refresh)
     await session.commit()
 
-    return {
-        "access_token": access_token,
-        "refresh_token": new_raw_refresh,
-        "token_type": "bearer",
-        "expires_in": get_settings().access_token_expire_minutes * 60,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "full_name": user.full_name,
-        },
-    }
+    return _build_auth_response(user, access_token, new_raw_refresh)
+
+
+async def exchange_external_token(session: AsyncSession, external_token: str) -> dict:
+    """Exchange a valid external bearer token for local OPPM access + refresh tokens."""
+    user = await resolve_supabase_user_from_token(session, external_token)
+
+    access_token = _create_access_token(user)
+    raw_refresh = _create_refresh_token()
+    refresh = RefreshToken(
+        user_id=user.id,
+        token_hash=_hash_token(raw_refresh),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=get_settings().refresh_token_expire_days),
+    )
+    session.add(refresh)
+    await session.commit()
+
+    return _build_auth_response(user, access_token, raw_refresh)
 
 
 async def signout(session: AsyncSession, user_id: str, access_token: str) -> None:

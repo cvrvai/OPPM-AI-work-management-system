@@ -495,6 +495,37 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     # Fetch unified project members (real + virtual) for owner columns
     all_member_repo = ProjectAllMemberRepository(session)
     all_members = await all_member_repo.find_project_all_members(project_id)
+
+    # Fallback: oppm_project_all_members is OPPM-specific and isn't populated by
+    # the standard Edit Project flow. If empty, build the list from the regular
+    # project_members table so the owner columns show real teammates instead of
+    # the scaffold's placeholder names.
+    if not all_members:
+        project_member_repo = ProjectMemberRepository(session)
+        project_members = await project_member_repo.find_project_members(project_id)
+        lead_workspace_member_id = str(project.lead_id) if project.lead_id else None
+        synthetic = []
+        for idx, pm in enumerate(project_members):
+            wm = pm.get("workspace_members") or {}
+            ws_member_id = wm.get("id")
+            ws_match = next((m for m in ws_members if str(m.get("id")) == str(ws_member_id)), None) or {}
+            email = ws_match.get("email") or ""
+            display_name = (
+                wm.get("display_name")
+                or ws_match.get("display_name")
+                or (email.split("@")[0] if email else None)
+                or "Member"
+            )
+            synthetic.append({
+                "id": str(ws_member_id),
+                "member_id": str(ws_member_id),
+                "source": "workspace",
+                "name": display_name,
+                "display_order": idx,
+                "is_leader": str(ws_member_id) == lead_workspace_member_id,
+            })
+        all_members = synthetic
+
     leader_member = next((member for member in all_members if member.get("is_leader")), None)
     ordered_members = []
     if leader_member is not None:

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { workspaceClient } from '@/lib/api/workspaceClient'
 import {
   listProjectsRouteApiV1WorkspacesWorkspaceIdProjectsGet,
@@ -12,7 +12,9 @@ import {
   deleteProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdDelete,
 } from '@/generated/workspace-api/sdk.gen'
 import type { ProjectCreate, ProjectUpdate } from '@/generated/workspace-api/types.gen'
+import { ApiError } from '@/lib/api/client'
 import { updateEntityInCache } from '@/lib/utils/queryNormalizer'
+import { useAuthStore } from '@/stores/authStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -39,10 +41,10 @@ interface CreateProjectPayload {
   description: string
   project_code: string | null
   objective_summary: string | null
+  deliverable_output: string | null
   priority: Priority
   methodology: Methodology
   status: Project['status']
-  progress: number
   start_date: string | null
   deadline: string | null
   end_date: string | null
@@ -56,6 +58,7 @@ interface UpdateProjectPayload {
   description: string
   project_code: string | null
   objective_summary: string | null
+  deliverable_output: string | null
   status: Project['status']
   priority: Priority
   start_date: string | null
@@ -64,6 +67,7 @@ interface UpdateProjectPayload {
   budget: number
   planning_hours: number
   lead_id: string | null
+  methodology: Methodology
 }
 
 export function Projects() {
@@ -73,11 +77,27 @@ export function Projects() {
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
   const [optimisticDeletingId, setOptimisticDeletingId] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const ws = useWorkspaceStore((s) => s.currentWorkspace)
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null)
   useChatContext('workspace')
   const openChat = useChatStore((s) => s.open)
   const addChatMessage = useChatStore((s) => s.addMessage)
+
+  const getProjectDestination = (project: Project) => {
+    switch (project.methodology) {
+      case 'oppm':
+        return `/projects/${project.id}/oppm`
+      case 'agile':
+        return `/projects/${project.id}/agile`
+      case 'waterfall':
+        return `/projects/${project.id}/waterfall`
+      case 'hybrid':
+      default:
+        return `/projects/${project.id}`
+    }
+  }
 
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ['projects', ws?.id],
@@ -113,45 +133,77 @@ export function Projects() {
         path: { workspace_id: ws!.id },
         body: data as unknown as ProjectCreate,
       })
+      if (res.error) {
+        throw new ApiError(
+          res.response?.status ?? 500,
+          (res.error as { detail?: string })?.detail || 'Failed to create project'
+        )
+      }
+
       const project = res.data as Project
+      const assignmentErrors: string[] = []
+
       if (memberAssignments.length > 0) {
-        await Promise.allSettled(
-          memberAssignments.map(({ userId, role }) =>
-            addProjectMemberRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdMembersPost({
+        const results = await Promise.all(
+          memberAssignments.map(async ({ userId, role }) => {
+            const memberRes = await addProjectMemberRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdMembersPost({
               client: workspaceClient,
               path: { workspace_id: ws!.id, project_id: project.id },
               body: { user_id: userId, role },
             })
-          )
+            if (memberRes.error) {
+              assignmentErrors.push(
+                (memberRes.error as { detail?: string })?.detail || `Failed to assign role ${role}`
+              )
+            }
+          })
         )
+        void results
       }
-      return project
+
+      return { project, assignmentErrors }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    onSuccess: ({ project, assignmentErrors }) => {
+      queryClient.invalidateQueries({ queryKey: ['projects', ws?.id] })
+      queryClient.invalidateQueries({ queryKey: ['project', project.id, ws?.id] })
       setShowCreate(false)
+      createMutation.reset()
       addToast('Project created successfully', 'success')
+      if (assignmentErrors.length > 0) {
+        addToast(`Project created, but ${assignmentErrors.length} team assignment${assignmentErrors.length === 1 ? '' : 's'} failed.`, 'error')
+      }
+      navigate(getProjectDestination(project))
     },
-    onError: () => {
-      addToast('Failed to create project. Please try again.', 'error')
+    onError: (error) => {
+      addToast(error instanceof Error ? error.message : 'Failed to create project. Please try again.', 'error')
     },
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdateProjectPayload }) =>
-      updateProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPut({
+    mutationFn: async ({ id, data }: { id: string; data: UpdateProjectPayload }) => {
+      const res = await updateProjectRouteApiV1WorkspacesWorkspaceIdProjectsProjectIdPut({
         client: workspaceClient,
         path: { workspace_id: ws!.id, project_id: id },
         body: data as unknown as ProjectUpdate,
-      }).then((res) => res.data as Project),
+      })
+      if (res.error) {
+        throw new ApiError(
+          res.response?.status ?? 500,
+          (res.error as { detail?: string })?.detail || 'Failed to update project'
+        )
+      }
+      return res.data as Project
+    },
     onSuccess: (updatedProject) => {
       updateEntityInCache(queryClient, updatedProject, [['projects']])
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project', updatedProject.id, ws?.id] })
       setEditingProject(null)
+      updateMutation.reset()
       addToast('Project updated successfully', 'success')
     },
-    onError: () => {
-      addToast('Failed to update project. Please try again.', 'error')
+    onError: (error) => {
+      addToast(error instanceof Error ? error.message : 'Failed to update project. Please try again.', 'error')
     },
   })
 
@@ -203,6 +255,7 @@ export function Projects() {
         </div>
         <button
           onClick={() => {
+            createMutation.reset()
             setShowCreate(true)
             openChat()
             addChatMessage({
@@ -328,6 +381,7 @@ export function Projects() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
+                      updateMutation.reset()
                       setEditingProject(project)
                       setMenuOpen(null)
                     }}
@@ -357,9 +411,14 @@ export function Projects() {
       {showCreate && (
         <CreateProjectModal
           members={members}
-          onClose={() => setShowCreate(false)}
+          currentUserId={currentUserId}
+          onClose={() => {
+            createMutation.reset()
+            setShowCreate(false)
+          }}
           onSubmit={(data, memberAssignments) => createMutation.mutate({ data, memberAssignments })}
           loading={createMutation.isPending}
+          error={createMutation.error instanceof Error ? createMutation.error.message : null}
         />
       )}
 
@@ -368,9 +427,13 @@ export function Projects() {
         <EditProjectModal
           project={editingProject}
           members={members}
-          onClose={() => setEditingProject(null)}
+          onClose={() => {
+            updateMutation.reset()
+            setEditingProject(null)
+          }}
           onSubmit={(data) => updateMutation.mutate({ id: editingProject.id, data })}
           loading={updateMutation.isPending}
+          error={updateMutation.error instanceof Error ? updateMutation.error.message : null}
         />
       )}
 
@@ -386,6 +449,3 @@ export function Projects() {
     </div>
   )
 }
-
-const PROJECT_ROLES = ['lead', 'contributor', 'reviewer', 'observer'] as const
-type ProjectRole = typeof PROJECT_ROLES[number]

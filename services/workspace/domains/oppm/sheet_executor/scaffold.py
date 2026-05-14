@@ -92,21 +92,16 @@ def _scaffold_task_name(task: Any, index: int) -> str:
 
 
 def _scaffold_member_name(member: Any, index: int) -> str:
-    fallback = (
-        _SCAFFOLD_DEFAULT_MEMBER_NAMES[index]
-        if index < len(_SCAFFOLD_DEFAULT_MEMBER_NAMES)
-        else f"Team Member {index + 1}"
-    )
     if isinstance(member, dict):
         return str(
             member.get("name")
             or member.get("full_name")
             or member.get("display_name")
-            or fallback
+            or ""
         )
     if member:
         return str(member)
-    return fallback
+    return ""
 
 
 def _scaffold_description(item: Any, fallback: str) -> str:
@@ -229,11 +224,8 @@ def _scaffold_owner_slots(members: Any, owner_col_count: int) -> tuple[list[Any]
 def _scaffold_owner_labels(owner_slots: list[Any], owner_col_count: int, has_leader_slot: bool) -> list[str]:
     labels: list[str] = []
     for slot_index in range(owner_col_count):
-        if has_leader_slot and slot_index == 0:
-            labels.append("Project Leader")
-            continue
         member = owner_slots[slot_index] if slot_index < len(owner_slots) else None
-        fallback_index = slot_index - 1 if has_leader_slot else slot_index
+        fallback_index = max(0, slot_index - 1 if has_leader_slot else slot_index)
         labels.append(_scaffold_member_name(member, fallback_index))
     return labels
 

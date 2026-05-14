@@ -62,7 +62,7 @@ async def list_project_members(project_id: str, ws: WorkspaceContext = Depends(g
 
 @router.post("/workspaces/{workspace_id}/projects/{project_id}/members", status_code=201)
 async def add_project_member_route(project_id: str, data: ProjectMemberAdd, ws: WorkspaceContext = Depends(require_write), session: AsyncSession = Depends(get_session)):
-    return await add_project_member(session, project_id, data.user_id, data.role)
+    return await add_project_member(session, project_id, ws.workspace_id, data.user_id, data.role)
 
 
 @router.delete("/workspaces/{workspace_id}/projects/{project_id}/members/{member_id}")

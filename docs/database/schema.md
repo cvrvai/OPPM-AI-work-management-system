@@ -1,6 +1,6 @@
 # Database Schema Reference
 
-Last updated: 2026-05-01
+Last updated: 2026-05-13
 
 ## Purpose
 
@@ -177,12 +177,14 @@ Top-level project record, workspace-scoped.
 | `progress` | `INTEGER` | NO | `0` | CHECK: 0–100 |
 | `project_code` | `VARCHAR(50)` | YES | | Short project identifier |
 | `objective_summary` | `TEXT` | YES | | Strategic summary |
+| `deliverable_output` | `TEXT` | YES | | Intended project output or deliverable |
 | `budget` | `NUMERIC(14,2)` | NO | `0` | |
 | `planning_hours` | `NUMERIC(10,2)` | NO | `0` | |
 | `start_date` | `DATE` | YES | | |
 | `deadline` | `DATE` | YES | | |
 | `end_date` | `DATE` | YES | | |
 | `lead_id` | `UUID` | YES | | FK → `workspace_members(id)` SET NULL |
+| `methodology` | `VARCHAR(20)` | NO | `'oppm'` | CHECK: `agile`, `waterfall`, `hybrid`, `oppm` |
 | `metadata` | `JSONB` | YES | `{}` | Flexible metadata |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | Auto-updates |
@@ -191,6 +193,7 @@ Top-level project record, workspace-scoped.
 - `ck_projects_status` — status IN ('planning', 'in_progress', 'completed', 'on_hold', 'cancelled')
 - `ck_projects_priority` — priority IN ('low', 'medium', 'high', 'critical')
 - `ck_projects_progress` — progress >= 0 AND progress <= 100
+- `ck_projects_methodology` — methodology IN ('agile', 'waterfall', 'hybrid', 'oppm')
 
 **Indexes:** `workspace_id`
 

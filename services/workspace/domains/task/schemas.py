@@ -27,6 +27,7 @@ class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None
     priority: Optional[Priority] = None
     progress: Optional[int] = Field(None, ge=0, le=100)
+    project_contribution: Optional[int] = Field(None, ge=0, le=100)
     start_date: Optional[str] = None
     due_date: Optional[str] = None
     oppm_objective_id: Optional[str] = None

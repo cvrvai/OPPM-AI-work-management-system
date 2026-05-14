@@ -31,6 +31,15 @@ class SharedSettings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:5173"
 
+    # Optional Supabase auth bridge
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_role_key: str = ""
+    supabase_auto_provision_users: bool = False
+    supabase_bridge_workspace_id: str = ""
+    supabase_bridge_role: str = "member"
+    supabase_auth_timeout_seconds: float = 5.0
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

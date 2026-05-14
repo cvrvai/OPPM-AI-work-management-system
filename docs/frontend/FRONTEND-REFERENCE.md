@@ -155,7 +155,7 @@ Current pages:
 - `Projects.tsx`
   Project list, project creation wizard, and project edit/delete actions.
 - `ProjectDetail.tsx`
-  Per-project task board/list/Gantt, task CRUD with main-task/sub-task hierarchy, task reports, summary cards. Create Task form includes a task-type toggle (Main Task vs Sub-Task), parent task selector, and a quick-start guide explaining OPPM task structure. Table view renders tasks hierarchically with visual indentation for sub-tasks.
+  Per-project task board/list/Gantt, task CRUD with main-task/sub-task hierarchy, task reports, summary cards. Create Task form includes a compact task-type toggle, parent task selector, inline objective creation, A/B/C owner assignment, and early OPPM alignment fields for objective, owner, due date, and contribution. Table view renders tasks hierarchically with visual indentation for sub-tasks.
 - `OPPMView.tsx`
   Project-scoped linked Google Sheet view for OPPM. Loads saved Google Sheet link state, supports save/unlink/push actions, prefers backend FortuneSheet render when credentials exist, and falls back to live browser preview mode when backend render is unavailable.
 - `Team.tsx`
@@ -358,9 +358,10 @@ Tasks support a parent/sub-task hierarchy via `parent_task_id`:
 - **Main tasks** have `parent_task_id = null` — these are top-level deliverables
 - **Sub-tasks** have `parent_task_id` referencing a main task
 - The Create Task form provides:
-  - A **task-type toggle** (Main Task / Sub-Task) at the top for quick selection
+  - A compact **task-type toggle** (Main Task / Sub-Task) at the top for quick selection
+  - Early OPPM alignment inputs for **Objective**, **Owner**, **Due Date**, and **Contribution**
   - A **Parent Task** dropdown in the Ownership section
-  - A **quick-start guide** explaining the OPPM hierarchy workflow for new users
+  - Inline **objective creation**, **A/B/C owner assignment**, **dependencies**, and **sub-objective** selection
 - The table view renders tasks hierarchically with `└` indentation for sub-tasks
 - The board (Kanban) view renders all tasks flat grouped by status
 

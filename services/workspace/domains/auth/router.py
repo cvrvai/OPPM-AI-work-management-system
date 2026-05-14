@@ -5,12 +5,13 @@ Tokens returned in JSON body — frontend stores in localStorage.
 
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.auth import get_current_user, CurrentUser
+from shared.auth import CurrentUser, get_current_user, security
 from shared.database import get_session
-from domains.auth.service import register, login, refresh_tokens, signout, update_profile
+from domains.auth.service import exchange_external_token, login, refresh_tokens, register, signout, update_profile
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -53,6 +54,21 @@ async def signup_route(body: SignUpRequest, session: AsyncSession = Depends(get_
 async def refresh_route(body: RefreshRequest, session: AsyncSession = Depends(get_session)):
     """Exchange a refresh token for new access + refresh tokens."""
     return await refresh_tokens(session, body.refresh_token)
+
+
+@router.post("/exchange")
+async def exchange_route(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    session: AsyncSession = Depends(get_session),
+):
+    """Exchange a valid external bearer token for local OPPM platform tokens."""
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await exchange_external_token(session, credentials.credentials)
 
 
 @router.post("/signout")

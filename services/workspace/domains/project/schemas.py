@@ -48,4 +48,4 @@ class ProjectUpdate(BaseModel):
 
 class ProjectMemberAdd(BaseModel):
     user_id: str
-    role: str = "member"
+    role: str = "contributor"
