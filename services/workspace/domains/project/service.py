@@ -3,6 +3,7 @@
 import logging
 from datetime import date
 from fastapi import HTTPException
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from domains.project.repository import ProjectRepository, ProjectMemberRepository
 from domains.notification.repository import AuditRepository
@@ -79,6 +80,56 @@ async def get_project(session: AsyncSession, project_id: str, workspace_id: str)
     return project
 
 
+async def _sync_oppm_all_member(
+    session: AsyncSession,
+    project_id: str,
+    workspace_member_id: str,
+    is_leader: bool,
+) -> None:
+    """Ensure an oppm_project_all_members row exists for this workspace member.
+
+    TaskOwner.member_id FKs to oppm_project_all_members.id, so without this
+    bridge row a workspace member cannot be assigned A/B/C priority on tasks.
+    Also enforces a single is_leader=True per project.
+    """
+    from domains.oppm.repository import ProjectAllMemberRepository
+    from shared.models.oppm import OPPMProjectAllMember
+
+    repo = ProjectAllMemberRepository(session)
+    existing_stmt = (
+        select(OPPMProjectAllMember)
+        .where(
+            OPPMProjectAllMember.project_id == project_id,
+            OPPMProjectAllMember.workspace_member_id == workspace_member_id,
+        )
+        .limit(1)
+    )
+    result = await session.execute(existing_stmt)
+    existing = result.scalar_one_or_none()
+
+    if is_leader:
+        # Demote any current leader before promoting this one.
+        await session.execute(
+            update(OPPMProjectAllMember)
+            .where(
+                OPPMProjectAllMember.project_id == project_id,
+                OPPMProjectAllMember.is_leader.is_(True),
+            )
+            .values(is_leader=False)
+        )
+
+    if existing is None:
+        await repo.add_workspace_member(
+            project_id=project_id,
+            workspace_member_id=workspace_member_id,
+            display_order=0 if is_leader else 1,
+            is_leader=is_leader,
+        )
+    elif existing.is_leader != is_leader:
+        existing.is_leader = is_leader
+        await session.flush()
+
+
 async def create_project(session: AsyncSession, workspace_id: str, user_id: str, data: dict, member_id: str) -> dict:
     project_repo = ProjectRepository(session)
     project_member_repo = ProjectMemberRepository(session)
@@ -98,8 +149,10 @@ async def create_project(session: AsyncSession, workspace_id: str, user_id: str,
     project = await project_repo.create(data)
 
     await project_member_repo.add_member(str(project.id), lead_member_id, role="lead")
+    await _sync_oppm_all_member(session, str(project.id), lead_member_id, is_leader=True)
     if lead_member_id != member_id:
         await project_member_repo.add_member(str(project.id), member_id, role="contributor")
+        await _sync_oppm_all_member(session, str(project.id), member_id, is_leader=False)
 
     await audit_repo.log(workspace_id, user_id, "create", "project", str(project.id), new_data=_audit_safe(data))
     return project
@@ -169,6 +222,7 @@ async def add_project_member(
             raise HTTPException(status_code=400, detail="Project already has a lead")
 
     project_member = await project_member_repo.add_member(project_id, member_id, role)
+    await _sync_oppm_all_member(session, project_id, member_id, is_leader=(role == "lead"))
     if role == "lead":
         await project_repo.update(project_id, {"lead_id": member_id})
     return project_member

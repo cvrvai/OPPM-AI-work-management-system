@@ -157,6 +157,23 @@ class TaskRepository(BaseRepository):
         owners_by_task = await self.get_owners_for_tasks([task_id])
         return owners_by_task.get(task_id, [])
 
+    async def set_owners(self, task_id: str, owners: list[dict]) -> None:
+        """Replace all A/B/C owners for a task.
+
+        Each owner dict must have `member_id` (referring to
+        oppm_project_all_members.id) and `priority` ('A'|'B'|'C').
+        """
+        await self.session.execute(
+            delete(TaskOwner).where(TaskOwner.task_id == task_id)
+        )
+        if owners:
+            rows = [
+                {"task_id": task_id, "member_id": o["member_id"], "priority": o["priority"]}
+                for o in owners
+            ]
+            await self.session.execute(insert(TaskOwner), rows)
+        await self.session.flush()
+
     async def get_owners_for_tasks(self, task_ids: list[str]) -> dict[str, list[dict]]:
         """Return {task_id: [owner_dict, ...]} for multiple tasks."""
         if not task_ids:
@@ -187,6 +204,7 @@ class TaskRepository(BaseRepository):
             fallback_name = email.split("@")[0] if email else None
             out[str(row.task_id)].append({
                 "member_id": str(row.member_id),
+                "workspace_member_id": str(row.workspace_member_id) if row.workspace_member_id else None,
                 "display_name": row.display_name or row.full_name or fallback_name or row.virtual_name,
                 "priority": row.priority,
             })

@@ -7,12 +7,15 @@ import logging
 from datetime import date
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.task.repository import TaskRepository, TaskReportRepository
 from domains.project.repository import ProjectRepository
 from domains.notification.repository import AuditRepository
 from domains.workspace.document_indexer import index_task, remove_entity
+from domains.project.service import _sync_oppm_all_member
+from shared.models.oppm import OPPMProjectAllMember
 logger = logging.getLogger(__name__)
 
 
@@ -131,6 +134,44 @@ async def get_task(session: AsyncSession, task_id: str, workspace_id: str) -> di
     return _task_to_dict(task, depends_on, virtual_assignees, owners)
 
 
+async def _resolve_owners_to_all_member_ids(
+    session: AsyncSession,
+    project_id: str,
+    owners_input: list[dict],
+) -> list[dict]:
+    """Translate frontend owner payload (workspace_member_id) into the form
+    `task_owners` expects (oppm_project_all_members.id).
+
+    Auto-creates an oppm_project_all_members row for any workspace member who
+    doesn't have one yet, so newly invited teammates can be assigned A/B/C
+    without a separate provisioning step.
+    """
+    if not owners_input:
+        return []
+    resolved: list[dict] = []
+    for entry in owners_input:
+        ws_member_id = str(entry.get("member_id") or "").strip()
+        priority = str(entry.get("priority") or "").upper()
+        if not ws_member_id or priority not in {"A", "B", "C"}:
+            continue
+        # Find or create the bridge row.
+        stmt = (
+            select(OPPMProjectAllMember)
+            .where(
+                OPPMProjectAllMember.project_id == project_id,
+                OPPMProjectAllMember.workspace_member_id == ws_member_id,
+            )
+            .limit(1)
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            await _sync_oppm_all_member(session, project_id, ws_member_id, is_leader=False)
+            row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is not None:
+            resolved.append({"member_id": str(row.id), "priority": priority})
+    return resolved
+
+
 async def create_task(session: AsyncSession, data: dict, workspace_id: str, user_id: str, member_id: str | None = None) -> dict:
     task_repo = TaskRepository(session)
     project_repo = ProjectRepository(session)
@@ -143,6 +184,7 @@ async def create_task(session: AsyncSession, data: dict, workspace_id: str, user
         raise HTTPException(status_code=403, detail="Only the project lead can create tasks")
     depends_on = data.pop("depends_on", None) or []
     virtual_assignees = data.pop("virtual_assignees", None) or []
+    owners_input = data.pop("owners", None) or []
     data["created_by"] = user_id
     audit_data = {**data}
     _coerce_dates(data)
@@ -151,10 +193,14 @@ async def create_task(session: AsyncSession, data: dict, workspace_id: str, user
         await task_repo.set_dependencies(str(task.id), depends_on)
     if virtual_assignees:
         await task_repo.set_virtual_assignees(str(task.id), virtual_assignees)
+    resolved_owners = await _resolve_owners_to_all_member_ids(session, str(task.project_id), owners_input)
+    if resolved_owners:
+        await task_repo.set_owners(str(task.id), resolved_owners)
     await _recalculate_project_progress(session, str(task.project_id))
     await audit_repo.log(workspace_id, user_id, "create", "task", str(task.id), new_data=audit_data)
     asyncio.create_task(index_task(task, workspace_id))
-    return _task_to_dict(task, depends_on, virtual_assignees, [])
+    owners = await task_repo.get_owners(str(task.id)) if resolved_owners else []
+    return _task_to_dict(task, depends_on, virtual_assignees, owners)
 
 
 async def update_task(session: AsyncSession, task_id: str, data: dict, workspace_id: str, user_id: str) -> dict:
@@ -163,6 +209,7 @@ async def update_task(session: AsyncSession, task_id: str, data: dict, workspace
     task = await get_task(session, task_id, workspace_id)
     depends_on = data.pop("depends_on", None)
     virtual_assignees = data.pop("virtual_assignees", None)
+    owners_input = data.pop("owners", None)
     audit_data = {**data}
     _coerce_dates(data)
     result = await task_repo.update(task_id, data)
@@ -176,6 +223,9 @@ async def update_task(session: AsyncSession, task_id: str, data: dict, workspace
         await task_repo.set_virtual_assignees(task_id, virtual_assignees)
     else:
         virtual_assignees = await task_repo.get_virtual_assignees(task_id)
+    if owners_input is not None:
+        resolved_owners = await _resolve_owners_to_all_member_ids(session, str(result.project_id), owners_input)
+        await task_repo.set_owners(task_id, resolved_owners)
     owners = await task_repo.get_owners(task_id)
     await _recalculate_project_progress(session, str(result.project_id))
     await audit_repo.log(workspace_id, user_id, "update", "task", task_id, new_data=audit_data)

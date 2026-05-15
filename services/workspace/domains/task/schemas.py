@@ -1,8 +1,18 @@
 """Task schemas."""
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal
 from shared.schemas.common import Priority, TaskStatus
+
+
+class TaskOwnerInput(BaseModel):
+    """One owner row sent by the OPPM Task form.
+
+    `member_id` is a workspace_members.id; the task service translates it to
+    the corresponding oppm_project_all_members.id (the actual FK target).
+    """
+    member_id: str
+    priority: Literal["A", "B", "C"]
 
 
 class TaskCreate(BaseModel):
@@ -18,6 +28,7 @@ class TaskCreate(BaseModel):
     assignee_id: Optional[str] = None
     depends_on: Optional[List[str]] = Field(default_factory=list)
     virtual_assignees: Optional[List[str]] = Field(default_factory=list)
+    owners: Optional[List[TaskOwnerInput]] = None
 
 
 class TaskUpdate(BaseModel):
@@ -34,6 +45,7 @@ class TaskUpdate(BaseModel):
     assignee_id: Optional[str] = None
     depends_on: Optional[List[str]] = None
     virtual_assignees: Optional[List[str]] = None
+    owners: Optional[List[TaskOwnerInput]] = None
 
 
 class TaskReportCreate(BaseModel):
