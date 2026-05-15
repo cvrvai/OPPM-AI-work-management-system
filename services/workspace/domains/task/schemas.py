@@ -17,7 +17,7 @@ class TaskOwnerInput(BaseModel):
 
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    description: str = ""
+    description: Optional[str] = ""
     project_id: str
     parent_task_id: Optional[str] = None
     priority: Priority = Priority.medium

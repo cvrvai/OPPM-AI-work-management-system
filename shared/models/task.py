@@ -32,7 +32,7 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        CheckConstraint("status IN ('todo', 'in_progress', 'completed')", name="ck_tasks_status"),
+        CheckConstraint("status IN ('todo', 'in_progress', 'completed', 'at_risk', 'blocked')", name="ck_tasks_status"),
         CheckConstraint("priority IN ('low', 'medium', 'high', 'critical')", name="ck_tasks_priority"),
         CheckConstraint("progress >= 0 AND progress <= 100", name="ck_tasks_progress"),
         CheckConstraint("project_contribution >= 0 AND project_contribution <= 100", name="ck_tasks_contribution"),

@@ -157,10 +157,14 @@ def _scaffold_timeline_symbol(status: str) -> str | None:
     normalized = str(status or "").lower()
     if normalized in {"planned", "todo"}:
         return "◻"
+    if normalized == "in_progress":
+        return "⚫"
     if normalized == "completed":
         return "◼"
-    if normalized in {"in_progress", "at_risk", "blocked"}:
-        return "⚫"
+    if normalized == "at_risk":
+        return "◐"
+    if normalized == "blocked":
+        return "⊗"
     return None
 
 
@@ -203,7 +207,10 @@ def _scaffold_timeline_marks(
         week_index = _nearest_week_index(due_date, week_starts)
         if week_index is None:
             continue
-        marks.append((row, week_index, "⚫"))
+        # Use the task's actual status for the fallback symbol
+        task_status = task.get("status", "") if isinstance(task, dict) else ""
+        fallback_symbol = _scaffold_timeline_symbol(task_status) or "⚫"
+        marks.append((row, week_index, fallback_symbol))
     return marks
 
 
@@ -339,7 +346,7 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # ── Legend rows (Priority + Project Identity Symbol) ──
     R_LEGEND_GAP = 5                            # 5 empty rows between risk and legend (moved up 10 rows)
     R_LEGEND_START = R_FORM_BOTTOM + R_LEGEND_GAP + 1  # first legend row
-    R_LEGEND_END = R_LEGEND_START + 5            # 6 legend rows total (0-5)
+    R_LEGEND_END = R_LEGEND_START + 6            # 7 legend rows total (0-6)
     R_FORM_BOTTOM = R_LEGEND_END                 # update form bottom to include legend
 
     # ── Dynamic column counts ──
@@ -517,23 +524,26 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Row 4: Project Identity Symbol header (merged B-H)
     a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 3}", "value": "Project Identity Symbol"}})
     a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 3}:H{R_LEGEND_START + 3}"}})
-    # Row 5: symbols and status (B-C merged for Start, D-E for In Progress, F-H for Complete)
-    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 4}", "value": "◻ Start"}})
-    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 4}:C{R_LEGEND_START + 4}"}})
-    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 4}", "value": "⚫ In Progress"}})
-    a.append({"action": "merge_cells", "params": {"range": f"D{R_LEGEND_START + 4}:E{R_LEGEND_START + 4}"}})
-    a.append({"action": "set_value", "params": {"range": f"F{R_LEGEND_START + 4}", "value": "◼ Complete"}})
-    a.append({"action": "merge_cells", "params": {"range": f"F{R_LEGEND_START + 4}:H{R_LEGEND_START + 4}"}})
-    # Row 6: RAG colors (B-C merged for Green, D-E for Yellow, F-H for Red)
-    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 5}", "value": "Green: Good"}})
-    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 5}:C{R_LEGEND_START + 5}"}})
-    a.append({"action": "set_background", "params": {"range": f"B{R_LEGEND_START + 5}:C{R_LEGEND_START + 5}", "color": "#6BCB77"}})
-    a.append({"action": "set_value", "params": {"range": f"D{R_LEGEND_START + 5}", "value": "Yellow: Average"}})
-    a.append({"action": "merge_cells", "params": {"range": f"D{R_LEGEND_START + 5}:E{R_LEGEND_START + 5}"}})
-    a.append({"action": "set_background", "params": {"range": f"D{R_LEGEND_START + 5}:E{R_LEGEND_START + 5}", "color": "#FFD93D"}})
-    a.append({"action": "set_value", "params": {"range": f"F{R_LEGEND_START + 5}", "value": "Red: Bad"}})
-    a.append({"action": "merge_cells", "params": {"range": f"F{R_LEGEND_START + 5}:H{R_LEGEND_START + 5}"}})
-    a.append({"action": "set_background", "params": {"range": f"F{R_LEGEND_START + 5}:H{R_LEGEND_START + 5}", "color": "#FF6B6B"}})
+    # Row 5: symbols and status (B-D merged for Planned, E-G for In Progress, H for Complete)
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 4}", "value": "◻ Planned"}})
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 4}:D{R_LEGEND_START + 4}"}})
+    a.append({"action": "set_value", "params": {"range": f"E{R_LEGEND_START + 4}", "value": "⚫ In Progress"}})
+    a.append({"action": "merge_cells", "params": {"range": f"E{R_LEGEND_START + 4}:G{R_LEGEND_START + 4}"}})
+    a.append({"action": "set_value", "params": {"range": f"H{R_LEGEND_START + 4}", "value": "◼ Completed"}})
+    # Row 6: At Risk + Blocked + RAG colors
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 5}", "value": "◐ At Risk"}})
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 5}:D{R_LEGEND_START + 5}"}})
+    a.append({"action": "set_value", "params": {"range": f"E{R_LEGEND_START + 5}", "value": "⊗ Blocked"}})
+    a.append({"action": "merge_cells", "params": {"range": f"E{R_LEGEND_START + 5}:G{R_LEGEND_START + 5}"}})
+    a.append({"action": "set_value", "params": {"range": f"H{R_LEGEND_START + 5}", "value": "Red: Bad"}})
+    a.append({"action": "set_background", "params": {"range": f"H{R_LEGEND_START + 5}", "color": "#FF6B6B"}})
+    # Row 7: RAG colors (Green + Yellow)
+    a.append({"action": "set_value", "params": {"range": f"B{R_LEGEND_START + 6}", "value": "Green: Good"}})
+    a.append({"action": "merge_cells", "params": {"range": f"B{R_LEGEND_START + 6}:D{R_LEGEND_START + 6}"}})
+    a.append({"action": "set_background", "params": {"range": f"B{R_LEGEND_START + 6}:D{R_LEGEND_START + 6}", "color": "#6BCB77"}})
+    a.append({"action": "set_value", "params": {"range": f"E{R_LEGEND_START + 6}", "value": "Yellow: Average"}})
+    a.append({"action": "merge_cells", "params": {"range": f"E{R_LEGEND_START + 6}:G{R_LEGEND_START + 6}"}})
+    a.append({"action": "set_background", "params": {"range": f"E{R_LEGEND_START + 6}:G{R_LEGEND_START + 6}", "color": "#FFD93D"}})
     # Legend columns B-H: 120px each for legend rows only
     for r in range(R_LEGEND_START, R_LEGEND_END + 1):
         a.append({"action": "set_column_width", "params": {"start_index": 1, "end_index": 7, "width": 120}})

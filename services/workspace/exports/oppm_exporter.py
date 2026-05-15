@@ -56,8 +56,8 @@ _DOT_MAP: dict[str, tuple[str, Font]] = {
     "planned":     ("\u25a1", Font(name="Calibri", size=10, color="111111")),
     "in_progress": ("\u25cf", Font(name="Calibri", size=10, bold=True, color="111111")),
     "completed":   ("\u25a0", Font(name="Calibri", size=10, bold=True, color="111111")),
-    "at_risk":     ("\u25cf", Font(name="Calibri", size=10, bold=True, color=_AMBER_600)),
-    "blocked":     ("\u25cf", Font(name="Calibri", size=10, bold=True, color=_RED_600)),
+    "at_risk":     ("\u25d0", Font(name="Calibri", size=10, bold=True, color=_AMBER_600)),
+    "blocked":     ("\u2297", Font(name="Calibri", size=10, bold=True, color=_RED_600)),
 }
 
 # -- Owner priority styles -------------------------------------------
@@ -759,11 +759,11 @@ def build_oppm_xlsx(data: dict) -> bytes:
     _sc(ws, r, C_SUBO_S, "Legend:",
         font=Font(name="Calibri", size=9, bold=True, color="999999"))
     legend = [
-        ("\u25cb Planned", _DOT_MAP["planned"][1]),
+        ("\u25a1 Planned", _DOT_MAP["planned"][1]),
         ("\u25cf In Progress", _DOT_MAP["in_progress"][1]),
-        ("\u25cf Completed", _DOT_MAP["completed"][1]),
-        ("\u25cf At Risk", _DOT_MAP["at_risk"][1]),
-        ("\u25cf Blocked", _DOT_MAP["blocked"][1]),
+        ("\u25a0 Completed", _DOT_MAP["completed"][1]),
+        ("\u25d0 At Risk", _DOT_MAP["at_risk"][1]),
+        ("\u2297 Blocked", _DOT_MAP["blocked"][1]),
     ]
     for li, (text, fnt) in enumerate(legend):
         _sc(ws, r, C_SUBO_S + 1 + li, text, font=fnt)

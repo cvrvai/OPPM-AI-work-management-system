@@ -33,6 +33,8 @@ class TaskStatus(str, Enum):
     todo = "todo"
     in_progress = "in_progress"
     completed = "completed"
+    at_risk = "at_risk"
+    blocked = "blocked"
 
 
 class WorkspaceRole(str, Enum):
