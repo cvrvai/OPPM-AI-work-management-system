@@ -552,17 +552,44 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
     project_tasks = await task_repo.find_project_tasks(project_id, limit=1000)
     task_ids = [str(task.id) for task in project_tasks]
     owners_by_task = await task_repo.get_owners_for_tasks(task_ids)
-    task_count = len(project_tasks)
     tl_repo = TimelineRepository(session)
     timeline_entries = await tl_repo.find_project_timeline(project_id)
 
-    # Build task list for scaffold
-    tasks = []
+    # Build task list in hierarchical order: main tasks with sub-tasks nested beneath them
+    main_tasks = [t for t in project_tasks if not t.parent_task_id]
+    sub_tasks_by_parent: dict[str, list] = {}
     for t in project_tasks:
+        if t.parent_task_id:
+            sub_tasks_by_parent.setdefault(str(t.parent_task_id), []).append(t)
+
+    ordered_tasks = []
+    for mt in sorted(main_tasks, key=lambda x: x.sort_order):
+        ordered_tasks.append(mt)
+        for st in sorted(sub_tasks_by_parent.get(str(mt.id), []), key=lambda x: x.sort_order):
+            ordered_tasks.append(st)
+
+    tasks = []
+    main_idx = 0
+    parent_main_idx: dict[str, int] = {}
+    sub_idx_by_parent: dict[str, int] = {}
+    for t in ordered_tasks:
+        is_main = t.parent_task_id is None
+        if is_main:
+            main_idx += 1
+            parent_main_idx[str(t.id)] = main_idx
+            row_label = str(main_idx)
+        else:
+            parent_key = str(t.parent_task_id)
+            sub_idx_by_parent[parent_key] = sub_idx_by_parent.get(parent_key, 0) + 1
+            m_idx = parent_main_idx.get(parent_key, main_idx)
+            row_label = f"{m_idx}.{sub_idx_by_parent[parent_key]}"
         tasks.append({
             "id": str(t.id),
             "name": t.title or "",
             "title": t.title or "",
+            "row_label": row_label,
+            "is_main": is_main,
+            "parent_task_id": str(t.parent_task_id) if t.parent_task_id else None,
             "due_date": str(t.due_date) if t.due_date else None,
             "status": t.status,
             "owners": owners_by_task.get(str(t.id), []),
@@ -570,6 +597,7 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
                 workspace_member_by_user_id.get(str(t.assignee_id), "")
             ) if t.assignee_id else None,
         })
+    task_count = len(tasks)
 
     # Fetch sub-objectives ordered by parent objective (sort_order), then position.
     # The grid only has 6 columns, so we cap at 6.

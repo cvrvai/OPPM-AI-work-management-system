@@ -417,15 +417,25 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "set_value", "params": {"range": f"{L_WEEK_START}6", "value": f"Project Identity Symbol: {weeks_label}"}})
     a.append({"action": "set_value", "params": {"range": f"{L_OWNER_START}6", "value": "Owner / Priority"}})
 
-    # ── 3. Task numbers 1..N in task-num column + task names in task-name columns ──
+    # ── 3. Task rows: main tasks get one wide merged cell, sub-tasks keep num separate ──
     for i in range(1, task_count + 1):
-        a.append({"action": "set_value", "params": {"range": f"{L_TASK_NUM}{6 + i}", "value": str(i)}})
         task = tasks[i - 1] if i <= len(tasks) else None
+        is_main = (not task) or task.get("is_main", True)
+        row_label = task.get("row_label", str(i)) if task else str(i)
         task_name = _scaffold_task_name(task, i - 1)
         due_date = _scaffold_task_due_date(task)
         if due_date is not None:
             task_name = f"{task_name} ({due_date.isoformat()})"
-        a.append({"action": "set_value", "params": {"range": f"{L_TASK_NAME_START}{6 + i}", "value": task_name}})
+        row = 6 + i
+        if is_main:
+            # Main task: number + name in one merged cell (K merged through task-name-end)
+            a.append({"action": "set_value", "params": {"range": f"{L_TASK_NUM}{row}", "value": f"{row_label}. {task_name}"}})
+            a.append({"action": "set_bold", "params": {"range": f"{L_TASK_NUM}{row}", "bold": True}})
+            a.append({"action": "set_alignment", "params": {"range": f"{L_TASK_NUM}{row}", "horizontal": "LEFT", "vertical": "MIDDLE"}})
+        else:
+            # Sub-task: short number label in K, name in the separate L-Q area
+            a.append({"action": "set_value", "params": {"range": f"{L_TASK_NUM}{row}", "value": row_label}})
+            a.append({"action": "set_value", "params": {"range": f"{L_TASK_NAME_START}{row}", "value": task_name}})
 
     # ── 3b. Project Identity Symbol marks in task rows ──
     for row, week_index, symbol in _scaffold_timeline_marks(tasks, weeks_data[:week_col_count], timeline_entries):
@@ -580,9 +590,15 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     a.append({"action": "merge_cells", "params": {"range": f"{L_TASK_NUM}6:{L_TASK_END}6"}})
     a.append({"action": "merge_cells", "params": {"range": f"{L_WEEK_START}6:{L_WEEK_END}6"}})
     a.append({"action": "merge_cells", "params": {"range": f"{L_OWNER_START}6:{L_OWNER_END}6"}})
-    # Task rows: task-num col + task-name cols merged per row
+    # Task rows: main tasks → K through task-name-end as one cell; sub-tasks → name area only
     for i in range(1, task_count + 1):
-        a.append({"action": "merge_cells", "params": {"range": f"{L_TASK_NAME_START}{6 + i}:{L_TASK_END}{6 + i}"}})
+        task = tasks[i - 1] if i <= len(tasks) else None
+        is_main = (not task) or task.get("is_main", True)
+        row = 6 + i
+        if is_main:
+            a.append({"action": "merge_cells", "params": {"range": f"{L_TASK_NUM}{row}:{L_TASK_END}{row}"}})
+        else:
+            a.append({"action": "merge_cells", "params": {"range": f"{L_TASK_NAME_START}{row}:{L_TASK_END}{row}"}})
     # Identity rows: merge task-name cols on each row to give a label area
     for r in range(R_IDENTITY_START, R_IDENTITY_END + 1):
         a.append({"action": "merge_cells", "params": {"range": f"{L_TASK_NAME_START}{r}:{L_TASK_END}{r}"}})
