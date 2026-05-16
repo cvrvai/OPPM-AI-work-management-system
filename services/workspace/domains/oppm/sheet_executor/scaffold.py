@@ -454,8 +454,8 @@ def _build_scaffold_actions(params: dict) -> list[dict]:
     # Blank white area spans the full 13-row matrix block within the body
     X_TOP = R_MATRIX_HEADER + 1                 # = 43
     X_BOTTOM = R_MATRIX_BOTTOM                  # = 54
-    # Leave the area blank (no text values) — user will insert an image later
-    a.append({"action": "set_value", "params": {"range": f"I{X_TOP}", "value": ""}})
+    # Leave the area blank — clear_sheet already clears it; this is a no-op safeguard
+    a.append({"action": "set_value", "params": {"range": f"{L_TASK_NAME_START}{X_TOP}", "value": ""}})
 
     # 4c. Identity Symbol section — A-F vertical, one letter per row, task-num column
     identity_letters = ["A", "B", "C", "D", "E", "F"]
