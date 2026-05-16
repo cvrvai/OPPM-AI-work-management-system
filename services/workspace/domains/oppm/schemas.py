@@ -21,15 +21,17 @@ class OPPMObjectiveUpdate(BaseModel):
     sort_order: Optional[int] = None
 
 
-# ── Sub-Objectives (1-6 strategic alignment columns) ──
+# ── Sub-Objectives ──
 
 class SubObjectiveCreate(BaseModel):
-    position: int = Field(ge=1, le=6)
+    objective_id: Optional[str] = None
+    position: Optional[int] = None
     label: str = Field(min_length=1, max_length=200)
 
 
 class SubObjectiveUpdate(BaseModel):
     label: Optional[str] = Field(default=None, max_length=200)
+    position: Optional[int] = None
 
 
 class TaskSubObjectiveSet(BaseModel):

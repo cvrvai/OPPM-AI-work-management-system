@@ -27,14 +27,10 @@ class OPPMSubObjective(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    objective_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("oppm_objectives.id", ondelete="CASCADE"), nullable=True, index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    __table_args__ = (
-        CheckConstraint("position BETWEEN 1 AND 6", name="ck_sub_objectives_position"),
-        UniqueConstraint("project_id", "position", name="uq_sub_objectives_project_position"),
-    )
 
 
 class TaskSubObjective(Base):

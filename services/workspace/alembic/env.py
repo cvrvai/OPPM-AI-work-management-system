@@ -8,17 +8,22 @@ from alembic import context
 # Make shared/ importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-# Import all models so autogenerate can detect them
+# Import ALL models so autogenerate detects every table change.
+# When you add a new model file, add its import here too.
 from shared.database import Base
 import shared.models.user
 import shared.models.workspace
 import shared.models.project
+import shared.models.project_file
 import shared.models.task
 import shared.models.oppm
 import shared.models.git
 import shared.models.ai_model
 import shared.models.notification
 import shared.models.embedding
+import shared.models.agile
+import shared.models.waterfall
+import shared.models.workspace_ai_config
 
 config = context.config
 

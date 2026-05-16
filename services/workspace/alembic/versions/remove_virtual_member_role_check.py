@@ -18,7 +18,19 @@ depends_on = None
 def upgrade():
     # Drop the CHECK constraint on oppm_virtual_members.role so any free-text
     # role can be stored (e.g. "Full Stack", "ML Engineer", "DevOps").
-    op.execute("ALTER TABLE oppm_virtual_members DROP CONSTRAINT IF EXISTS oppm_virtual_members_role_check")
+    # Guard against fresh databases where the table may not exist yet.
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'oppm_virtual_members'
+            ) THEN
+                ALTER TABLE oppm_virtual_members
+                DROP CONSTRAINT IF EXISTS oppm_virtual_members_role_check;
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade():

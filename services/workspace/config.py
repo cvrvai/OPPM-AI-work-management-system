@@ -23,6 +23,7 @@ class WorkspaceSettings(SharedSettings):
 
     # App
     debug: bool = True
+    skip_migrations: bool = False
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

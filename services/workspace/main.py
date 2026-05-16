@@ -43,7 +43,10 @@ def _run_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _run_migrations()
+    if not settings.skip_migrations:
+        _run_migrations()
+    else:
+        logger.info("SKIP_MIGRATIONS=true — migrations handled by migrate service")
     await init_db()
     await init_redis()
     yield

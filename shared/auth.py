@@ -138,6 +138,21 @@ async def _ensure_supabase_bridge_membership(session: AsyncSession, user: User, 
     if not settings.supabase_bridge_workspace_id:
         return
 
+    from shared.models.workspace import Workspace
+    ws_exists = await session.execute(
+        select(Workspace.id)
+        .where(Workspace.id == settings.supabase_bridge_workspace_id)
+        .limit(1)
+    )
+    if not ws_exists.first():
+        logger.warning(
+            "Supabase bridge workspace %s does not exist — skipping membership provisioning. "
+            "Run: INSERT INTO workspaces (id,name,slug,settings,created_by) VALUES ('%s','Bridge','bridge','{}',gen_random_uuid())",
+            settings.supabase_bridge_workspace_id,
+            settings.supabase_bridge_workspace_id,
+        )
+        return
+
     result = await session.execute(
         select(WorkspaceMember.id)
         .where(

@@ -32,6 +32,20 @@ services:
       intelligence:
         condition: service_healthy
 
+  migrate:
+    build:
+      context: .
+      dockerfile: services/workspace/Dockerfile
+    command: python migrate.py
+    env_file:
+      - services/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   workspace:
     build:
       context: .
@@ -46,9 +60,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
       - REDIS_URL=redis://:${REDIS_PASSWORD:-oppm_dev_password}@redis:6379/0
       - GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json
+      - SKIP_MIGRATIONS=true
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_started
     healthcheck:
@@ -77,32 +92,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-
-  integrations:
-    build:
-      context: .
-      dockerfile: services/integrations/Dockerfile
-    expose:
-      - "8002"
-    env_file:
-      - services/.env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://oppm:${DB_PASSWORD:-oppm_dev_password}@postgres:5432/oppm
-      - AI_SERVICE_URL=http://intelligence:8001
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-
-  frontend:
-    build: ./frontend
-    expose:
-      - "5173"
 
 networks:
   default:

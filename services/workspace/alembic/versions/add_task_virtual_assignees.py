@@ -15,6 +15,24 @@ depends_on = None
 
 
 def upgrade():
+    # Create oppm_virtual_members if it was not created by an earlier migration
+    # (the original CREATE TABLE migration was removed during a refactor).
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS oppm_virtual_members (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            name VARCHAR(255) NOT NULL,
+            role VARCHAR(100),
+            email VARCHAR(255),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS ix_oppm_virtual_members_workspace
+        ON oppm_virtual_members (workspace_id)
+    """)
+
     op.create_table(
         'task_virtual_assignees',
         sa.Column('id', sa.UUID(), nullable=False),

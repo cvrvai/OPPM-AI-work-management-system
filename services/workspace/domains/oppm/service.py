@@ -571,10 +571,27 @@ async def get_oppm_scaffold(session: AsyncSession, project_id: str, workspace_id
             ) if t.assignee_id else None,
         })
 
-    # Fetch sub-objectives for scaffold labels
+    # Fetch sub-objectives ordered by parent objective (sort_order), then position.
+    # The grid only has 6 columns, so we cap at 6.
+    obj_repo_for_subs = ObjectiveRepository(session)
     sub_obj_repo = SubObjectiveRepository(session)
+    ordered_objectives = await obj_repo_for_subs.find_project_objectives(project_id)
     sub_objectives = await sub_obj_repo.find_project_sub_objectives(project_id)
-    sub_obj_labels = [so.label for so in sub_objectives]
+
+    sub_by_obj: dict[str, list] = {}
+    for so in sub_objectives:
+        key = str(so.objective_id) if so.objective_id else "__none__"
+        sub_by_obj.setdefault(key, []).append(so)
+
+    sub_obj_labels: list[str] = []
+    for obj in ordered_objectives:
+        subs = sorted(sub_by_obj.get(str(obj.id), []), key=lambda s: s.position or 0)
+        sub_obj_labels.extend(s.label for s in subs)
+    # Orphan sub-objectives (no objective_id) go last
+    sub_obj_labels.extend(
+        s.label for s in sorted(sub_by_obj.get("__none__", []), key=lambda s: s.position or 0)
+    )
+    # No hard cap — scaffold now handles dynamic column count (minimum 6)
 
     # Fetch deliverables, forecasts, risks for scaffold
     deliv_repo = DeliverableRepository(session)
